@@ -16,8 +16,8 @@ function switchView(view){
         : 'staffdirectory';
     }
     const allowed = getRoleViews(currentUser.role);
-    const setupPages = ['schoolprofile','classessetup','academicyear','feestructuresetup','promotions','refundpolicy'];
-    const adminOnlyPages = ['usersroles','studentparentlogins','rolespermissions','admintools2'];
+    const setupPages = ['schoolprofile','classessetup','academicyear','feestructuresetup','promotions'];
+    const adminOnlyPages = ['usersroles','studentparentlogins','rolespermissions','admintools2','refundpolicy'];
     const universalPages = ['myaccount'];
     let permitted;
     if(universalPages.includes(view)) permitted = true;
