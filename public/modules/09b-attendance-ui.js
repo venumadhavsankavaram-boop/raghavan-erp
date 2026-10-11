@@ -57,7 +57,8 @@ function renderAttRoster(body){
   });
   const holiday = holidayFor(attMarkDate);
   const isHoliday = !!holiday;
-  const both = canUseBothSessionsShortcut();
+  if(attIsSingleSession(attMarkDate)) attMarkSession = 'Morning';
+  const both = canUseBothSessionsShortcut() && !attIsSingleSession(attMarkDate);
   const kpi = (key, label, cls) => `<div class="at-kpi at-kpi--${cls}"><span aria-hidden="true">${AT_STATUSES.find(x => x.key === key).icon}</span><div><b id="atCount${key}">0</b><small>${label}</small></div></div>`;
   body.innerHTML = `
     <div class="breadcrumb"><a onclick="backToAttGrid()">All Classes</a> &nbsp;/&nbsp; ${escapeHtml(attCurrentClass)} — Section ${escapeHtml(attCurrentSection)}</div>
@@ -68,7 +69,7 @@ function renderAttRoster(body){
     <div class="iv-toolbar">
       <input type="date" class="input" id="attDateInput" value="${attMarkDate}" onchange="changeAttDate(this.value)" style="max-width:190px;">
       <div class="sf-segments" role="group" aria-label="Session" style="${attApplyBothSessions ? 'opacity:.45; pointer-events:none;' : ''}">
-        ${ATT_SESSIONS.map(sess => `<button type="button" class="${attMarkSession === sess ? 'active' : ''}" onclick="changeAttSession('${sess}')">${sess === 'Morning' ? '🌅' : '🌇'} ${sess}</button>`).join('')}
+        ${attSessionsFor(attMarkDate).map(sess => `<button type="button" class="${attMarkSession === sess ? 'active' : ''}" onclick="changeAttSession('${sess}')">${sess === 'Morning' ? '🌅' : '🌇'} ${sess}</button>`).join('')}
       </div>
       <div class="iv-toolbar-actions">
         ${both ? `<label class="at-both" title="Saves the same status to both Morning and Afternoon in one go — handy for backfilling past dates.">

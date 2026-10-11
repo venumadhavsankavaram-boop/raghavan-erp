@@ -425,6 +425,9 @@ async function ensureSchema() {
   await sql`CREATE TABLE IF NOT EXISTS attendance_settings (
     id INT PRIMARY KEY, threshold DECIMAL(6,2) DEFAULT 75, working_days JSON NOT NULL DEFAULT ('[1,2,3,4,5,6]')
   )`;
+  await addColumnIfMissing('attendance_settings', 'single_from VARCHAR(5)');
+  await addColumnIfMissing('attendance_settings', 'single_to VARCHAR(5)');
+  await addColumnIfMissing('attendance_settings', 'single_set TINYINT DEFAULT 0');
   await sql`CREATE TABLE IF NOT EXISTS school_info (
     id INT PRIMARY KEY, data JSON NOT NULL DEFAULT ('{}')
   )`;
@@ -2775,14 +2778,22 @@ async function handleAttendanceSettings(req, res) {
   if (req.method === 'GET') {
     const rows = await sql`SELECT * FROM attendance_settings WHERE id = 1`;
     if (rows.length === 0) return res.status(200).json({});
-    return res.status(200).json({ threshold: Number(rows[0].threshold), workingDays: rows[0].working_days });
+    const r0 = rows[0];
+    // single_set = 0 means the period was never configured: the client falls back to its default (15 Mar to 31 May).
+    const out = { threshold: Number(r0.threshold), workingDays: r0.working_days };
+    if (r0.single_set) { out.singleFrom = r0.single_from || ''; out.singleTo = r0.single_to || ''; }
+    return res.status(200).json(out);
   }
   if (req.method === 'PUT') {
     const s = req.body || {};
+    const mdOk = v => (typeof v === 'string' && /^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v)) ? v : null;
+    const sf = mdOk(s.singleFrom), st = mdOk(s.singleTo);
+    const sset = (s.singleFrom !== undefined || s.singleTo !== undefined) ? 1 : 0;
     await sql`
-      INSERT INTO attendance_settings (id, threshold, working_days)
-      VALUES (1, ${s.threshold || 75}, ${JSON.stringify(s.workingDays || [1,2,3,4,5,6])}::jsonb)
-      ON DUPLICATE KEY UPDATE threshold = ${s.threshold || 75}, working_days = ${JSON.stringify(s.workingDays || [1,2,3,4,5,6])}::jsonb
+      INSERT INTO attendance_settings (id, threshold, working_days, single_from, single_to, single_set)
+      VALUES (1, ${s.threshold || 75}, ${JSON.stringify(s.workingDays || [1,2,3,4,5,6])}::jsonb, ${sf}, ${st}, ${sset})
+      ON DUPLICATE KEY UPDATE threshold = ${s.threshold || 75}, working_days = ${JSON.stringify(s.workingDays || [1,2,3,4,5,6])}::jsonb,
+        single_from = ${sf}, single_to = ${st}, single_set = ${sset}
     `;
     return res.status(200).json({ ok: true });
   }
@@ -3062,16 +3073,51 @@ async function notifyFeePayment({ studentId, amount, mode, receiptNo }) {
 // for every student would just be daily noise parents learn to ignore. See
 // the Attendance module's Teacher-scoping comments for the same
 // only-what-needs-attention principle applied to what a Teacher can see.
+//
+// Session-aware (Morning / Afternoon):
+//  - the message names the session ("in the Morning session"), or says "for the full day" once both
+//    sessions carry the same status;
+//  - during the school's single-session period (default 15 Mar to 31 May, see Attendance > Settings)
+//    there is no session wording at all: the day is just "marked Absent on <date>";
+//  - a parent gets ONE push per student/date/status/session-set (notification_events), so re-saving a
+//    roster, or saving both sessions at once, never repeats it. The 4 s wait lets the second record of a
+//    both-sessions save land first so it becomes a single "full day" message;
+//  - only today's and yesterday's marks push: back-filling older dates never floods parents.
+async function attendanceSingleRange() {
+  const rows = await sql`SELECT single_from, single_to, single_set FROM attendance_settings WHERE id = 1`;
+  const r = rows[0];
+  if (!r || !r.single_set) return ['03-15', '05-31'];
+  return [r.single_from || '', r.single_to || ''];
+}
+function inSingleRange(date, [f, t]) {
+  if (!f || !t) return false;
+  const md = String(date || '').slice(5, 10);
+  return f <= t ? (md >= f && md <= t) : (md >= f || md <= t);
+}
 async function notifyAttendanceEvent({ studentId, date, status }) {
-  if (!studentId || !['Absent', 'Late', 'Leave'].includes(status)) return;
+  if (!studentId || !date || !['Absent', 'Late', 'Leave'].includes(status)) return;
+  const dayDiff = Math.abs((Date.now() - new Date(String(date).slice(0, 10) + 'T12:00:00Z').getTime()) / 86400000);
+  if (!(dayDiff <= 2)) return;   // back-filled / old date: no push
+  await new Promise(r => setTimeout(r, 4000));
+  const recs = await sql`SELECT session, status FROM attendance_records WHERE student_id = ${studentId} AND date = ${date}`;
+  const same = recs.filter(r => r.status === status);
+  if (!same.length) return;      // changed again in the meantime
+  const single = inSingleRange(date, await attendanceSingleRange());
+  const sess = same.some(r => !r.session) ? ['Morning', 'Afternoon'] : ['Morning', 'Afternoon'].filter(x => same.some(r => r.session === x));
+  const fullDay = single || sess.length === 2;
+  const refKey = date + '|' + status + '|' + (single ? 'day' : sess.join('+'));
+  if (!(await insertNotificationEventIfNew(studentId, 'attendance_alert', refKey))) return;
   const rows = await sql`SELECT * FROM students WHERE id = ${studentId}`;
   const student = rows[0];
   if (!student) return;
-  const body = `${student.first_name} ${student.last_name} was marked ${status} on ${date}.`;
-  await sendPushToStudent(student.id, { title: `Marked ${status}`, body, tag: 'attendance', url: '/' });
+  const name = `${student.first_name} ${student.last_name}`;
+  const where = single ? '' : fullDay ? ' for the full day (Morning and Afternoon)' : ` in the ${sess[0]} session`;
+  const body = `${name} was marked ${status}${where} on ${date}.`;
+  const title = fullDay && !single ? `${status} for the full day` : `Marked ${status}`;
+  await sendPushToStudent(student.id, { title, body, tag: 'attendance-' + date, url: '/' });
   if (whatsappConfigured()) {
     const phone = getStudentParentPhone(student);
-    if (phone) await sendWhatsAppTemplate(phone, 'ATTENDANCE_ALERT', [`${student.first_name} ${student.last_name}`, status, date]);
+    if (phone) await sendWhatsAppTemplate(phone, 'ATTENDANCE_ALERT', [name, status + (single ? '' : fullDay ? ' (full day)' : ' (' + sess[0] + ')'), date]);
   }
 }
 // Fires once — the moment a student's mark set for an exam goes from

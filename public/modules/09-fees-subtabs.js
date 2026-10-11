@@ -18,6 +18,20 @@ const ATTENDANCE_KEY = "attendance-records";
      (staffAttendanceRecords) — same shape, same rule. */
   function attSessionWeight(r){ return r.session ? 1 : 2; }
   const ATT_SESSIONS = ['Morning', 'Afternoon'];
+  // Single-session period: most schools run one session (7:45 to 12:30) from 15 March to year end, so
+  // Afternoon attendance is not taken. Configurable under Attendance > Settings; "" in both = never.
+  // Unconfigured schools default to 15 Mar to 31 May.
+  function attSingleRange(){
+    const s = (typeof attSettings === 'object' && attSettings) || {};
+    if(s.singleFrom === undefined && s.singleTo === undefined) return ['03-15', '05-31'];
+    return [s.singleFrom || '', s.singleTo || ''];
+  }
+  function attIsSingleSession(ds){
+    const [f, t] = attSingleRange(); if(!f || !t) return false;
+    const md = String(ds || '').slice(5, 10); if(!md) return false;
+    return f <= t ? (md >= f && md <= t) : (md >= f || md <= t);
+  }
+  function attSessionsFor(ds){ return attIsSingleSession(ds) ? ['Morning'] : ATT_SESSIONS; }
 
   async function loadAttendance(){
     holidays = await storageGet(HOLIDAYS_KEY, []);
@@ -248,6 +262,7 @@ const ATTENDANCE_KEY = "attendance-records";
     return list.sort((a,b) => (a.firstName||'').localeCompare(b.firstName||''));
   }
   function renderStaffAttMark(body){
+    if(attIsSingleSession(staffAttMarkDate)) staffAttMarkSession = 'Morning';
     const list = filteredStaffForAttendance();
     list.forEach(st => {
       if(staffPendingMarks[st.id] === undefined){
@@ -261,7 +276,7 @@ const ATTENDANCE_KEY = "attendance-records";
         <div class="ms-toolbar-left">
           <input type="date" class="input" id="staffAttDateInput" value="${staffAttMarkDate}" onchange="changeStaffAttDate(this.value)" style="max-width:200px;">
           <div class="att-status-row" style="display:inline-flex;">
-            ${ATT_SESSIONS.map(sess => `<button type="button" class="att-status-btn ${staffAttMarkSession===sess?'active':''}" onclick="changeStaffAttSession('${sess}')">${sess==='Morning'?'🌅':'🌇'} ${sess}</button>`).join('')}
+            ${attSessionsFor(staffAttMarkDate).map(sess => `<button type="button" class="att-status-btn ${staffAttMarkSession===sess?'active':''}" onclick="changeStaffAttSession('${sess}')">${sess==='Morning'?'🌅':'🌇'} ${sess}</button>`).join('')}
           </div>
           <button class="btn btn-ghost btn-sm" onclick="markAllStaffStatus('Present')">Mark All Present</button>
           <button class="btn btn-ghost btn-sm" onclick="markAllStaffStatus('Absent')">Mark All Absent</button>
@@ -295,6 +310,7 @@ const ATTENDANCE_KEY = "attendance-records";
     renderStaffAttendanceContent();
   }
   async function saveStaffAttendance(){
+    if(attIsSingleSession(staffAttMarkDate)) staffAttMarkSession = 'Morning';
     await ensureDataLoaded('staffAttendanceRecords', loadStaffAttendance);
     Object.keys(staffPendingMarks).forEach(staffId => {
       const status = staffPendingMarks[staffId];
@@ -446,7 +462,7 @@ const ATTENDANCE_KEY = "attendance-records";
     // canUseBothSessionsShortcut) writes the same status into both Morning
     // and Afternoon records in one save, instead of requiring the whole
     // roster to be re-marked twice just to record "present all day."
-    const sessionsToSave = (attApplyBothSessions && canUseBothSessionsShortcut()) ? ATT_SESSIONS : [attMarkSession];
+    const sessionsToSave = (attApplyBothSessions && canUseBothSessionsShortcut() && !attIsSingleSession(attMarkDate)) ? ATT_SESSIONS : [attIsSingleSession(attMarkDate) ? 'Morning' : attMarkSession];
     Object.keys(pendingMarks).forEach(studentId => {
       const status = pendingMarks[studentId];
       sessionsToSave.forEach(session => {
@@ -642,14 +658,33 @@ const ATTENDANCE_KEY = "attendance-records";
             ${days.map((d,i) => `<label style="display:flex; align-items:center; gap:4px; font-size:0.82rem;"><input type="checkbox" class="atWorkDay" value="${i}" ${attSettings.workingDays.includes(i)?'checked':''}> ${d}</label>`).join('')}
           </div>
         </div>
+        <div class="f-field" style="margin-bottom:16px;">
+          <label>Single-session period <small style="font-weight:400;">(school runs one session, 7:45–12:30; Afternoon attendance is not taken)</small></label>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:6px; font-size:0.82rem;">
+            <label style="display:flex; align-items:center; gap:4px;"><input type="checkbox" id="atSingleOn" ${attSingleRange()[0] && attSingleRange()[1] ? 'checked' : ''}> Enabled</label>
+            From ${attMdPicker('atSingleFrom', attSingleRange()[0] || '03-15')} to ${attMdPicker('atSingleTo', attSingleRange()[1] || '05-31')}
+          </div>
+        </div>
         <button class="btn btn-primary" onclick="saveAttSettings()">Save Settings</button>
       </div>
     `;
   }
+  function attMdPicker(id, md){
+    const [m, d] = String(md).split('-').map(Number);
+    const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `<select class="input" id="${id}M" style="width:auto;">${names.map((n,i) => `<option value="${i+1}" ${i+1===m?'selected':''}>${n}</option>`).join('')}</select>
+      <input type="number" class="input" id="${id}D" min="1" max="31" value="${d}" style="width:64px;">`;
+  }
+  function attReadMd(id){
+    const m = String(Math.min(12, Math.max(1, Number(document.getElementById(id + 'M').value) || 1))).padStart(2, '0');
+    const d = String(Math.min(31, Math.max(1, Number(document.getElementById(id + 'D').value) || 1))).padStart(2, '0');
+    return m + '-' + d;
+  }
   async function saveAttSettings(){
     const threshold = Number(document.getElementById('atThreshold').value) || 75;
     const workingDays = Array.from(document.querySelectorAll('.atWorkDay:checked')).map(el => Number(el.value));
-    attSettings = { threshold, workingDays };
+    const on = document.getElementById('atSingleOn').checked;
+    attSettings = { threshold, workingDays, singleFrom: on ? attReadMd('atSingleFrom') : '', singleTo: on ? attReadMd('atSingleTo') : '' };
     await storageSet(ATT_SETTINGS_KEY, attSettings);
     showToast('Attendance settings saved.', 'burst');
   }
