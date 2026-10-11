@@ -125,7 +125,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     { key:'setup_academicyear',  label:'Academic Year',   icon:'📅', category:'Configuration', isNew:true },
     { key:'setup_feestructure',  label:'Fee Structure',   icon:'💳', category:'Configuration', isNew:true },
     { key:'setup_promotions',    label:'Promotions Setup', icon:'⬆️', category:'Configuration', isNew:true },
-    { key:'setup_refundpolicy',  label:'Refund Policy (view only — only Admin can change)', icon:'💸', category:'Configuration', isNew:true },
+    { key:'setup_refundpolicy',  label:'Refund Policy (Admin only — hidden from every other role)', icon:'💸', category:'Configuration', isNew:true },
   ];
 
   const PERMISSION_ACTIONS = ['view','create','edit','delete','print','approve'];
@@ -844,7 +844,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     document.getElementById('navAcademicYear').style.display = getSetupTabAccess(currentUser.role, 'setup_academicyear') ? 'flex' : 'none';
     document.getElementById('navFeeStructureSetup').style.display = getSetupTabAccess(currentUser.role, 'setup_feestructure') ? 'flex' : 'none';
     document.getElementById('navPromotions').style.display = getSetupTabAccess(currentUser.role, 'setup_promotions') ? 'flex' : 'none';
-    document.getElementById('navRefundPolicy').style.display = getSetupTabAccess(currentUser.role, 'setup_refundpolicy') ? 'flex' : 'none';
+    document.getElementById('navRefundPolicy').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';   // Admin only: the refund limit is not shown to other roles
     document.getElementById('navUsersRoles').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';
     document.getElementById('navStudentParentLogins').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';
     document.getElementById('navRolesPermissions').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';
