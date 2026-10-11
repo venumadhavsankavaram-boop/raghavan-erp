@@ -4,12 +4,14 @@
    a ₹10,000 payment leaves ₹8,000 collected on the student's ledger.
 
    Flow
-     1. "Refund" on a receipt opens a request: pick the fee heads + amounts, a
-        reason code, and how the money goes back (credit to the student's
-        account, or cash / online / cheque).
+     1. Refunds tab → "New Refund": find the student (class / section / name),
+        pick the fee heads + amounts, a reason code, and how the money goes
+        back (credit to the student's account, or cash / online / cheque).
      2. Admin's refunds are approved on the spot. Anyone else with the
         "Approve" permission (Principal by default) can approve up to the
         policy limit (Configuration → Refund Policy); above that only Admin can.
+        The limit itself is shown to Admin only — other roles just see whether a
+        request will be processed or wait for approval.
         Requesters without approve rights wait in the queue.
      3. On approval: credit refunds raise the student's account credit (no cash
         moves); cash/online/cheque refunds also post a "Fee Refund" expense
@@ -309,8 +311,8 @@ function rfUpdateRequestTotal(){
   let route;
   if(!total) route = 'Select at least one fee head and an amount.';
   else if(rfCanApproveAmount(total)) route = `Total ${fmtMoney(total)} — you can approve this, so it will be processed immediately.`;
-  else if(refundPerm('approve')) route = `Total ${fmtMoney(total)} is above your approval limit (${fmtMoney(rfApproverLimit(currentUser.role))}) — it will wait for Admin approval.`;
-  else route = `Total ${fmtMoney(total)} — this goes to the approval queue (Principal up to ${fmtMoney(rfApproverLimit('Principal'))}, Admin for any amount).`;
+  else if(refundPerm('approve')) route = `Total ${fmtMoney(total)} is above your approval limit — it will wait for Admin approval.`;
+  else route = `Total ${fmtMoney(total)} — this goes to the approval queue for approval.`;
   document.getElementById('rfRouteInfo').textContent = route;
 }
 async function submitRefundRequest(){
@@ -375,7 +377,7 @@ async function rfProcess(refundId){
   const r = feeRefunds.find(x => x.id === refundId);
   if(!r){ showToast('That refund request no longer exists.'); return false; }
   if(r.status !== 'pending'){ showToast(`This request is already ${r.status}.`); refreshAfterRefund(); return false; }
-  if(!rfCanApproveAmount(r.total)){ showToast(refundPerm('approve') ? `Above your approval limit of ${fmtMoney(rfApproverLimit(currentUser.role))} — Admin must approve this one.` : "You don't have permission to approve refunds."); return false; }
+  if(!rfCanApproveAmount(r.total)){ showToast(refundPerm('approve') ? 'Above your approval limit — Admin must approve this one.' : "You don't have permission to approve refunds."); return false; }
   const pays = [];
   for(const l of r.lines){
     const p = payments.find(x => x.id === l.paymentId);
@@ -609,7 +611,7 @@ async function renderRefundsTab(body){
       ${sfKpi('Pending approval', pend.length, pend.length ? 'danger' : 'plain', fmtMoney(sum(pend)))}
       ${sfKpi('Refunded this month', fmtMoney(sum(doneMonth)), 'plain', doneMonth.length + ' refund(s)')}
       ${sfKpi('Account credit outstanding', fmtMoney(creditTotal), 'good', credits.length + ' student(s)')}
-      ${sfKpi('Principal approval limit', fmtMoney(rfApproverLimit('Principal')), 'plain', 'Admin: no limit')}
+      ${currentUser.role === 'Admin' ? sfKpi('Principal approval limit', fmtMoney(rfApproverLimit('Principal')), 'plain', 'Admin: no limit') : ''}
     </section>
     ${pend.length ? `<div class="dash-section-title"><div><h3>Awaiting approval</h3></div></div>
       <div class="table-wrap" style="overflow-x:auto;margin-bottom:24px;"><table><thead><tr><th>Refund</th><th>Student</th><th>Heads</th><th>Amount</th><th>Reason</th><th>Status</th><th></th></tr></thead><tbody>${pend.map(row).join('')}</tbody></table></div>` : ''}
@@ -651,7 +653,7 @@ async function initRefundPolicyPage(){
   body.innerHTML = `${isAdmin ? '' : '<p class="note" style="margin-bottom:12px;">View only — only Admin can change the refund policy.</p>'}    
     <div class="sf-card" style="padding:20px;margin-bottom:24px;">
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;">
-        <label class="sf-field"><span>Principal can approve up to (₹)</span><input type="number" min="0" id="rfPolLimit" value="${rfApproverLimit('Principal')}" ${isAdmin ? '' : 'disabled'}></label>
+        ${isAdmin ? `<label class="sf-field"><span>Principal can approve up to (₹)</span><input type="number" min="0" id="rfPolLimit" value="${rfApproverLimit('Principal')}"></label>` : ''}
         <label class="sf-field"><span>Default return method</span><select id="rfPolMethod" ${isAdmin ? '' : 'disabled'}>${Object.keys(RF_METHODS).map(k => `<option value="${k}" ${refundPolicy.defaultMethod === k ? 'selected' : ''}>${RF_METHODS[k]}</option>`).join('')}</select></label>
         <label class="sf-field"><span>Non-refundable heads (words, comma-separated)</span><input id="rfPolNon" value="${escapeHtml(refundPolicy.nonRefundable || '')}" ${isAdmin ? '' : 'disabled'}></label>
       </div>
