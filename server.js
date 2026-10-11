@@ -1,3 +1,5 @@
+/* Copyright (c) 2026 SVM EdTech. All rights reserved. Proprietary and confidential.
+   Unauthorised copying, modification or distribution of this file is prohibited. See LICENSE. */
 // Express server for Render — serves the ERP's static files AND handles
 // every /api/* request, using the exact same tested resource-handling logic
 // that ran on Vercel. Only the "wrapper" around it changed: Vercel routed
@@ -214,6 +216,16 @@ async function ensureSchema() {
   // silently lose the time-of-day on every read. approved_date/requested_date
   // on student_discounts use the same TEXT-for-timestamp-strings approach.
   await addColumnIfMissing('payments', 'voided_at TEXT');
+  // Fee Pro: payment details (cheque / reference / deposit account / cashier).
+  await addColumnIfMissing('payments', 'cheque_no TEXT');
+  await addColumnIfMissing('payments', 'cheque_bank TEXT');
+  await addColumnIfMissing('payments', 'cheque_date VARCHAR(32)');
+  await addColumnIfMissing('payments', 'cheque_status VARCHAR(32)');
+  await addColumnIfMissing('payments', 'cheque_status_date VARCHAR(64)');
+  await addColumnIfMissing('payments', 'cheque_note TEXT');
+  await addColumnIfMissing('payments', 'ref TEXT');
+  await addColumnIfMissing('payments', 'bank_account_id TEXT');
+  await addColumnIfMissing('payments', 'collected_by TEXT');
   await sql`CREATE TABLE IF NOT EXISTS student_discounts (
     id VARCHAR(191) PRIMARY KEY, batch_id VARCHAR(191), student_id VARCHAR(191), type TEXT, applies_to TEXT, mode TEXT,
     value DECIMAL(14,2) DEFAULT 0, note TEXT, status TEXT, requested_by TEXT, requested_role TEXT, requested_date TEXT,
@@ -223,6 +235,12 @@ async function ensureSchema() {
     id VARCHAR(191) PRIMARY KEY, student_id VARCHAR(191), name TEXT, amount DECIMAL(14,2) DEFAULT 0, paid BOOLEAN DEFAULT false,
     paid_amount DECIMAL(14,2) DEFAULT 0, date TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
+  // Fee Pro: late-fee / opening-balance markers on extra fees, and the concession rule behind a discount.
+  await addColumnIfMissing('student_extra_fees', 'kind VARCHAR(32)');
+  await addColumnIfMissing('student_extra_fees', 'late_key VARCHAR(191)');
+  await addColumnIfMissing('student_extra_fees', 'assessed_by TEXT');
+  await addColumnIfMissing('student_extra_fees', 'added_by TEXT');
+  await addColumnIfMissing('student_discounts', 'rule_id VARCHAR(191)');
   await sql`CREATE TABLE IF NOT EXISTS attendance_records (
     id VARCHAR(191) PRIMARY KEY, student_id VARCHAR(191), date VARCHAR(32), status TEXT,
     session VARCHAR(20), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -261,7 +279,7 @@ async function ensureSchema() {
   // deletion_requests is, rather than trusting the client to set its own
   // status.
   await sql`CREATE TABLE IF NOT EXISTS staff_leave_requests (
-    id VARCHAR(191) PRIMARY KEY, staff_id TEXT, staff_name TEXT,
+    id VARCHAR(191) PRIMARY KEY, staff_id VARCHAR(191), staff_name TEXT,
     from_date VARCHAR(32), to_date VARCHAR(32), session VARCHAR(20), reason TEXT,
     status VARCHAR(20) NOT NULL DEFAULT ('Pending'),
     requested_by TEXT, requested_by_name TEXT, requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -963,6 +981,7 @@ async function destroySession(req, res) {
 // logging in and out are themselves how a session is created or cleared.
 const PUBLIC_API_ROUTES = [
   { path: '/api/login', methods: ['POST'] },
+  { path: '/api/demo-info', methods: ['GET'] },
   { path: '/api/logout', methods: ['POST'] },
   { path: '/api/vendor-support-login', methods: ['GET'] },
   { path: '/api/vendor/admission-inquiries', methods: ['GET'] },
@@ -1189,6 +1208,7 @@ const SIMPLE_RESOURCES = {
       { app: 'extraFeeName', col: 'extra_fee_name' }, { app: 'extraFeeId', col: 'extra_fee_id' },
       { app: 'voided', col: 'voided' }, { app: 'voidType', col: 'void_type' }, { app: 'voidReason', col: 'void_reason' },
       { app: 'voidedBy', col: 'voided_by' }, { app: 'voidedAt', col: 'voided_at' },
+      { app: 'chequeNo', col: 'cheque_no' }, { app: 'chequeBank', col: 'cheque_bank' }, { app: 'chequeDate', col: 'cheque_date' }, { app: 'chequeStatus', col: 'cheque_status' }, { app: 'chequeStatusDate', col: 'cheque_status_date' }, { app: 'chequeNote', col: 'cheque_note' }, { app: 'ref', col: 'ref' }, { app: 'bankAccountId', col: 'bank_account_id' }, { app: 'collectedBy', col: 'collected_by' },
     ],
   },
   discounts: {
@@ -1200,7 +1220,7 @@ const SIMPLE_RESOURCES = {
       { app: 'requestedBy', col: 'requested_by' }, { app: 'requestedRole', col: 'requested_role' },
       { app: 'requestedDate', col: 'requested_date' }, { app: 'approverId', col: 'approver_id' },
       { app: 'approverName', col: 'approver_name' }, { app: 'approvedBy', col: 'approved_by' },
-      { app: 'approvedDate', col: 'approved_date' },
+      { app: 'approvedDate', col: 'approved_date' }, { app: 'ruleId', col: 'rule_id' },
     ],
   },
   'extra-fees': {
@@ -1209,6 +1229,7 @@ const SIMPLE_RESOURCES = {
       { app: 'id', col: 'id' }, { app: 'studentId', col: 'student_id' }, { app: 'name', col: 'name' },
       { app: 'amount', col: 'amount', numeric: true }, { app: 'paid', col: 'paid' }, { app: 'paidAmount', col: 'paid_amount', numeric: true },
       { app: 'date', col: 'date' },
+      { app: 'kind', col: 'kind' }, { app: 'lateKey', col: 'late_key' }, { app: 'assessedBy', col: 'assessed_by' }, { app: 'addedBy', col: 'added_by' },
     ],
   },
   attendance: {
@@ -1446,6 +1467,13 @@ const KV_KEY_TO_MODULE = {
   // Per-fee-head remittance schedule (Yearly / Terms / Monthly) per academic year.
   'fee-schedule': ['managefee'],
   'receipt-settings': ['managefee'],
+  // Fee refund requests (request → approval → credit note) and the refund policy.
+  'fee-refunds': ['managefee'],
+  'refund-policy': ['managefee'],
+  'fee-pro-settings': ['managefee'],
+  'fee-day-closings': ['managefee'],
+  'fee-late-waivers': ['managefee'],
+  'concession-rules': ['managefee'],
   'grading-scale': ['exams', 'result'],
   'grading-schemes': ['exams', 'result'],
   'exam-types': ['exams', 'result'],
@@ -1609,9 +1637,10 @@ async function findRecentDuplicate(table, guard, body) {
   const conds = [], params = [];
   guard.match.forEach(([col, app], i) => {
     let v = body[app];
-    if (v === undefined || v === '') v = null;
-    conds.push(`${col} <=> $${i + 1}`);
-    params.push(v);
+    if (v === undefined || v === null) v = '';
+    // Blank and NULL are the same thing here (the form sends '' and the DB may hold either).
+    if (col === 'amount' || col === 'discount') { conds.push(`COALESCE(${col}, 0) = $${i + 1}`); params.push(Number(v) || 0); }
+    else { conds.push(`COALESCE(${col}, '') = $${i + 1}`); params.push(String(v)); }
   });
   const rows = await sql.query(
     `SELECT * FROM ${table} WHERE ${conds.join(' AND ')} AND COALESCE(voided, 0) = 0 AND created_at > (NOW() - INTERVAL 120 SECOND) LIMIT 1`,
@@ -2081,7 +2110,8 @@ async function purgeExpiredTrash() {
 // purgeExpiredTrash definitions above it — see the note near the top of this
 // file (search "Cannot access 'PURGEABLE_RESOURCES'") for why this used to
 // live up there and broke on every boot.
-purgeExpiredTrash().catch(err => console.error('purgeExpiredTrash (startup) failed:', err));
+// Delayed so a brand-new database has finished creating its tables first (a first boot on a slow host takes a while).
+setTimeout(() => { purgeExpiredTrash().catch(err => console.error('purgeExpiredTrash (startup) failed:', err)); }, 90 * 1000);
 setInterval(() => { purgeExpiredTrash().catch(err => console.error('purgeExpiredTrash (interval) failed:', err)); }, 24 * 60 * 60 * 1000);
 // Shared by both handleUsers' and handleHybrid's PUT ?purge=1 branches: an
 // Admin/Principal jumping the retention queue to remove one specific
@@ -2770,7 +2800,11 @@ async function handleAttendanceSettings(req, res) {
 // set those in Render → this service → Environment once you have a Razorpay
 // account; until then these routes reply 501 and the "Pay Online" button
 // tells the parent to pay at the office instead.
+// DEMO_MODE=true: a showcase install with sample data. Nothing leaves the server —
+// no WhatsApp, no push notifications, no online payments.
+const DEMO_MODE = process.env.DEMO_MODE === 'true';
 function razorpayConfigured() {
+  if (DEMO_MODE) return false;
   return !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);
 }
 app.post('/api/payments/create-order', async (req, res) => {
@@ -2860,6 +2894,7 @@ app.get('/api/payments/status', (req, res) => {
 // every notify* function below silently no-ops on the push side — nothing
 // breaks, parents just don't get a browser/PWA notification yet.
 function webPushConfigured() {
+  if (DEMO_MODE) return false;
   return !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
 }
 if (webPushConfigured()) {
@@ -2881,6 +2916,7 @@ if (webPushConfigured()) {
 // a 24-hour customer reply window) — the env vars below let a school point
 // at whatever name they got approved, without a code change.
 function whatsappConfigured() {
+  if (DEMO_MODE) return false;
   return !!(process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN);
 }
 const WHATSAPP_DEFAULT_TEMPLATES = {
@@ -3220,7 +3256,7 @@ async function feeReminderTick() {
   await runFeeDueReminders().catch(err => console.error('runFeeDueReminders failed:', err));
 }
 setInterval(feeReminderTick, 60 * 60 * 1000);
-setTimeout(feeReminderTick, 30 * 1000);
+setTimeout(feeReminderTick, 120 * 1000); // after first-boot table creation has finished
 
 // ---------- Push subscription endpoints ----------
 // Any signed-in login can call these (not just Parent/Student) so a Teacher
@@ -3639,6 +3675,13 @@ const PARENT_SHARED_REFERENCE_RESOURCES = ['fee-structure', 'exam-defs', 'subjec
 // 'fee-schedule' added so a parent's Fees tab shows the same term due dates the
 // office sees (it holds only dates and percentages, nothing per-student).
 const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings', 'syllabus-topics', 'fee-schedule', 'grading-scale', 'grading-schemes'];
+
+// Lets the login page show the "demo" banner and the demo logins. Reveals nothing when not a demo.
+app.get('/api/demo-info', (req, res) => {
+  if (!DEMO_MODE) return res.status(200).json({ demo: false });
+  return res.status(200).json({ demo: true, password: process.env.DEMO_PASSWORD || 'Demo@123',
+    logins: [['demo.admin','Admin'],['demo.principal','Principal'],['demo.accountant','Accountant'],['demo.office','Office Assistant'],['demo.teacher','Teacher'],['demo.parent','Parent'],['demo.student','Student']] });
+});
 
 app.post('/api/login', async (req, res) => {
   try {
@@ -5134,6 +5177,53 @@ console.log(`Binding to port ${PORT} (process.env.PORT was ${JSON.stringify(proc
 const httpServer = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+// ---- Demo install only (DEMO_MODE=true): load the sample school if the database is empty,
+// and reload it every night at 02:00 IST so the demo never drifts. Does nothing on a real school.
+if (DEMO_MODE) {
+  let seeding = false, lastNightly = '';
+  // Re-load the sample school whenever demo/seed-demo.mjs changes (its fingerprint is kept in kv_store).
+  const seedFingerprint = async () => {
+    const { createHash } = await import('node:crypto'); const fs = await import('node:fs');
+    return createHash('sha256').update(fs.readFileSync(new URL('./demo/seed-demo.mjs', import.meta.url))).digest('hex').slice(0, 16);
+  };
+  const markSeeded = async () => {
+    const h = await seedFingerprint();
+    await sql`INSERT INTO kv_store (\`key\`, value) VALUES ('demo-seed-version', ${JSON.stringify(h)}) ON DUPLICATE KEY UPDATE value = VALUES(value)`;
+  };
+  const runDemoSeed = () => {
+    if (seeding) return; seeding = true;
+    // Run the seed inside this process, calling the app directly (no network):
+    // the hosting sandbox refuses a connection from the app to its own port (EACCES).
+    import('light-my-request').then(async ({ default: inject }) => {
+      globalThis.__demoFetch = async (url, opts = {}) => {
+        const u = new URL(url);
+        const r = await inject(app, { method: opts.method || 'GET', url: u.pathname + u.search, headers: opts.headers || {}, payload: opts.body });
+        const h = new Headers();
+        for (const [k, v] of Object.entries(r.headers)) { if (Array.isArray(v)) v.forEach(x => h.append(k, x)); else if (v !== undefined) h.set(k, String(v)); }
+        return new Response([204, 304].includes(r.statusCode) ? null : r.payload, { status: r.statusCode, headers: h });
+      };
+      const mod = await import('./demo/seed-demo.mjs?run=' + Date.now());
+      await mod.finished;
+      await markSeeded();
+      console.log('Demo seed finished OK');
+    }).catch(e => console.error('SEED FAILED:', e && e.message, e && e.cause ? '(cause: ' + (e.cause.code || e.cause.message) + ')' : ''))
+      .finally(() => { seeding = false; delete globalThis.__demoFetch; });
+  };
+  setTimeout(async () => {
+    try {
+      const r = await sql`SELECT COUNT(*) AS n FROM students`;
+      const v = await sql`SELECT value FROM kv_store WHERE \`key\` = 'demo-seed-version'`;
+      const stored = v.length ? String(v[0].value).replace(/"/g, '') : '';
+      if (Number(r[0].n) === 0) { console.log('Demo mode: database is empty, loading sample school…'); runDemoSeed(); }
+      else if (stored !== await seedFingerprint()) { console.log('Demo mode: sample data is out of date, reloading…'); runDemoSeed(); }
+    } catch (e) { console.error('Demo mode check failed:', e.message); }
+  }, 90 * 1000);
+  setInterval(() => {
+    const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
+    const day = ist.toISOString().slice(0, 10);
+    if (ist.getUTCHours() === 2 && ist.getUTCMinutes() < 10 && lastNightly !== day) { lastNightly = day; runDemoSeed(); }
+  }, 5 * 60 * 1000);
+}
 httpServer.on('error', (err) => {
   console.error(`HTTP server failed to bind to port ${PORT}:`, err);
 });

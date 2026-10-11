@@ -365,7 +365,7 @@ function renderRouteRosterBody(){
 
 /* ---------- 5. Bus passes ---------- */
 function trxBusPaid(s){
-  return payments.filter(p => p.studentId === s.id && p.category === 'bus' && !p.voided).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  return payments.filter(p => p.studentId === s.id && p.category === 'bus' && !p.voided).reduce((sum, p) => sum + payNet(p), 0);
 }
 function trxBpList(){
   let list = busPassRiderPool();

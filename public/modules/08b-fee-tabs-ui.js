@@ -240,11 +240,13 @@ function ftDefaultersFiltered(){
   if(f.section) list = list.filter(d => d.student.section === f.section);
   if(f.name) list = list.filter(d => (d.student.firstName + ' ' + d.student.lastName).toLowerCase().includes(f.name.toLowerCase()));
   if(f.phone) list = list.filter(d => (d.parentPhone || '').includes(f.phone));
+  if(f.status === 'overdue') list = list.filter(d => d.overdue);
+  else if(f.status === 'upcoming') list = list.filter(d => !d.overdue);
   return list;
 }
 
 function ftDefaulterRowHtml(d, canNotify){
-  const parts = '<span class="ft-parts">' + [['Tuition', d.tuitionBal], ['Bus', d.busBal], ['Stock', d.stockBal], ['Hostel', d.hostelBal]]
+  const parts = '<span class="ft-parts">' + [['Tuition', d.tuitionBal], ['Bus', d.busBal], ['Stock', d.stockBal], ['Hostel', d.hostelBal], ['Other', d.otherBal]]
     .filter(p => p[1] > 0).map(p => `<span class="ft-part">${p[0]} ${fmtMoney(p[1])}</span>`).join('') + '</span>';
   const state = d.dueTillToday > 0 ? 'overdue' : 'pending';
   return `<tr>
@@ -269,9 +271,11 @@ function paintFtDefaulters(){
   const pageItems = list.slice(start, start + defaulterPageSize);
   const outstanding = list.reduce((s, d) => s + d.total, 0);
   const dueNow = list.reduce((s, d) => s + (d.dueTillToday || 0), 0);
+  const all = computeDefaulters();
+  const overdueN = all.filter(d => d.overdue).length;
 
   document.getElementById('ftDfKpis').innerHTML =
-    sfKpi('Defaulters', list.length, list.length ? 'danger' : 'good', list.length ? 'Students with a balance' : 'Nobody owes anything')
+    sfKpi(defaulterFilters.status === 'upcoming' ? 'Not yet due' : defaulterFilters.status === 'all' ? 'Students with a balance' : 'Overdue students', list.length, (list.length && defaulterFilters.status !== 'upcoming') ? 'danger' : 'good', `${overdueN} overdue · ${all.length - overdueN} not yet due`)
     + sfKpi('Total outstanding', fmtMoney(outstanding), outstanding ? 'danger' : 'good')
     + sfKpi('Due till today', fmtMoney(dueNow), dueNow ? 'warn' : 'good', 'Already past its due date');
 
@@ -296,6 +300,7 @@ function onDefaulterFilterChange(){
     section: document.getElementById('dfSection').value,
     name: document.getElementById('dfName').value,
     phone: document.getElementById('dfPhone').value,
+    status: document.getElementById('dfStatus').value,
   };
   defaulterPage = 1;
   paintFtDefaulters();
@@ -312,6 +317,7 @@ function renderDefaultersTab(body){
     <div class="iv-toolbar">
       <select class="input" id="dfClass" onchange="onDefaulterFilterChange()" aria-label="Class"><option value="">All classes</option>${CLASS_LEVELS.map(c => `<option ${f.className === c ? 'selected' : ''}>${ftEsc(c)}</option>`).join('')}</select>
       <select class="input" id="dfSection" onchange="onDefaulterFilterChange()" aria-label="Section"><option value="">All sections</option>${SECTIONS.map(s => `<option value="${ftEsc(s)}" ${f.section === s ? 'selected' : ''}>Section ${ftEsc(s)}</option>`).join('')}</select>
+      <select class="input" id="dfStatus" onchange="onDefaulterFilterChange()" aria-label="Status"><option value="overdue" ${(f.status || 'overdue') === 'overdue' ? 'selected' : ''}>Overdue only</option><option value="upcoming" ${f.status === 'upcoming' ? 'selected' : ''}>Balance, not yet due</option><option value="all" ${f.status === 'all' ? 'selected' : ''}>All with a balance</option></select>
       <input class="input iv-search" id="dfName" type="search" placeholder="Search name…" value="${ftEsc(f.name)}" oninput="onDefaulterFilterChange()" autocomplete="off">
       <input class="input iv-search" id="dfPhone" type="search" placeholder="Parent phone…" value="${ftEsc(f.phone)}" oninput="onDefaulterFilterChange()" autocomplete="off">
       <div class="iv-toolbar-actions">

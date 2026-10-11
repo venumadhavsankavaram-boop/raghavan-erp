@@ -162,7 +162,7 @@
     // Same guard as Bus Fee/Extra Fee: don't let a Hostel Fee payment already
     // collected silently fall out of the ledger just because the room
     // assignment (the thing that makes it "expected") gets cleared.
-    const paidHostel = payments.filter(p => p.studentId === studentId && p.category === 'hostel' && !p.voided).reduce((sum,p) => sum + (Number(p.amount)||0), 0);
+    const paidHostel = payments.filter(p => p.studentId === studentId && p.category === 'hostel' && !p.voided).reduce((sum,p) => sum + payNet(p), 0);
     if(paidHostel > 0){
       showToast(`Can't remove — ${fmtMoney(paidHostel)} has already been collected as Hostel Fee for this student. Void or Refund that payment first (Fee ledger → Payment History), then remove them from the room.`);
       return;
@@ -491,7 +491,7 @@
     const route = transportRoutes.find(r => r.id === s.transportRouteId);
     const stop = route ? route.stops.find(st => st.id === s.transportStopId) : null;
     const expected = studentBusFare(s);
-    const paid = payments.filter(p => p.studentId === s.id && p.category === 'bus' && !p.voided).reduce((sum,p) => sum + (Number(p.amount)||0), 0);
+    const paid = payments.filter(p => p.studentId === s.id && p.category === 'bus' && !p.voided).reduce((sum,p) => sum + payNet(p), 0);
     return {
       name: `${s.firstName} ${s.lastName}`,
       fatherName: s.fatherName || '—',

@@ -269,7 +269,9 @@ function renderPermissionEditor(body){
             <thead><tr><th>Module</th>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead>
             <tbody>
             ${mods.map(m => {
-              const p = permissions[m.key] || Object.fromEntries(PERMISSION_ACTIONS.map(a => [a, false]));
+              const p = permissions[m.key] || (m.key === 'managefee_refunds' && typeof refundPermFor === 'function'
+                ? Object.fromEntries(PERMISSION_ACTIONS.map(a => [a, !!refundPermFor(roleName, a)]))
+                : Object.fromEntries(PERMISSION_ACTIONS.map(a => [a, false])));
               const full = PERMISSION_ACTIONS.every(a => p[a]);
               const hasChildren = (CHILDREN_OF_PARENT[m.key] || []).length > 0;
               return `<tr class="${m.parent ? 'perm-row-sub urx-sub' : ''}" data-search="${escapeHtml((m.label + ' ' + cat).toLowerCase())}">

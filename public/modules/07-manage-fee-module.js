@@ -35,9 +35,9 @@ const FEE_TYPES_KEY = "fee-types";
   let feeView = 'grid';
   let feeCurrentClass = '', feeCurrentSection = '', feeCurrentStudentId = '';
   let defaulterPage = 1, defaulterPageSize = 10;
-  let defaulterFilters = { className:'', section:'', name:'', phone:'' };
+  let defaulterFilters = { className:'', section:'', name:'', phone:'', status:'overdue' };
 
-  const MF_TAB_PERM_KEYS = { fees:'managefee_collection', structure:'managefee_structure', types:'managefee_types', discounts:'managefee_discounts', extra:'managefee_extra', late:'managefee_late', defaulters:'managefee_defaulters' };
+  const MF_TAB_PERM_KEYS = { fees:'managefee_collection', structure:'managefee_structure', types:'managefee_types', discounts:'managefee_discounts', extra:'managefee_extra', late:'managefee_late', defaulters:'managefee_defaulters', refunds:'managefee_refunds', reports:'managefee_reports' };
   async function initManageFeeView(){
     await ensureDataLoaded('payments', loadPaymentsData);
     populateMfAyBadgeAndSelect();
@@ -73,7 +73,7 @@ const FEE_TYPES_KEY = "fee-types";
 
   function switchFeeTab(tab){
     feeTab = tab;
-    ['fees','structure','types','discounts','extra','late','defaulters'].forEach(t => {
+    ['fees','structure','types','discounts','extra','late','defaulters','refunds','reports'].forEach(t => {
       const btn = document.getElementById('mftab-'+t);
       if(btn) btn.classList.toggle('active', t===tab);
     });
@@ -102,6 +102,8 @@ const FEE_TYPES_KEY = "fee-types";
     if(feeTab === 'extra') return renderExtraFeesTab(body);
     if(feeTab === 'late') return renderLateFeesTab(body);
     if(feeTab === 'defaulters') return renderDefaultersTab(body);
+    if(feeTab === 'refunds') return renderRefundsTab(body);
+    if(feeTab === 'reports') return renderReportsTab(body);
   }
 
   /* --- Student Fees: class grid / section / ledger --- */
@@ -371,8 +373,15 @@ const FEE_TYPES_KEY = "fee-types";
   async function voidPayment(id){
     if(!canSub('managefee_collection','managefee','delete')){ showToast("You don't have permission to void payments."); return; }
     await ensureDataLoaded('payments', loadPaymentsData);
+    if(typeof fpEnsure === 'function') await fpEnsure();
     const p = payments.find(x => x.id === id);
     if(!p || p.voided) return;
+    if(typeof payRefunded === 'function' && (payRefunded(p) > 0 || payPendingRefund(p) > 0)){
+      showToast('This payment already has a refund (or a pending refund request) against it, so it cannot be voided. Reject or cancel the refund request first.'); return;
+    }
+    if(typeof feeDayClosed === 'function' && feeDayClosed(p.date) && currentUser.role !== 'Admin'){
+      showToast('The day this receipt belongs to has been closed in the Day Book. Ask an Admin to void it.'); return;
+    }
     const reason = await showPromptDialog(`Void this payment of ${fmtMoney(p.amount)}?\n\nEnter a reason (it stays visible, marked VOIDED, for audit — the receipt number is never reused):`, { title:'Void payment', okText:'Void', placeholder:'Reason for voiding' });
     if(reason === null) return;
     if(!reason.trim()){ showToast('A reason is required to void a payment.'); return; }

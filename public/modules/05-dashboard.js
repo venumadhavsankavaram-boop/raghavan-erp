@@ -413,7 +413,7 @@ function ringSVG(pct, color, size, stroke, trackColor){
     // visible via Accounting → Overview or Fees → Recent Payment History.
     const extraFeesCollected = payments
       .filter(p => p.category === 'extra' && !p.voided)
-      .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+      .reduce((sum, p) => sum + payNet(p), 0);
 
     // The real stock/inventory movement (uniforms, books, stationery sold to
     // students) lives in the Inventory module's own sales log, not as

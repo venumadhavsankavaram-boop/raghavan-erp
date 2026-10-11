@@ -269,6 +269,8 @@ const SETTINGS_KEY = "finance-settings";
   // ensureDataLoaded('payments', loadPaymentsData) before reading it.
   async function loadPaymentsData(){
     payments = await storageGet(PAYMENTS_KEY, []);
+    // Refund requests + policy travel with payments (a partial refund changes what counts as collected).
+    if(typeof loadRefundData === 'function') await loadRefundData();
   }
 
   function autoAcademicYear(){
@@ -302,7 +304,7 @@ const SETTINGS_KEY = "finance-settings";
     const perCat = {};
     Object.keys(CATS).forEach(c => {
       const catPayments = payments.filter(p => p.category === c && !p.voided);
-      const collected = catPayments.reduce((s,p) => s + (Number(p.amount)||0), 0);
+      const collected = catPayments.reduce((s,p) => s + payNet(p), 0);
       let discount = c === 'stock' ? 0 : catPayments.reduce((s,p) => s + (Number(p.discount)||0), 0);
 
       let expected = 0;
@@ -359,7 +361,7 @@ const SETTINGS_KEY = "finance-settings";
       // Payments carry a classAtPayment snapshot so a promoted student's old-class payments never get miscounted against their new class's fee.
       // A voided/refunded payment (see voidPayment/submitRefundPayment) is excluded here so a wrongly-assigned or refunded fee stops counting as collected.
       const catPayments = payments.filter(p => p.studentId === s.id && p.category === c && (p.classAtPayment === s.className || !p.classAtPayment) && !p.voided);
-      const collected = catPayments.reduce((sum,p) => sum + (Number(p.amount)||0), 0);
+      const collected = catPayments.reduce((sum,p) => sum + payNet(p), 0);
       let discount = c === 'stock' ? 0 : catPayments.reduce((sum,p) => sum + (Number(p.discount)||0), 0);
       let expected = 0;
       if(c === 'hostel'){

@@ -434,7 +434,7 @@ const WIZARD_TABS = ['new','parent','previous','transport'];
     if(editId){
       const existing = students.find(s => s.id === editId);
       if(existing && existing.needsTransport === 'Yes' && data.needsTransport !== 'Yes'){
-        const paidBus = payments.filter(p => p.studentId === editId && p.category === 'bus' && !p.voided).reduce((sum,p) => sum + (Number(p.amount)||0), 0);
+        const paidBus = payments.filter(p => p.studentId === editId && p.category === 'bus' && !p.voided).reduce((sum,p) => sum + payNet(p), 0);
         if(paidBus > 0){
           showToast(`Can't turn off Needs Transport — ${fmtMoney(paidBus)} has already been collected as Bus Fee for this student. Void or Refund that payment first (Fee ledger → Payment History), then update Transport here.`);
           return false;

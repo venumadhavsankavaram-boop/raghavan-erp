@@ -51,7 +51,7 @@ function frcCopyHtml(label, d){
     <div class="meta">
       <div><small>Receipt No</small><b>${frcEsc(d.receiptNo)}</b></div>
       <div><small>Date</small><b>${frcEsc(d.date)}</b></div>
-      <div><small>Payment mode</small><b>${frcEsc(d.mode)}</b></div>
+      <div><small>Payment mode</small><b>${frcEsc(d.mode)}</b>${d.detail ? `<small>${frcEsc(d.detail)}</small>` : ''}</div>
       <div class="paid"><span>✓ PAID</span></div>
     </div>
     <div class="who">
@@ -75,7 +75,7 @@ function frcCopyHtml(label, d){
         <div class="due"><small>Remaining due (all fees)</small><b>₹ ${frcMoney(d.due)}</b></div></div>
       <div class="sign"><span></span>${frcEsc(d.signer)}<br><small>Authorised signatory</small></div>
     </div>
-    <div class="note">Fee once paid is neither refundable nor transferable. Computer-generated receipt.</div>
+    <div class="note">${frcEsc((typeof fpSettings !== 'undefined' && fpSettings && fpSettings.receiptNote) || 'Computer-generated receipt.')}${d.collector ? ' · Collected by ' + frcEsc(d.collector) : ''}</div>
   </section>`;
 }
 
@@ -166,6 +166,8 @@ function frcBuildData(recs){
   const modes = Array.from(new Set(recs.map(r => r.mode).filter(Boolean)));
   return {
     recs, s, receiptNo: p.receiptNo || previewReceiptNo(), date: p.date || '—', mode: modes.join(' + ') || '—',
+    detail: (() => { const q = recs.find(x => x.chequeNo || x.ref); if(!q) return ''; return q.chequeNo ? ('Cheque ' + q.chequeNo + (q.chequeBank ? ' · ' + q.chequeBank : '') + (q.chequeDate ? ' · ' + q.chequeDate : '')) : ('Ref ' + q.ref); })(),
+    collector: (recs.find(x => x.collectedBy) || {}).collectedBy || '',
     contact: frcContact(s), parentName: s.fatherName || s.motherName || s.guardianName || '—',
     address: s.fatherAddress || s.motherAddress || s.guardianAddress || '—',
     netPaid, disc: recs.reduce((sum, r) => sum + (Number(r.discount) || 0), 0),

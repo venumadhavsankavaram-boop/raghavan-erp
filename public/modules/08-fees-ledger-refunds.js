@@ -102,7 +102,8 @@ let refundPaymentId = null;
   // the in-memory `payments` / `studentExtraFees` arrays but does not
   // persist — the caller saves once after every selected family member has
   // been recorded.
-  function recordFamilyPayment(studentId, heads, mode, date, note){
+  function recordFamilyPayment(studentId, heads, mode, date, note, details){
+    const det = Object.assign({ collectedBy: (typeof currentUser !== 'undefined' && currentUser && currentUser.name) || '' }, details || {});
     const student = students.find(x => x.id === studentId);
     if(!student || !Array.isArray(heads) || !heads.length) return null;
     const receiptNo = nextReceiptNo();
@@ -122,7 +123,7 @@ let refundPaymentId = null;
           receiptNo, studentId, studentName: student.name,
           category: 'extra', extraFeeName: fee ? fee.name : h.label, extraFeeId: h.key,
           mode, amount: take, discount: 0, instalment: '', date, note: note || '',
-          classAtPayment: student.className,
+          classAtPayment: student.className, ...det,
         };
         payments.push(record);
         created.push(record);
@@ -131,7 +132,7 @@ let refundPaymentId = null;
           id: 'pay_' + Date.now() + '_' + studentId + '_' + h.key,
           receiptNo, studentId, studentName: student.name,
           category: h.key, mode, amount: take, discount: 0, instalment: instalmentLabelFor(h.key, payCat[h.key], take), date, note: note || '',
-          classAtPayment: student.className,
+          classAtPayment: student.className, ...det,
         };
         payments.push(record);
         created.push(record);
@@ -149,6 +150,7 @@ let refundPaymentId = null;
   let ffHeadCounter = 0;
   async function openFamilyFeeModal(anchorStudentId){
     await ensureDataLoaded('payments', loadPaymentsData);
+    if(typeof fpEnsure === 'function') await fpEnsure();
     const s = students.find(x => x.id === anchorStudentId);
     if(!s) return;
     const familyIds = getFamilyIds(s);
@@ -187,6 +189,7 @@ let refundPaymentId = null;
         <tr><td></td><td colspan="4" style="color:var(--ink-soft); font-size:0.82rem; padding-left:28px;">All fee heads paid</td></tr>`;
       return headerRow + headRows;
     }).join('');
+    if(typeof ffRenderModeFields === 'function') ffRenderModeFields();
     document.getElementById('familyFeeModalOverlay').classList.add('open');
     updateFamilyTotalToPay();
   }
@@ -286,11 +289,19 @@ let refundPaymentId = null;
       });
       remaining = leftover;
     }
+    // Whole rupees that add up EXACTLY to what was typed (rounding each share on its own
+    // used to collect a rupee or two more than the total the cashier entered).
+    const placed = Math.round(totalInput - remaining);
+    pool.forEach(p => { p.whole = Math.min(Math.floor(p.alloc + 1e-9), p.due); });
+    let spare = placed - pool.reduce((s, p) => s + p.whole, 0);
+    pool.slice().sort((a, b) => (b.alloc - Math.floor(b.alloc)) - (a.alloc - Math.floor(a.alloc))).forEach(p => {
+      if(spare > 0 && p.whole < p.due){ p.whole += 1; spare -= 1; }
+    });
     pool.forEach(p => {
       const amtInput = document.getElementById('ffAmt_'+p.hid);
-      if(amtInput) amtInput.value = Math.round(p.alloc);
+      if(amtInput) amtInput.value = p.whole;
     });
-    const unallocated = Math.max(0, Math.round(remaining));
+    const unallocated = Math.max(0, Math.round(totalInput - pool.reduce((s, p) => s + p.whole, 0)));
     if(unallocWrap) unallocWrap.style.display = unallocated > 0 ? '' : 'none';
     if(unallocEl) unallocEl.textContent = fmtMoney(unallocated);
     updateFamilyTotalToPay();
@@ -320,9 +331,22 @@ let refundPaymentId = null;
     });
     const studentIds = Object.keys(byStudent);
     if(!studentIds.length){ showToast('Select at least one fee head and enter an amount to pay.'); return; }
+    // Never accept more than a head still owes (the excess would silently vanish), or a future date.
+    const over = Array.from(document.querySelectorAll('.ff-head-row')).find(row => {
+      const chk = document.getElementById('ffChk_'+row.dataset.hid), a = document.getElementById('ffAmt_'+row.dataset.hid);
+      return chk && chk.checked && a && (Number(a.value) || 0) > (Number(row.dataset.outstanding) || 0) + 0.001;
+    });
+    if(over){ showToast(`${over.dataset.label}: the amount is more than the ${fmtMoney(over.dataset.outstanding)} still due. Reduce it to what is owed.`); return; }
+    if(date > localISODate()){ showToast('The payment date cannot be in the future.'); return; }
+    if(typeof feeDayClosed === 'function' && feeDayClosed(date)){
+      if(currentUser.role !== 'Admin'){ showToast(`${date} has been closed in the Day Book — new receipts can't be dated on a closed day. Use today's date or ask an Admin.`); return; }
+      if(!(await showConfirmDialog(`${date} is a closed day in the Day Book. Record this receipt on it anyway?`))) return;
+    }
+    const details = (typeof ffReadDetails === 'function') ? ffReadDetails(mode, date) : { ok:true, data:{} };
+    if(!details.ok) return;
     const results = [];
     studentIds.forEach(sid => {
-      const res = recordFamilyPayment(sid, byStudent[sid], mode, date, note);
+      const res = recordFamilyPayment(sid, byStudent[sid], mode, date, note, details.data);
       if(res) results.push(res);
     });
     if(!results.length){ showToast('Nothing was recorded — check the amounts entered.'); return; }
@@ -847,45 +871,39 @@ let refundPaymentId = null;
 
   /* --- Fee Defaulters --- */
   function computeDefaulters(){
-    // Covers all 4 fee categories (Tuition, Bus, Stock, Hostel) so a student who only
-    // owes Stock or Hostel dues isn't silently left off the defaulters list.
+    // Built on computePendingFeeRows() so it sees exactly what the student ledger and the
+    // Collect screen see: all four fee heads PLUS extra fees, carried-forward dues and late fees
+    // (these used to be missing, so a student owing only old dues never appeared here).
     const list = [];
+    const today = localISODate();
     students.filter(s => isActive(s)).forEach(s => {
-      const { perCat } = computeStudentFinance(s);
-      const tuitionBal = perCat.fee.receivable;
-      const busBal = perCat.bus.receivable;
-      const stockBal = perCat.stock.receivable;
-      const hostelBal = perCat.hostel.receivable;
-      const total = tuitionBal + busBal + stockBal + hostelBal;
-      if(total > 0){
-        // Remittance schedule: earliest unpaid due date, and what is payable by today.
-        let nextDue = '', dueTillToday = 0;
-        Object.keys(CATS).forEach(c => {
-          if(!(perCat[c].expected > 0) || !(perCat[c].receivable > 0)) return;
-          const sm = studentCategorySchedule(c, perCat[c]).summary;
-          dueTillToday += sm.dueTillToday;
-          const d = sm.firstUnpaid && sm.firstUnpaid.due;
-          if(d && (!nextDue || d < nextDue)) nextDue = d;
-        });
-        list.push({
-          student: s, tuitionBal, busBal, stockBal, hostelBal, total, nextDue, dueTillToday,
-          parentPhone: s.fatherPhone || s.motherPhone || s.guardianPhone || '',
-        });
-      }
+      const { pendingRows, totalPendingOutstanding } = computePendingFeeRows(s);
+      if(!(totalPendingOutstanding > 0)) return;
+      const bal = c => pendingRows.filter(r => r.type === 'category' && r.key === c).reduce((a, r) => a + r.outstanding, 0);
+      let dueTillToday = 0, nextDue = '';
+      pendingRows.forEach(r => {
+        let d = '';
+        if(r.type === 'category'){ dueTillToday += r.dueTillToday || 0; d = r.dueDate; }
+        else { dueTillToday += r.outstanding; d = r.dueDate; }   // an extra fee is payable as soon as it is raised
+        if(isValidISODate(d) && (!nextDue || d < nextDue)) nextDue = d;
+      });
+      list.push({
+        student: s, tuitionBal: bal('fee'), busBal: bal('bus'), stockBal: bal('stock'), hostelBal: bal('hostel'),
+        otherBal: pendingRows.filter(r => r.type === 'extra').reduce((a, r) => a + r.outstanding, 0),
+        total: totalPendingOutstanding, nextDue, dueTillToday, overdue: dueTillToday > 0,
+        parentPhone: s.fatherPhone || s.motherPhone || s.guardianPhone || '',
+      });
     });
     return list;
   }
 
   function defaultersReportRows(){
-    let list = computeDefaulters();
-    if(defaulterFilters.className) list = list.filter(d => d.student.className===defaulterFilters.className);
-    if(defaulterFilters.section) list = list.filter(d => d.student.section===defaulterFilters.section);
-    if(defaulterFilters.name) list = list.filter(d => (d.student.firstName+' '+d.student.lastName).toLowerCase().includes(defaulterFilters.name.toLowerCase()));
-    if(defaulterFilters.phone) list = list.filter(d => (d.parentPhone||'').includes(defaulterFilters.phone));
+    const list = (typeof ftDefaultersFiltered === 'function') ? ftDefaultersFiltered() : computeDefaulters();
     return list.map(d => ({
-      'Student': d.student.firstName+' '+d.student.lastName, 'Class': d.student.className+' - '+d.student.section,
-      'Parent Phone': d.parentPhone || '', 'Due Date': d.nextDue || lateFeeSettings.dueDate || '', 'Due Till Today': d.dueTillToday,
-      'Tuition Due': d.tuitionBal, 'Bus Due': d.busBal, 'Stock Due': d.stockBal, 'Hostel Due': d.hostelBal, 'Amount Due': d.total,
+      'Student': d.student.firstName+' '+d.student.lastName, 'Admission No': d.student.admissionNo || '', 'Class': d.student.className+' - '+d.student.section,
+      'Parent Phone': d.parentPhone || '', 'Next Due Date': d.nextDue || '', 'Due Till Today': d.dueTillToday,
+      'Tuition Due': d.tuitionBal, 'Bus Due': d.busBal, 'Stock Due': d.stockBal, 'Hostel Due': d.hostelBal, 'Other Dues (extra / old / late)': d.otherBal, 'Total Outstanding': d.total,
+      'Status': d.overdue ? 'Overdue' : 'Not yet due',
     }));
   }
   function downloadDefaultersExcel(){ exportRowsToExcel('fee_defaulters.xlsx', 'Fee Defaulters', defaultersReportRows()); }
@@ -894,7 +912,7 @@ let refundPaymentId = null;
 
   /* --- Notify Parents (WhatsApp click-to-chat, real & functional, no backend needed) --- */
   function openNotifyModal(scope, singleId){
-    let list = computeDefaulters();
+    let list = computeDefaulters().filter(d => d.overdue || scope === 'single');
     if(scope === 'filtered'){
       if(defaulterFilters.className) list = list.filter(d => d.student.className===defaulterFilters.className);
       if(defaulterFilters.section) list = list.filter(d => d.student.section===defaulterFilters.section);

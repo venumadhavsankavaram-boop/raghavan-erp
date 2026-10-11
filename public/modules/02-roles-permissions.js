@@ -57,6 +57,8 @@ const CUSTOM_ROLES_KEY = "custom-roles";
 
     { key:'managefee',   label:'Manage Fee',         icon:'💰', category:'Finance' },
     { key:'managefee_collection', label:'Fee Collection & Receipts', icon:'💳', category:'Finance', parent:'managefee', isNew:true },
+    { key:'managefee_refunds',    label:'Fee Refunds (Create = request · Approve = approve/reject · Delete = cancel requests · Print = vouchers)', icon:'💸', category:'Finance', parent:'managefee', isNew:true },
+    { key:'managefee_reports',    label:'Reports & Day Book (Approve = close/reopen day · Print = export)', icon:'📊', category:'Finance', parent:'managefee', isNew:true },
     { key:'managefee_structure',  label:'Fee Structure',             icon:'🏗️', category:'Finance', parent:'managefee', isNew:true },
     { key:'managefee_types',      label:'Fee Types',                 icon:'🏷️', category:'Finance', parent:'managefee', isNew:true },
     { key:'managefee_discounts',  label:'Discounts',                 icon:'🎟️', category:'Finance', parent:'managefee', isNew:true },
@@ -123,6 +125,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     { key:'setup_academicyear',  label:'Academic Year',   icon:'📅', category:'Configuration', isNew:true },
     { key:'setup_feestructure',  label:'Fee Structure',   icon:'💳', category:'Configuration', isNew:true },
     { key:'setup_promotions',    label:'Promotions Setup', icon:'⬆️', category:'Configuration', isNew:true },
+    { key:'setup_refundpolicy',  label:'Refund Policy (view only — only Admin can change)', icon:'💸', category:'Configuration', isNew:true },
   ];
 
   const PERMISSION_ACTIONS = ['view','create','edit','delete','print','approve'];
@@ -318,7 +321,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
   function getResultTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'result', action); }
   const STAFF_SUBPAGE_KEYS = ['staff_depts','staff_idcards','staff_payroll'];
   function getStaffSubpageAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'staff', action); }
-  const SETUP_SUBMODULE_KEYS = ['setup_schoolprofile','setup_classes','setup_academicyear','setup_feestructure','setup_promotions'];
+  const SETUP_SUBMODULE_KEYS = ['setup_schoolprofile','setup_classes','setup_academicyear','setup_feestructure','setup_promotions','setup_refundpolicy'];
   function getSetupTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'setup', action); }
   // Newly added sub-module groups (each mirrors that module's own tabs/buttons
   // one-for-one) — same fallback-to-parent behavior throughout.
@@ -334,8 +337,11 @@ const CUSTOM_ROLES_KEY = "custom-roles";
   function getCommsTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'announcements', action); }
   const NOTICEBOARD_SUBMODULE_KEYS = ['noticeboard_post','noticeboard_headings','noticeboard_website'];
   function getNoticeBoardTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'noticeboard', action); }
-  const MANAGEFEE_SUBMODULE_KEYS = ['managefee_collection','managefee_structure','managefee_types','managefee_discounts','managefee_extra','managefee_late','managefee_defaulters'];
-  function getManageFeeTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'managefee', action); }
+  const MANAGEFEE_SUBMODULE_KEYS = ['managefee_collection','managefee_refunds','managefee_reports','managefee_structure','managefee_types','managefee_discounts','managefee_extra','managefee_late','managefee_defaulters'];
+  function getManageFeeTabAccess(role, moduleKey, action){
+    if(moduleKey === 'managefee_refunds') return refundPermFor(role, action || 'view');
+    return getSubModuleAccess(role, moduleKey, 'managefee', action);
+  }
   const INVENTORY_SUBMODULE_KEYS = ['inventory_items','inventory_sell','inventory_approvals','inventory_saleshistory','inventory_stockoverview'];
   function getInventoryTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'inventory', action); }
   const TRANSPORT_SUBMODULE_KEYS = ['transport_routes','transport_assign','transport_roster','transport_buspass'];
@@ -399,6 +405,13 @@ const CUSTOM_ROLES_KEY = "custom-roles";
         });
       }
     });
+    // Approving fee refunds is never granted by default except to Admin / Principal (the Principal is held to the refund policy's limit).
+    if(roleName !== 'Admin' && roleName !== 'Principal' && p.managefee_refunds){
+      p.managefee_refunds.approve = false;
+    }
+    if(roleName !== 'Admin' && roleName !== 'Principal' && p.managefee_reports){
+      p.managefee_reports.approve = false;
+    }
     // Publishing to the public website is never granted by default except to Admin / Principal.
     if(roleName !== 'Admin' && roleName !== 'Principal' && p.noticeboard_website){
       PERMISSION_ACTIONS.forEach(a => { p.noticeboard_website[a] = false; });
@@ -831,6 +844,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     document.getElementById('navAcademicYear').style.display = getSetupTabAccess(currentUser.role, 'setup_academicyear') ? 'flex' : 'none';
     document.getElementById('navFeeStructureSetup').style.display = getSetupTabAccess(currentUser.role, 'setup_feestructure') ? 'flex' : 'none';
     document.getElementById('navPromotions').style.display = getSetupTabAccess(currentUser.role, 'setup_promotions') ? 'flex' : 'none';
+    document.getElementById('navRefundPolicy').style.display = getSetupTabAccess(currentUser.role, 'setup_refundpolicy') ? 'flex' : 'none';
     document.getElementById('navUsersRoles').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';
     document.getElementById('navStudentParentLogins').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';
     document.getElementById('navRolesPermissions').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';

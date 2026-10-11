@@ -16,7 +16,7 @@ function switchView(view){
         : 'staffdirectory';
     }
     const allowed = getRoleViews(currentUser.role);
-    const setupPages = ['schoolprofile','classessetup','academicyear','feestructuresetup','promotions'];
+    const setupPages = ['schoolprofile','classessetup','academicyear','feestructuresetup','promotions','refundpolicy'];
     const adminOnlyPages = ['usersroles','studentparentlogins','rolespermissions','admintools2'];
     const universalPages = ['myaccount'];
     let permitted;
@@ -53,6 +53,7 @@ function switchView(view){
     document.getElementById('view-academicyear').style.display = view === 'academicyear' ? 'block' : 'none';
     document.getElementById('view-feestructuresetup').style.display = view === 'feestructuresetup' ? 'block' : 'none';
     document.getElementById('view-promotions').style.display = view === 'promotions' ? 'block' : 'none';
+    document.getElementById('view-refundpolicy').style.display = view === 'refundpolicy' ? 'block' : 'none';
     document.getElementById('view-usersroles').style.display = view === 'usersroles' ? 'block' : 'none';
     document.getElementById('view-studentparentlogins').style.display = view === 'studentparentlogins' ? 'block' : 'none';
     document.getElementById('view-rolespermissions').style.display = view === 'rolespermissions' ? 'block' : 'none';
@@ -93,6 +94,7 @@ function switchView(view){
     document.getElementById('navAcademicYear').classList.toggle('active', view === 'academicyear');
     document.getElementById('navFeeStructureSetup').classList.toggle('active', view === 'feestructuresetup');
     document.getElementById('navPromotions').classList.toggle('active', view === 'promotions');
+    document.getElementById('navRefundPolicy').classList.toggle('active', view === 'refundpolicy');
     document.getElementById('navUsersRoles').classList.toggle('active', view === 'usersroles');
     document.getElementById('navStudentParentLogins').classList.toggle('active', view === 'studentparentlogins');
     document.getElementById('navRolesPermissions').classList.toggle('active', view === 'rolespermissions');
@@ -127,6 +129,7 @@ function switchView(view){
     if(view === 'academicyear'){ initAcademicYearPage(); }
     if(view === 'feestructuresetup'){ initFeeStructureSetupPage(); }
     if(view === 'promotions'){ initPromotionsPage(); }
+    if(view === 'refundpolicy'){ initRefundPolicyPage(); }
     if(view === 'usersroles'){ initUsersRolesPage(); }
     if(view === 'studentparentlogins'){ initStudentParentLoginsPage(); }
     if(view === 'rolespermissions'){ initRolesPermissionsPage(); }

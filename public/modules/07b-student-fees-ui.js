@@ -359,7 +359,7 @@ function renderStudentLedger(body){
       <button type="button" class="${ledgerFamilyView === 'family' ? 'active' : ''}" onclick="setLedgerFamilyView('family')">Family</button>
     </div>
     <div class="dash-section-title"><div><h3>👪 Family Summary</h3><span class="eyebrow-sm">${familyIds.length} member${familyIds.length === 1 ? '' : 's'}</span></div>
-      ${canPay ? sfBtn('primary', 'family', 'Collect Family Fees', `openFamilyFeeModal('${s.id}')`) : ''}
+      <span style="display:flex;gap:8px;flex-wrap:wrap;">${canSub('managefee_extra','managefee','create') ? sfBtn('secondary', 'family', 'Add previous dues', `openPreviousDuesModal('${s.id}')`) : ''}${canPay ? sfBtn('primary', 'family', 'Collect Family Fees', `openFamilyFeeModal('${s.id}')`) : ''}</span>
     </div>
     <section class="sf-kpis">
       ${sfKpi('Total amount', fmtMoney(familyTotals.expected), 'plain')}
@@ -414,27 +414,28 @@ function renderStudentLedger(body){
         const paidAmt = Number(e.paidAmount) || 0;
         const statusHtml = paidAmt >= e.amount ? '<span class="pill">Paid</span>' : paidAmt > 0 ? `<span class="balance-tag due">Partially Paid (${fmtMoney(paidAmt)} of ${fmtMoney(e.amount)})</span>` : '<span class="balance-tag due">Unpaid</span>';
         return `<tr><td>${e.name}</td><td>${fmtMoney(e.amount)}</td><td>${statusHtml}</td>
-        <td>${paidAmt > 0 ? `<button class="btn-edit-text" onclick="printReceiptForExtraFee('${e.id}')">Print Receipt</button>&nbsp;·&nbsp;` : ``}${canSub('managefee_collection', 'managefee', 'delete') ? `<button class="btn-danger-text" onclick="removeExtraFee('${e.id}')">Remove</button>` : ``}</td></tr>`;
+        <td>${paidAmt > 0 ? `<button class="btn-edit-text" onclick="printReceiptForExtraFee('${e.id}')">Print Receipt</button>&nbsp;·&nbsp;` : ``}${e.kind === 'late' ? (paidAmt <= 0 && (currentUser.role === 'Admin' || canSub('managefee_late','managefee','delete')) ? `<button class="btn-danger-text" onclick="lateWaive('${e.id}')">Waive</button>` : ``) : (canSub('managefee_collection', 'managefee', 'delete') ? `<button class="btn-danger-text" onclick="removeExtraFee('${e.id}')">Remove</button>` : ``)}</td></tr>`;
       }).join('')}
     </tbody></table></div>` : '';
 
   const historyHtml = `
+    ${rfCreditBannerHtml(s.id)}
     <div class="dash-section-title"><div><h3>Payment History</h3></div></div>
     <div class="table-wrap" style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Category</th><th>Instalment</th><th>Mode</th><th>Amount</th><th>Discount</th><th>Status</th><th></th></tr></thead><tbody>
       ${studentPayments.length ? studentPayments.map(p => {
         const statusHtml = p.voided
           ? `<span class="balance-tag due" title="${(p.voidReason || '').replace(/"/g, '&quot;')}">${p.voidType === 'refund' ? 'REFUNDED' : 'VOIDED'}</span>`
-          : `<span class="pill">Recorded</span>`;
+          : rfStatusBadge(p);
         const actions = [];
         if(!p.voided && canSub('managefee_collection', 'managefee', 'print')) actions.push(sfBtn('link', 'receipt', 'Print Receipt', `printReceipt('${p.id}')`));
         if(!p.voided && canSub('managefee_collection', 'managefee', 'delete')) actions.push(sfBtn('danger', '', 'Void', `voidPayment('${p.id}')`));
-        if(!p.voided && canSub('managefee_collection', 'managefee', 'delete')) actions.push(sfBtn('danger', '', 'Refund', `openRefundPaymentModal('${p.id}')`));
         return `<tr${p.voided ? ' style="opacity:.6;"' : ''}><td>${p.date || '—'}</td><td><span class="pill">${feeLabelFor(p)}</span></td><td>${escapeHtml(p.instalment || '—')}</td><td>${p.mode || '—'}</td><td>${p.voided ? `<s>${fmtMoney(p.amount)}</s>` : fmtMoney(p.amount)}</td><td>${fmtMoney(p.discount)}</td><td>${statusHtml}</td><td class="sf-actions">${actions.join('')}</td></tr>`;
       }).join('') : `<tr><td colspan="8"><div class="empty-state"><b>No payments yet</b></div></td></tr>`}
     </tbody></table></div>`;
 
   const heroActions = canPay ? `
     ${sfBtn('soft', 'plus', 'Add Admission Fee', `addAdmissionFeeForStudent('${s.id}')`)}
+    ${canSub('managefee_extra','managefee','create') ? sfBtn('soft', 'plus', 'Add previous dues', `openPreviousDuesModal('${s.id}')`) : ''}
     ${sfBtn('soft', 'plus', 'Assign Extra Fee', `openExtraFeeAssignModal('${s.id}')`)}` : '';
 
   body.innerHTML = `

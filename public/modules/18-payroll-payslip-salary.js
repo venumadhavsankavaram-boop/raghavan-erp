@@ -506,7 +506,8 @@ function salaryDisbursementData(monthStr){
   // inflow + the refund outflow together net to the correct real effect
   // (zero for a full refund, the retained amount for a partial one) instead
   // of the payment vanishing and only the outflow being recorded.
-  function pBookedInLedger(p){ return !p.voided || p.voidType === 'refund'; }
+  // A payment made from the student's account credit moves no new money (the cash came in with the original payment), so it is never booked again.
+  function pBookedInLedger(p){ return (!p.voided || p.voidType === 'refund') && p.mode !== 'Account Credit'; }
   function acctFeeIncomeTotal(){
     return payments.filter(pBookedInLedger).reduce((sum,p) => sum + (Number(p.amount)||0), 0);
   }
