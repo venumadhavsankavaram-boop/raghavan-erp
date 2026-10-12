@@ -898,8 +898,9 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     let voucherNo;
     try{ voucherNo = await issueDocNumber('journal_voucher'); }
     catch(e){ showToast("Could not get a voucher number from the server (" + e.message + ") — not saved. Try again once you're back online."); return; }
-    acctJournalVouchers.push({ id:'jv_'+Date.now(), voucherNo, date, type, narration, lines, createdBy:currentUser.name, voided:false });
-    await storageSet(ACCT_JOURNAL_KEY, acctJournalVouchers);
+    const jvRec = { id:'jv_'+Date.now(), voucherNo, date, type, narration, lines, createdBy:currentUser.name, voided:false };
+    acctJournalVouchers.push(jvRec);
+    if(!(await acctSaveVoucherSafely(ACCT_JOURNAL_KEY, acctJournalVouchers, jvRec))){ renderAcctJournalTab(document.getElementById('accountingBody')); return; }
     jvDraftLines = [];
     renderDashboard();
     showToast('Journal Voucher ' + voucherNo + ' saved.');

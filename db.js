@@ -226,7 +226,27 @@ export async function createIndexIfMissing(indexName, table, columnsExpr) {
   try {
     await pool.query(`CREATE INDEX ${indexName} ON ${table} (${columnsExpr})`);
   } catch (err) {
-    if (err.code !== 'ER_DUP_KEYNAME') throw err;
+    if (err.code === 'ER_DUP_KEYNAME') return;
+    // Older live databases hold some columns as TEXT/BLOB, which MySQL cannot
+    // index without a prefix length. Retry once with a prefix on those columns
+    // only, so one legacy column type can never abort the whole start-up.
+    if (err.code === 'ER_BLOB_KEY_WITHOUT_LENGTH') {
+      const cols = String(columnsExpr).split(',').map(c => c.trim()).filter(Boolean);
+      const [rows] = await pool.query(
+        `SELECT COLUMN_NAME AS name, DATA_TYPE AS dt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+        [table]
+      );
+      const types = {};
+      (rows || []).forEach(r => { types[String(r.name).toLowerCase()] = String(r.dt).toLowerCase(); });
+      const expr = cols.map(c => /text|blob/.test(types[c.toLowerCase()] || '') ? `${c}(191)` : c).join(', ');
+      try {
+        await pool.query(`CREATE INDEX ${indexName} ON ${table} (${expr})`);
+      } catch (err2) {
+        if (err2.code !== 'ER_DUP_KEYNAME') throw err2;
+      }
+      return;
+    }
+    throw err;
   }
 }
 

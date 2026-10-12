@@ -82,7 +82,7 @@ function openPaymentModal(presetStudentId){
       classAtPayment: student.className,
     };
     payments.push(record);
-    await storageSet(PAYMENTS_KEY, payments);
+    if(!(await saveReceiptsSafely([record], 'Receipt ' + record.receiptNo))){ closePaymentModal(); return false; }
     closePaymentModal();
     renderDashboard();
     if(document.getElementById('view-managefee').style.display !== 'none') renderFeeBody();

@@ -1160,6 +1160,7 @@ function currentFinancialYear() {
 const DOC_SERIES_PREFIX = {
   income_voucher: 'RV',   // Receipt Voucher — money coming in, other than a fee payment
   payment_voucher: 'PV',  // Payment Voucher — money going out
+  journal_voucher: 'JV',  // Journal Voucher — Accounting > Journal Vouchers (the screen already asks for this series)
 };
 app.post('/api/next-doc-number', async (req, res) => {
   try {

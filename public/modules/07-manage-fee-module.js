@@ -346,8 +346,8 @@ const FEE_TYPES_KEY = "fee-types";
       payments.push(record);
       lastId = record.id;
     });
-    await storageSet(PAYMENTS_KEY, payments);
-    await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
+    if(!(await saveReceiptsSafely(payments.filter(p => p.receiptNo === sharedReceiptNo && p.studentId === studentId), 'Receipt ' + sharedReceiptNo))) return;
+    if(!(await saveKeySafely(STUDENT_EXTRA_FEES_KEY, studentExtraFees, 'The extra-fee balance'))) warnPartialAndReload('Receipt ' + sharedReceiptNo + ' was saved but the extra-fee balance was not — please check the student\'s Extra Fees.');
     renderDashboard();
     renderFeeBody();
     if(lastId && !payments.some(p => p.id === lastId)) return; // duplicate refused by the server

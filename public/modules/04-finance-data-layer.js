@@ -236,12 +236,15 @@ const SETTINGS_KEY = "finance-settings";
         // Local fallback copy only — see the matching comment in persist().
         try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){}
         usingLocalFallback = false;
+        return true;
       }catch(e){
         if(e.message !== 'SESSION_EXPIRED') showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
         try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e2){}
         if(e.message !== 'SESSION_EXPIRED') usingLocalFallback = true;
+        // false = the server did not get it (callers that must not lose data offer a retry);
+        // a session expiry already signs the person out, so it is not reported as a retryable failure.
+        return e.message === 'SESSION_EXPIRED' ? undefined : false;
       }
-      return;
     }
     if(API_BACKED_KEYS[key]){
       return syncArrayToApi(key, value);

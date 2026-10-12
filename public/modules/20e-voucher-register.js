@@ -40,6 +40,38 @@ async function acctSaveVoucherSafely(key, arr, rec){
   return true;
 }
 
+// Same idea for anything else that must not be lost silently (fee receipts,
+// refund postings, extra-fee balances): keep asking until the server has it.
+// Returns true when saved, false when the person chose to stop.
+async function saveKeySafely(key, arr, what){
+  let ok = await storageSet(key, arr);
+  while(ok === false){
+    const retry = await showConfirmDialog(
+      (what || 'This entry') + ' could NOT be saved to the server — most likely the internet connection dropped. ' +
+      'Check the connection, then press "Retry save".',
+      { title: 'Not saved yet', okText: 'Retry save', cancelText: 'Stop — do not save' });
+    if(!retry) return false;
+    ok = await storageSet(key, arr);
+  }
+  return true;
+}
+// Fee receipts: if the person stops, the unsaved receipts are removed and the
+// page reloads from the server so nothing half-recorded stays on screen. The
+// receipt numbers used stay listed as Missing in the Voucher Register.
+async function saveReceiptsSafely(recs, what){
+  const ok = await saveKeySafely(PAYMENTS_KEY, payments, what);
+  if(ok) return true;
+  (recs || []).forEach(r => { const ix = payments.indexOf(r); if(ix >= 0) payments.splice(ix, 1); });
+  showToast('Receipt was NOT saved. Reloading the latest data — please enter it again.');
+  setTimeout(() => { try{ location.reload(); }catch(e){} }, 1800);
+  return false;
+}
+// Used when the person stops part-way through a multi-step posting.
+function warnPartialAndReload(msg){
+  showToast(msg);
+  setTimeout(() => { try{ location.reload(); }catch(e){} }, 2500);
+}
+
 /* ---------- register ---------- */
 const vrState = { series:'payment_voucher', period:'', order:'desc', view:'all', search:'' };
 const VR_SERIES = [

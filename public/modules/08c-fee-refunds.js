@@ -402,7 +402,7 @@ async function rfProcess(refundId){
   r.processedAt = r.approvedAt; r.voucherNos = voucherNos;
   rfAudit(r, r.requestedBy === currentUser.name ? 'approved (self)' : 'approved', r.method === 'credit' ? 'credited to student account' : 'paid out via ' + RF_METHODS[r.method]);
   _rfCache = null;
-  await storageSet(FEE_REFUNDS_KEY, feeRefunds);
+  if(!(await saveKeySafely(FEE_REFUNDS_KEY, feeRefunds, 'Refund ' + r.refundNo))){ warnPartialAndReload('Refund ' + r.refundNo + ' was NOT saved. Reloading the latest data — please try again.'); return false; }
   // Extra fees keep their own paid counter — roll it back by the refunded amount.
   let extraTouched = false;
   r.lines.forEach(l => {
@@ -432,7 +432,7 @@ async function rfProcess(refundId){
           addedBy: currentUser.name, voided: false,
         });
       });
-      await storageSet(ACCT_EXPENSES_KEY, acctExpenses);
+      if(!(await saveKeySafely(ACCT_EXPENSES_KEY, acctExpenses, 'Refund voucher ' + voucherNos.join(', ')))) throw new Error('refund voucher not saved');
     }
   }catch(e){
     showToast(`Refund ${r.refundNo} was recorded, but a follow-up save failed (${e.message}). Please check Accounting and the student's fee screen.`);
@@ -529,8 +529,8 @@ async function submitApplyCredit(studentId){
     if(total > bal){ showToast(`Only ${fmtMoney(bal)} of credit is available.`); return; }
     const res = recordFamilyPayment(studentId, heads, 'Account Credit', new Date().toISOString().slice(0, 10), 'Applied from account credit');
     if(!res){ showToast('Nothing was applied.'); return; }
-    await storageSet(PAYMENTS_KEY, payments);
-    await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
+    if(!(await saveReceiptsSafely(Array.isArray(res) ? res : (res && res.records) || [], 'The credit receipt'))){ rfCloseModal(); return; }
+    if(!(await saveKeySafely(STUDENT_EXTRA_FEES_KEY, studentExtraFees, 'The extra-fee balances'))) warnPartialAndReload('Credit applied but the extra-fee balances were not saved — please check the Extra Fees.');
     rfCloseModal();
     refreshAfterRefund();
     showToast(`${fmtMoney(total)} of account credit applied for ${rfStudentName(studentId)}.`, 'burst');

@@ -67,7 +67,7 @@ let refundPaymentId = null;
         await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
       }
     }
-    await storageSet(PAYMENTS_KEY, payments);
+    if(!(await saveKeySafely(PAYMENTS_KEY, payments, 'The refund (original receipt marked refunded)'))){ warnPartialAndReload('Refund NOT saved. Reloading the latest data — please try again.'); return; }
     // 2. Post a real Expense Voucher so Accounting shows the cash/bank
     // outflow — auto-creating the "Fee Refund" category the first time.
     if(!acctExpenseCategories.includes(FEE_REFUND_CATEGORY)){
@@ -82,7 +82,11 @@ let refundPaymentId = null;
       description: `Fee refund — ${feeLabelFor(p)} originally paid ${p.date||''} (receipt ${p.receiptNo||'—'}). ${reason}`,
       addedBy: currentUser.name, voided: false,
     });
-    await storageSet(ACCT_EXPENSES_KEY, acctExpenses);
+    if(!(await saveKeySafely(ACCT_EXPENSES_KEY, acctExpenses, 'Refund voucher ' + voucherNo))){
+      closeRefundPaymentModal();
+      warnPartialAndReload('Refund voucher ' + voucherNo + ' was NOT saved, but the original receipt is already marked refunded. Please re-enter the voucher from Accounting > Expenses.');
+      return;
+    }
     closeRefundPaymentModal();
     renderDashboard();
     renderFeeBody();
@@ -345,13 +349,14 @@ let refundPaymentId = null;
     const details = (typeof ffReadDetails === 'function') ? ffReadDetails(mode, date) : { ok:true, data:{} };
     if(!details.ok) return;
     const results = [];
+    const _famBefore = payments.length;
     studentIds.forEach(sid => {
       const res = recordFamilyPayment(sid, byStudent[sid], mode, date, note, details.data);
       if(res) results.push(res);
     });
     if(!results.length){ showToast('Nothing was recorded — check the amounts entered.'); return; }
-    await storageSet(PAYMENTS_KEY, payments);
-    await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
+    if(!(await saveReceiptsSafely(payments.slice(_famBefore), 'The family receipts'))){ closeFamilyFeeModal(); return; }
+    if(!(await saveKeySafely(STUDENT_EXTRA_FEES_KEY, studentExtraFees, 'The extra-fee balances'))) warnPartialAndReload('Receipts were saved but the extra-fee balances were not — please check the Extra Fees.');
     closeFamilyFeeModal();
     renderDashboard();
     renderFeeBody();
