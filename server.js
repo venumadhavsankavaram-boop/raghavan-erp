@@ -1218,6 +1218,13 @@ app.get('/api/voucher-gaps', async (req, res) => {
     // Known periods for this series, newest first — feeds the period picker.
     const periodsRows = await sql.query('SELECT DISTINCT period FROM doc_counters WHERE series = $1 ORDER BY period DESC', [series]);
     const periods = periodsRows.map(r => r.period);
+    // Fee receipts saved without the server counter (imported or demo data) still deserve a view: also offer every
+    // receipt prefix found on saved payments, e.g. "REHS-26-" from "REHS-26-000041".
+    if (src.kind === 'receipt') {
+      const pre = await sql.query(`SELECT DISTINCT LEFT(${src.col}, CHAR_LENGTH(${src.col}) - LOCATE('-', REVERSE(${src.col})) + 1) AS p FROM ${src.table} WHERE ${src.col} LIKE '%-%'`);
+      pre.forEach(r => { if (r.p && validRegisterPeriod(src, r.p) && !periods.includes(r.p)) periods.push(r.p); });
+      periods.sort().reverse();
+    }
     let period = String(req.query.period || '');
     if (!validRegisterPeriod(src, period)) period = src.kind === 'voucher' ? currentFinancialYear() : (periods[0] || '');
     if (!period) return res.status(200).json({ series, label: src.label, kind: src.kind, prefix: src.prefix, period: '', periods: [], from: 1, issuedUpTo: 0, savedCount: 0, missingCount: 0, unexplainedCount: 0, missing: [] });
