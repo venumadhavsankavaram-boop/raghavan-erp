@@ -16,6 +16,7 @@ const acxEl = () => document.getElementById('accountingBody');
 const acxOpen = {};                         // which "+ Record" panels are open
 const acxVStatus = { income:'all', expense:'all' };
 const acxVCat = { income:'', expense:'' };
+const acxVOrder = { income:'numDesc', expense:'numDesc' }; // numDesc | numAsc | dateDesc | dateAsc
 const acxModes = ['Cash','Bank Transfer','UPI','Cheque','Card','Online'];
 
 function acxToggle(id){
@@ -186,8 +187,17 @@ function acxVMatches(kind){
     if(st === 'voided' && !v.voided) return false;
     if(cat && v.category !== cat) return false;
     return !q || (v.party||'').toLowerCase().includes(q) || (v.category||'').toLowerCase().includes(q) || (v.referenceNo||'').toLowerCase().includes(q) || (v.voucherNo||'').toLowerCase().includes(q);
-  }).sort((a,b) => (b.date||'').localeCompare(a.date||''));
+  }).sort((a,b) => {
+    const o = acxVOrder[kind];
+    const num = (a.voucherNo||'').localeCompare((b.voucherNo||''), undefined, { numeric:true });
+    const dt = (a.date||'').localeCompare(b.date||'');
+    if(o === 'numAsc') return num;
+    if(o === 'dateDesc') return -dt || -num;
+    if(o === 'dateAsc') return dt || num;
+    return -num; // numDesc (default): highest voucher number first
+  });
 }
+function acxVOrderSet(kind, v){ acxVOrder[kind] = v; acxRepaintVouchers(kind); }
 function acxVoucherRowsHtml(kind){
   const inc = kind === 'income';
   const perm = inc ? 'accounting_income' : 'accounting_expenses';
@@ -276,6 +286,7 @@ function acxVoucherTab(kind, body){
       <div class="sf-segments" id="acxVSeg" role="group" aria-label="Status">
         ${[['all','All'],['active','Active'],['voided','Voided']].map(([v, l]) => `<button type="button" data-v="${v}" class="${acxVStatus[kind] === v ? 'active' : ''}" onclick="acxVFilter('${kind}','status','${v}')">${l}</button>`).join('')}
       </div>
+      <select class="input" onchange="acxVOrderSet('${kind}',this.value)" aria-label="Order" title="Order of vouchers">${[['numDesc','Newest number first ↓'],['numAsc','Oldest number first ↑'],['dateDesc','Date: newest first'],['dateAsc','Date: oldest first']].map(([v,l]) => `<option value="${v}" ${acxVOrder[kind] === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <select class="input" onchange="acxVFilter('${kind}','cat',this.value)" aria-label="Category"><option value="">All categories</option>${cats.map(c => `<option ${acxVCat[kind] === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}</select>
       <div class="iv-toolbar-actions">${canCreate ? acxToggleBtn(kind === 'income' ? 'inc' : 'exp', inc ? '＋ Record income' : '＋ Record expense') : ''}</div>
     </div>
@@ -630,3 +641,5 @@ function renderAcctBudgetTab(body){
       </tbody></table></div>
     </section>`;
 }
+
+

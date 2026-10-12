@@ -189,6 +189,12 @@ async function fpChequeSet(receiptNo, studentId, status){
    ===================================================================================== */
 let rpTab = 'daybook';
 let rpFrom = '', rpTo = '', rpModeF = 'all', rpCashierF = 'all', rpGroup = 'head', rpChequeF = 'open';
+let rpOrder = 'asc'; // Day Book receipt order: 'asc' = oldest receipt first (as before), 'desc' = newest receipt first
+// Receipt numbers compared as numbers-in-text (000099 < 000100), flipped for newest-first.
+function fpReceiptOrder(a, b){
+  const c = String(a.receiptNo || '').localeCompare(String(b.receiptNo || ''), undefined, { numeric: true });
+  return rpOrder === 'desc' ? -c : c;
+}
 
 function fpBooked(p){ return pBookedInLedger(p) && p.mode !== 'Account Credit'; }
 function fpRefundsOut(from, to){
@@ -239,7 +245,7 @@ function fpPaintDayBook(host){
   const refundsPaid = outs.reduce((s, r) => s + (Number(r.total) || 0), 0);
   const cashRefunds = outs.filter(r => r.method === 'Cash').reduce((s, r) => s + (Number(r.total) || 0), 0);
   const total = sum(booked);
-  const groups = fpGroupReceipts(list).sort((a, b) => String(a.receiptNo).localeCompare(String(b.receiptNo)));
+  const groups = fpGroupReceipts(list).sort(fpReceiptOrder);
   const single = rpFrom === rpTo;
   const cashIn = byMode['Cash'] || 0;
   const expectedCash = cashIn - cashRefunds;
@@ -272,6 +278,7 @@ function fpPaintDayBook(host){
   host.innerHTML = fpRangeBar(`
       <select class="input" onchange="rpModeF=this.value;renderReportsTab(document.getElementById('feeBody'))">${modeOpts.map(m => `<option value="${m}" ${rpModeF === m ? 'selected' : ''}>${m === 'all' ? 'All modes' : m}</option>`).join('')}</select>
       <select class="input" onchange="rpCashierF=this.value;renderReportsTab(document.getElementById('feeBody'))"><option value="all">All cashiers</option>${cashiers.map(c => `<option value="${fpEsc(c)}" ${rpCashierF === c ? 'selected' : ''}>${fpEsc(c)}</option>`).join('')}</select>
+      <select class="input" aria-label="Receipt order" title="Order of receipts" onchange="rpOrder=this.value;renderReportsTab(document.getElementById('feeBody'))"><option value="asc" ${rpOrder === 'asc' ? 'selected' : ''}>Oldest receipt first ↑</option><option value="desc" ${rpOrder === 'desc' ? 'selected' : ''}>Newest receipt first ↓</option></select>
       <div class="iv-toolbar-actions">${fpCan('print') ? sfBtn('soft', 'down', 'Excel', 'fpExportDayBook(false)') + sfBtn('soft', 'down', 'PDF', 'fpExportDayBook(true)') : ''}</div>`) + `
     <section class="sf-kpis">
       ${sfKpi('Collected', fmtMoney(total), 'good', groups.filter(g => !g.recs.every(r => r.voided)).length + ' receipt(s)')}
@@ -310,7 +317,7 @@ async function fpReopenDay(date){
   renderReportsTab(document.getElementById('feeBody'));
 }
 function fpDayBookRows(){
-  return fpGroupReceipts(fpDayBookData()).sort((a, b) => String(a.receiptNo).localeCompare(String(b.receiptNo))).map(g => ({
+  return fpGroupReceipts(fpDayBookData()).sort(fpReceiptOrder).map(g => ({
     'Receipt No': g.receiptNo, 'Date': g.date, 'Student': g.studentName || '', 'Class': fpStudentClass(g.studentId),
     'Fee Heads': g.recs.map(r => feeLabelFor(r)).join(', '), 'Mode': g.mode || '', 'Reference': fpRefDetail(g.recs[0]),
     'Collected By': g.collectedBy || '', 'Amount': g.recs.reduce((s, r) => s + (Number(r.amount) || 0), 0),

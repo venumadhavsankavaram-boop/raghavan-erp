@@ -504,10 +504,13 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     const dcBtn = document.getElementById('acttab-dailycollections');
     const isAdminUser = currentUser.role === 'Admin';
     if(dcBtn) dcBtn.style.display = isAdminUser ? '' : 'none';
-    if(accountingTab === 'dailycollections' && !isAdminUser){
+    // Voucher Register: Admin-only as well (it reads server-side issue logs).
+    const vrBtn = document.getElementById('acttab-voucherregister');
+    if(vrBtn) vrBtn.style.display = isAdminUser ? '' : 'none';
+    if((accountingTab === 'dailycollections' || accountingTab === 'voucherregister') && !isAdminUser){
       accountingTab = accessibleTabs[0] || 'overview';
     }
-    if(!accessibleTabs.includes(accountingTab) && accountingTab !== 'dailycollections'){
+    if(!accessibleTabs.includes(accountingTab) && accountingTab !== 'dailycollections' && accountingTab !== 'voucherregister'){
       accountingTab = accessibleTabs[0] || 'overview';
     }
     switchAccountingTab(accountingTab);
@@ -539,6 +542,8 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     ACCT_TABS.forEach(t => document.getElementById('acttab-'+t).classList.toggle('active', t===tab));
     const dcBtn = document.getElementById('acttab-dailycollections');
     if(dcBtn) dcBtn.classList.toggle('active', tab==='dailycollections');
+    const vrTabBtn = document.getElementById('acttab-voucherregister');
+    if(vrTabBtn) vrTabBtn.classList.toggle('active', tab==='voucherregister');
     renderAccountingBody();
   }
   async function renderAccountingBody(){
@@ -556,6 +561,13 @@ const COMMS_MESSAGES_KEY = "comms-messages";
       }
       await ensureDataLoaded('inventorySales', loadInventory);
       return renderAcctDailyCollectionsTab(body);
+    }
+    if(accountingTab === 'voucherregister'){
+      if(currentUser.role !== 'Admin'){
+        body.innerHTML = `<div class="empty-state"><b>You don't have access to this section.</b></div>`;
+        return;
+      }
+      return renderAcctVoucherRegisterTab(body);
     }
     if(!getAccountingTabAccess(currentUser.role, ACCT_TAB_PERM_KEYS[accountingTab])){
       body.innerHTML = `<div class="empty-state"><b>You don't have access to this section.</b></div>`;
@@ -627,7 +639,7 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     }
     const incRec = { id:'inc_'+Date.now(), voucherNo, date, category, costCenter, amount, party, mode, referenceNo, bankAccountId, description, addedBy:currentUser.name, voided:false };
     acctIncome.push(incRec);
-    await storageSet(ACCT_INCOME_KEY, acctIncome);
+    if(!(await acctSaveVoucherSafely(ACCT_INCOME_KEY, acctIncome, incRec))){ renderAcctIncomeTab(document.getElementById('accountingBody')); return; }
     renderDashboard();
     renderAcctIncomeTab(document.getElementById('accountingBody'));
     if(!acctIncome.includes(incRec)) return; // duplicate refused by the server
@@ -666,7 +678,7 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     }
     const expRec = { id:'exp_'+Date.now(), voucherNo, date, category, costCenter, amount, party, mode, referenceNo, bankAccountId, description, addedBy:currentUser.name, voided:false };
     acctExpenses.push(expRec);
-    await storageSet(ACCT_EXPENSES_KEY, acctExpenses);
+    if(!(await acctSaveVoucherSafely(ACCT_EXPENSES_KEY, acctExpenses, expRec))){ renderAcctExpenseTab(document.getElementById('accountingBody')); return; }
     renderDashboard();
     renderAcctExpenseTab(document.getElementById('accountingBody'));
     if(!acctExpenses.includes(expRec)) return; // duplicate refused by the server

@@ -446,6 +446,23 @@ async function ensureSchema() {
     series VARCHAR(191) NOT NULL, period VARCHAR(191) NOT NULL, next_seq INT NOT NULL DEFAULT 1,
     PRIMARY KEY (series, period)
   )`;
+  // Who asked for each voucher number, and when — so an Admin looking at a
+  // gap in the sequence (e.g. PV/26-27/000118 never saved) can see which
+  // user's screen it was issued to. Best-effort: a failure to write this log
+  // never blocks issuing a number.
+  await sql`CREATE TABLE IF NOT EXISTS doc_number_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY, series VARCHAR(191) NOT NULL, period VARCHAR(191) NOT NULL, seq INT NOT NULL,
+    doc_number VARCHAR(191), issued_by TEXT, issued_role TEXT, issued_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_doc_number_log_lookup (series, period, seq)
+  )`;
+  // An Admin's explanation for a number that was issued but has no voucher
+  // behind it ("page closed before saving", "duplicate blocked", ...). The
+  // gap stays listed — the note is the audit trail that accounts for it.
+  await sql`CREATE TABLE IF NOT EXISTS doc_gap_notes (
+    series VARCHAR(191) NOT NULL, period VARCHAR(191) NOT NULL, seq INT NOT NULL,
+    reason TEXT, noted_by TEXT, noted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (series, period, seq)
+  )`;
   // Accounting: Income (Receipt) and Payment vouchers. These used to live as
   // a single JSON blob per school in kv_store (acct-income / acct-expenses)
   // — every save round-tripped the ENTIRE list, so two staff saving around
@@ -1147,10 +1164,116 @@ app.post('/api/next-doc-number', async (req, res) => {
     // the guarantee kv_store's whole-blob PUT couldn't give.
     const seq = await nextDocSeq(series, period);
     const docNumber = `${prefix}/${period}/${String(seq).padStart(6, '0')}`;
+    // Remember who this number went to (best-effort — see doc_number_log).
+    try {
+      await sql.query('INSERT INTO doc_number_log (series, period, seq, doc_number, issued_by, issued_role) VALUES ($1, $2, $3, $4, $5, $6)',
+        [series, period, seq, docNumber, (req.authUser && req.authUser.name) || '', (req.authUser && req.authUser.role) || '']);
+    } catch (logErr) { console.error('doc_number_log write failed (number still issued):', logErr.message); }
     return res.status(200).json({ docNumber });
   } catch (err) {
     console.error('next-doc-number error:', err);
     return res.status(500).json({ error: 'Could not issue a document number.' });
+  }
+});
+
+// ---------- Voucher & receipt register (Admin) ----------
+// A document number is issued by the server the moment Save is pressed, and the
+// document itself is stored a moment later. If anything goes wrong in between
+// (connection drop, duplicate-entry guard, page closed) the number is used up
+// with no document behind it — a gap such as PV/26-27/000118. The register
+// lists every such gap per series + period so the Admin can account for it.
+//   period = financial year ("26-27") for vouchers, the receipt prefix ("SPS-26-") for fee receipts.
+const REGISTER_SERIES = {
+  payment_voucher: { prefix: 'PV', table: 'acct_expenses', col: 'voucher_no', label: 'Payment Vouchers', kind: 'voucher' },
+  income_voucher:  { prefix: 'RV', table: 'acct_income',   col: 'voucher_no', label: 'Receipt Vouchers', kind: 'voucher' },
+  fee_receipt:     { prefix: '',   table: 'payments',      col: 'receipt_no', label: 'Fee Receipts',     kind: 'receipt' },
+};
+function registerNumber(src, period, n) {
+  return src.kind === 'voucher'
+    ? `${src.prefix}/${period}/${String(n).padStart(6, '0')}`
+    : period + String(n).padStart(6, '0');
+}
+function validRegisterPeriod(src, period) {
+  return src.kind === 'voucher' ? /^\d{2}-\d{2}$/.test(period) : /^[A-Za-z0-9-]{2,20}$/.test(period);
+}
+app.get('/api/voucher-gaps', async (req, res) => {
+  try {
+    if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can view the voucher register.' });
+    const series = String(req.query.series || 'payment_voucher');
+    const src = REGISTER_SERIES[series];
+    if (!src) return res.status(400).json({ error: 'Unknown series.' });
+    // Known periods for this series, newest first — feeds the period picker.
+    const periodsRows = await sql.query('SELECT DISTINCT period FROM doc_counters WHERE series = $1 ORDER BY period DESC', [series]);
+    const periods = periodsRows.map(r => r.period);
+    let period = String(req.query.period || '');
+    if (!validRegisterPeriod(src, period)) period = src.kind === 'voucher' ? currentFinancialYear() : (periods[0] || '');
+    if (!period) return res.status(200).json({ series, label: src.label, kind: src.kind, prefix: src.prefix, period: '', periods: [], from: 1, issuedUpTo: 0, savedCount: 0, missingCount: 0, unexplainedCount: 0, missing: [] });
+    if (!periods.includes(period)) periods.unshift(period);
+    const counter = await sql.query('SELECT next_seq FROM doc_counters WHERE series = $1 AND period = $2', [series, period]);
+    // Vouchers: next_seq holds the LAST number issued. Fee receipts: next_seq holds the NEXT number to issue.
+    const rawSeq = counter.length ? Number(counter[0].next_seq) || 0 : 0;
+    const issuedUpTo = src.kind === 'receipt' ? Math.max(0, rawSeq - 1) : rawSeq;
+    // Voided / refunded documents keep their number, so they count as "present".
+    const likeStr = src.kind === 'voucher' ? `${src.prefix}/${period}/%` : period + '%';
+    const rows = await sql.query(`SELECT DISTINCT ${src.col} AS no FROM ${src.table} WHERE ${src.col} LIKE $1`, [likeStr]);
+    const saved = new Set();
+    let maxSaved = 0;
+    const tail = src.kind === 'voucher'
+      ? new RegExp('^' + src.prefix + '/' + period + '/(\\d+)$')
+      : new RegExp('^' + period.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(\\d+)$');
+    rows.forEach(r => {
+      const m = tail.exec(String(r.no || ''));
+      if (m) { const n = parseInt(m[1], 10); saved.add(n); if (n > maxSaved) maxSaved = n; }
+    });
+    const top = Math.max(issuedUpTo, maxSaved);
+    // Vouchers restart at 1 each financial year. Fee receipts may have started above 1 (old receipts predate the
+    // server counter), so only numbers from the lowest receipt on record upwards can be judged "missing".
+    let from = 1;
+    if (src.kind === 'receipt' && saved.size) { from = Infinity; saved.forEach(n => { if (n < from) from = n; }); }
+    const logRows = await sql.query('SELECT seq, issued_by, issued_role, issued_at FROM doc_number_log WHERE series = $1 AND period = $2', [series, period]);
+    const logBySeq = new Map(logRows.map(r => [Number(r.seq), r]));
+    const noteRows = await sql.query('SELECT seq, reason, noted_by, noted_at FROM doc_gap_notes WHERE series = $1 AND period = $2', [series, period]);
+    const noteBySeq = new Map(noteRows.map(r => [Number(r.seq), r]));
+    const missing = [];
+    for (let n = from; n <= top; n++) {
+      if (saved.has(n)) continue;
+      const lg = logBySeq.get(n), nt = noteBySeq.get(n);
+      missing.push({
+        seq: n, docNumber: registerNumber(src, period, n),
+        issuedTo: lg ? (lg.issued_by || '') : null, issuedRole: lg ? (lg.issued_role || '') : null, issuedAt: lg ? lg.issued_at : null,
+        note: nt ? { reason: nt.reason || '', notedBy: nt.noted_by || '', notedAt: nt.noted_at } : null,
+      });
+    }
+    return res.status(200).json({
+      series, label: src.label, kind: src.kind, prefix: src.prefix, period, periods,
+      from, issuedUpTo: top, savedCount: saved.size, missingCount: missing.length,
+      unexplainedCount: missing.filter(m => !m.note).length, missing,
+    });
+  } catch (err) {
+    console.error('voucher-gaps error:', err);
+    return res.status(500).json({ error: 'Could not check the voucher register.' });
+  }
+});
+app.post('/api/voucher-gaps/note', async (req, res) => {
+  try {
+    if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can annotate missing numbers.' });
+    const b = req.body || {};
+    const src = REGISTER_SERIES[String(b.series || '')];
+    if (!src) return res.status(400).json({ error: 'Unknown series.' });
+    const period = String(b.period || '');
+    const seq = parseInt(b.seq, 10);
+    const reason = String(b.reason || '').trim().slice(0, 500);
+    if (!validRegisterPeriod(src, period) || !(seq >= 1)) return res.status(400).json({ error: 'Invalid number.' });
+    if (!reason) return res.status(400).json({ error: 'Please type a reason.' });
+    await sql.query(
+      `INSERT INTO doc_gap_notes (series, period, seq, reason, noted_by) VALUES ($1, $2, $3, $4, $5)
+       ON DUPLICATE KEY UPDATE reason = VALUES(reason), noted_by = VALUES(noted_by), noted_at = CURRENT_TIMESTAMP`,
+      [b.series, period, seq, reason, req.authUser.name || '']);
+    await sql`INSERT INTO audit_log (actor_name, actor_role, method, resource, record_id) VALUES (${req.authUser.name}, ${req.authUser.role}, 'NOTE', 'voucher_gap', ${registerNumber(src, period, seq)})`.catch(() => {});
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('voucher-gaps note error:', err);
+    return res.status(500).json({ error: 'Could not save the note.' });
   }
 });
 
@@ -1182,6 +1305,13 @@ app.post('/api/receipt-numbers', async (req, res) => {
     }
     const first = await reserveDocSeqRange('fee_receipt', prefix, count, minNext);
     const numbers = Array.from({ length: count }, (_, i) => prefix + String(first + i).padStart(6, '0'));
+    // Remember who these numbers went to (best-effort — see doc_number_log).
+    try {
+      for (let i = 0; i < count; i++) {
+        await sql.query('INSERT INTO doc_number_log (series, period, seq, doc_number, issued_by, issued_role) VALUES ($1, $2, $3, $4, $5, $6)',
+          ['fee_receipt', prefix, first + i, numbers[i], req.authUser.name || '', req.authUser.role || '']);
+      }
+    } catch (logErr) { console.error('doc_number_log write failed (numbers still issued):', logErr.message); }
     return res.status(200).json({ numbers });
   } catch (err) {
     console.error('receipt-numbers error:', err);
