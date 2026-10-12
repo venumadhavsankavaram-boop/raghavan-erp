@@ -446,23 +446,9 @@ async function ensureSchema() {
     series VARCHAR(191) NOT NULL, period VARCHAR(191) NOT NULL, next_seq INT NOT NULL DEFAULT 1,
     PRIMARY KEY (series, period)
   )`;
-  // Who asked for each voucher number, and when — so an Admin looking at a
-  // gap in the sequence (e.g. PV/26-27/000118 never saved) can see which
-  // user's screen it was issued to. Best-effort: a failure to write this log
-  // never blocks issuing a number.
-  await sql`CREATE TABLE IF NOT EXISTS doc_number_log (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY, series VARCHAR(191) NOT NULL, period VARCHAR(191) NOT NULL, seq INT NOT NULL,
-    doc_number VARCHAR(191), issued_by TEXT, issued_role TEXT, issued_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_doc_number_log_lookup (series, period, seq)
-  )`;
-  // An Admin's explanation for a number that was issued but has no voucher
-  // behind it ("page closed before saving", "duplicate blocked", ...). The
-  // gap stays listed — the note is the audit trail that accounts for it.
-  await sql`CREATE TABLE IF NOT EXISTS doc_gap_notes (
-    series VARCHAR(191) NOT NULL, period VARCHAR(191) NOT NULL, seq INT NOT NULL,
-    reason TEXT, noted_by TEXT, noted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (series, period, seq)
-  )`;
+  // doc_number_log / doc_gap_notes (voucher register) are created by ensureRegisterTables() below —
+  // on boot here AND again on first use, so the register works even if a boot step above fails.
+  await ensureRegisterTables().catch(err => console.error('register tables:', err.message));
   // Accounting: Income (Receipt) and Payment vouchers. These used to live as
   // a single JSON blob per school in kv_store (acct-income / acct-expenses)
   // — every save round-tripped the ENTIRE list, so two staff saving around
@@ -1134,6 +1120,30 @@ app.all('/api/kv/:key', async (req, res) => {
   }
 });
 
+// ---------- Voucher register tables ----------
+// doc_number_log: who asked for each voucher/receipt number, and when — so an Admin looking at a gap
+// (e.g. PV/26-27/000118 never saved) can see whose screen it was issued to. Best-effort: never blocks issuing.
+// doc_gap_notes: the Admin's explanation for a number issued with no document behind it.
+// Short VARCHARs keep the composite key small on any MySQL row format.
+var _registerTablesReady = null;
+function ensureRegisterTables() {
+  if (!_registerTablesReady) {
+    _registerTablesReady = (async () => {
+      await sql`CREATE TABLE IF NOT EXISTS doc_number_log (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY, series VARCHAR(40) NOT NULL, period VARCHAR(40) NOT NULL, seq INT NOT NULL,
+        doc_number VARCHAR(191), issued_by TEXT, issued_role TEXT, issued_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_doc_number_log_lookup (series, period, seq)
+      )`;
+      await sql`CREATE TABLE IF NOT EXISTS doc_gap_notes (
+        series VARCHAR(40) NOT NULL, period VARCHAR(40) NOT NULL, seq INT NOT NULL,
+        reason TEXT, noted_by TEXT, noted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (series, period, seq)
+      )`;
+    })().catch(err => { _registerTablesReady = null; throw err; });
+  }
+  return _registerTablesReady;
+}
+
 // ---------- Document numbering (Income/Payment vouchers, and any future series) ----------
 // Indian schools run their financial year April -> March; a receipt/payment
 // voucher series conventionally restarts at 1 each financial year rather
@@ -1166,6 +1176,7 @@ app.post('/api/next-doc-number', async (req, res) => {
     const docNumber = `${prefix}/${period}/${String(seq).padStart(6, '0')}`;
     // Remember who this number went to (best-effort — see doc_number_log).
     try {
+      await ensureRegisterTables();
       await sql.query('INSERT INTO doc_number_log (series, period, seq, doc_number, issued_by, issued_role) VALUES ($1, $2, $3, $4, $5, $6)',
         [series, period, seq, docNumber, (req.authUser && req.authUser.name) || '', (req.authUser && req.authUser.role) || '']);
     } catch (logErr) { console.error('doc_number_log write failed (number still issued):', logErr.message); }
@@ -1202,6 +1213,7 @@ app.get('/api/voucher-gaps', async (req, res) => {
     const series = String(req.query.series || 'payment_voucher');
     const src = REGISTER_SERIES[series];
     if (!src) return res.status(400).json({ error: 'Unknown series.' });
+    await ensureRegisterTables();
     // Known periods for this series, newest first — feeds the period picker.
     const periodsRows = await sql.query('SELECT DISTINCT period FROM doc_counters WHERE series = $1 ORDER BY period DESC', [series]);
     const periods = periodsRows.map(r => r.period);
@@ -1265,6 +1277,7 @@ app.post('/api/voucher-gaps/note', async (req, res) => {
     const reason = String(b.reason || '').trim().slice(0, 500);
     if (!validRegisterPeriod(src, period) || !(seq >= 1)) return res.status(400).json({ error: 'Invalid number.' });
     if (!reason) return res.status(400).json({ error: 'Please type a reason.' });
+    await ensureRegisterTables();
     await sql.query(
       `INSERT INTO doc_gap_notes (series, period, seq, reason, noted_by) VALUES ($1, $2, $3, $4, $5)
        ON DUPLICATE KEY UPDATE reason = VALUES(reason), noted_by = VALUES(noted_by), noted_at = CURRENT_TIMESTAMP`,
@@ -1307,6 +1320,7 @@ app.post('/api/receipt-numbers', async (req, res) => {
     const numbers = Array.from({ length: count }, (_, i) => prefix + String(first + i).padStart(6, '0'));
     // Remember who these numbers went to (best-effort — see doc_number_log).
     try {
+      await ensureRegisterTables();
       for (let i = 0; i < count; i++) {
         await sql.query('INSERT INTO doc_number_log (series, period, seq, doc_number, issued_by, issued_role) VALUES ($1, $2, $3, $4, $5, $6)',
           ['fee_receipt', prefix, first + i, numbers[i], req.authUser.name || '', req.authUser.role || '']);
