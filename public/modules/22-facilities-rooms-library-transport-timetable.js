@@ -752,6 +752,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     const grandTotal = invCart.reduce((sum,c) => sum+c.price*c.qty-c.discount, 0);
     const buyerStudent = invCheckoutBuyerType==='Student' ? students.find(s => s.id===invCheckoutStudentId) : null;
     let remainingPaid = paidAmountInput;
+    const _saleBefore = payments.length;
     invCart.forEach(c => {
       const it = inventoryItems.find(x => x.id === c.itemId);
       const lineTotal = c.price*c.qty - c.discount;
@@ -769,12 +770,14 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       }
       inventorySales.push({ id:'isale_'+Date.now()+'_'+c.itemId, itemId:c.itemId, itemName:c.name, buyerType:invCheckoutBuyerType, studentId:invCheckoutBuyerType==='Student'?invCheckoutStudentId:'', buyerName, qty:c.qty, unitPrice:c.price, unitCost:c.cost, discount:c.discount, totalAmount:lineTotal, totalCost:lineCost, paidAmount:linePaid, mode:invCheckoutPaymentMode, notes, date:today, soldBy:currentUser.name, sefId });
     });
-    await storageSet(INVENTORY_ITEMS_KEY, inventoryItems);
-    await storageSet(INVENTORY_SALES_KEY, inventorySales);
-    if(invCheckoutBuyerType==='Student'){
-      await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
-      await storageSet(PAYMENTS_KEY, payments);
+    // Receipts first: if they cannot be saved and the person stops, nothing else was written and the page reloads clean.
+    if(invCheckoutBuyerType==='Student' && payments.length > _saleBefore){
+      if(!(await saveReceiptsSafely(payments.slice(_saleBefore), 'The inventory receipt'))) return;
     }
+    let _saleOk = await saveKeySafely(INVENTORY_ITEMS_KEY, inventoryItems, 'The stock quantities');
+    _saleOk = _saleOk && await saveKeySafely(INVENTORY_SALES_KEY, inventorySales, 'The sale record');
+    if(_saleOk && invCheckoutBuyerType==='Student') _saleOk = await saveKeySafely(STUDENT_EXTRA_FEES_KEY, studentExtraFees, 'The student\'s extra-fee entry');
+    if(!_saleOk){ warnPartialAndReload('The sale was only partly saved. Reloading the latest data — please check Inventory and the receipt before repeating it.'); return; }
     renderDashboard();
     invCart = [];
     invCheckoutStudentId = '';
@@ -1005,6 +1008,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       }
       if(cashRefunded > 0){
         const st = students.find(x => x.id === s.studentId);
+        window.__retPayBefore = payments.length;
         payments.push({
           id:'pay_refund_'+Date.now()+'_'+s.itemId, receiptNo:nextReceiptNo(), studentId:s.studentId,
           studentName: st ? st.firstName+' '+st.lastName : '', category:'extra', extraFeeName:s.itemName,
@@ -1021,12 +1025,14 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       buyerName:s.buyerName||'', reason, date:today, processedBy:currentUser.name,
     });
 
-    await storageSet(INVENTORY_ITEMS_KEY, inventoryItems);
-    await storageSet(INVENTORY_RETURNS_KEY, inventoryReturns);
-    if(s.buyerType === 'Student'){
-      await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
-      if(cashRefunded > 0) await storageSet(PAYMENTS_KEY, payments);
+    if(s.buyerType === 'Student' && cashRefunded > 0 && window.__retPayBefore != null){
+      const _rb = window.__retPayBefore; window.__retPayBefore = null;
+      if(!(await saveReceiptsSafely(payments.slice(_rb), 'The refund receipt'))) return;
     }
+    let _retOk = await saveKeySafely(INVENTORY_ITEMS_KEY, inventoryItems, 'The stock quantities');
+    _retOk = _retOk && await saveKeySafely(INVENTORY_RETURNS_KEY, inventoryReturns, 'The return record');
+    if(_retOk && s.buyerType === 'Student') _retOk = await saveKeySafely(STUDENT_EXTRA_FEES_KEY, studentExtraFees, 'The extra-fee entry');
+    if(!_retOk){ warnPartialAndReload('The return was only partly saved. Reloading the latest data — please check Inventory before repeating it.'); return; }
     document.getElementById('invReturnModalWrap').innerHTML = '';
     renderDashboard();
     renderInventoryBody();
