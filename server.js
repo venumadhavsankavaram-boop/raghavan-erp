@@ -241,6 +241,8 @@ async function ensureSchema() {
   await addColumnIfMissing('student_extra_fees', 'assessed_by TEXT');
   await addColumnIfMissing('student_extra_fees', 'added_by TEXT');
   await addColumnIfMissing('student_discounts', 'rule_id VARCHAR(191)');
+  await addColumnIfMissing('student_discounts', 'cancelled_by TEXT');
+  await addColumnIfMissing('student_discounts', 'cancelled_date TEXT');
   await sql`CREATE TABLE IF NOT EXISTS attendance_records (
     id VARCHAR(191) PRIMARY KEY, student_id VARCHAR(191), date VARCHAR(32), status TEXT,
     session VARCHAR(20), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -1376,6 +1378,7 @@ const SIMPLE_RESOURCES = {
       { app: 'requestedDate', col: 'requested_date' }, { app: 'approverId', col: 'approver_id' },
       { app: 'approverName', col: 'approver_name' }, { app: 'approvedBy', col: 'approved_by' },
       { app: 'approvedDate', col: 'approved_date' }, { app: 'ruleId', col: 'rule_id' },
+      { app: 'cancelledBy', col: 'cancelled_by' }, { app: 'cancelledDate', col: 'cancelled_date' },
     ],
   },
   'extra-fees': {
@@ -1831,6 +1834,19 @@ async function handleSimple(req, res, config, resourceName) {
         // Idempotent: the same record id arriving twice (retry, double-send) is one record.
         const same = await sql.query(`SELECT id FROM ${table} WHERE id = $1`, [body.id]);
         if (same.length) return res.status(200).json({ ok: true, alreadySaved: true });
+        // One live (Approved/Pending) concession per student per fee head. Checked here,
+        // under a per-student lock, so two admins (or a retry) can never both create one.
+        if (table === 'student_discounts' && body.studentId && body.appliesTo && !['Rejected', 'Cancelled'].includes(body.status)) {
+          const live = await sql.query(
+            `SELECT id FROM student_discounts WHERE student_id = $1 AND applies_to = $2 AND COALESCE(status, '') NOT IN ('Rejected', 'Cancelled') LIMIT 1`,
+            [body.studentId, body.appliesTo]);
+          if (live.length) {
+            return res.status(409).json({
+              error: 'This student already has a discount on this fee head. The extra copy was not saved.',
+              code: 'DUPLICATE', existing: { number: 'a discount on this fee head' },
+            });
+          }
+        }
         if (guard) {
           const dup = await findRecentDuplicate(table, guard, body);
           if (dup) {
@@ -1847,6 +1863,7 @@ async function handleSimple(req, res, config, resourceName) {
       // Serialise writes per student (payments) / per table (vouchers) so two
       // simultaneous identical requests cannot both pass the check.
       if (guard) return withKeyLock(table + ':' + (guard.lockBy ? (body[guard.lockBy] || '') : ''), doInsert);
+      if (table === 'student_discounts') return withKeyLock('student_discounts:' + (body.studentId || ''), doInsert);
       return doInsert();
     } else {
       const setClause = cols.filter(c => c !== 'id').map((c, i) => `${c} = $${i + 2}`).join(', ');

@@ -421,6 +421,15 @@ let refundPaymentId = null;
     return Object.values(groups).sort((a,b) => (b.records[0].requestedDate||'').localeCompare(a.records[0].requestedDate||''));
   }
 
+  // A student can hold only ONE live (Approved or Pending) discount per fee head.
+  // Rejected ones don't count, so a rejected request can be re-created.
+  function discExistingFor(studentId, cat){
+    return studentDiscounts.filter(d => d.studentId === studentId && d.appliesTo === cat && d.status !== 'Rejected' && d.status !== 'Cancelled');
+  }
+  function discExistingAmount(recs){
+    return recs.reduce((sum, d) => sum + (typeof fpDiscountAmount === 'function' ? fpDiscountAmount(d) : (Number(d.value) || 0)), 0);
+  }
+
   function renderDiscountsTab(body){
     if(discView === 'create') return renderDiscCreateForm(body);
     renderDiscListView(body);
@@ -611,14 +620,28 @@ let refundPaymentId = null;
             <table class="disc-fee-table">
               <thead><tr><th>Type</th><th>Total Amount</th><th>Discount Amt</th><th>Discount %</th></tr></thead>
               <tbody>
-              ${cats.map(c => `
+              ${cats.map(c => {
+                const ex = discExistingFor(id, c);
+                if(ex.length){
+                  const amt = discExistingAmount(ex);
+                  const pend = ex.every(d => d.status === 'Pending');
+                  const pct = perCat[c].expected > 0 ? Math.round(amt / perCat[c].expected * 10000) / 100 : 0;
+                  return `
+                <tr class="disc-row-locked">
+                  <td><span class="pill">${CATS[c]}</span></td>
+                  <td>${fmtMoney(perCat[c].expected)}</td>
+                  <td colspan="2"><b>${fmtMoney(amt)}</b> <span style="color:var(--ink-soft);">(${pct}%)</span> ${pend ? pillTone('warning','Pending approval') : pillTone('success','Discount allowed')}
+                    <div style="font-size:0.74rem; color:var(--ink-soft); margin-top:3px;">Already created &mdash; delete it from the Discounts list first if it must change.</div></td>
+                </tr>`;
+                }
+                return `
                 <tr>
                   <td><span class="pill">${CATS[c]}</span></td>
                   <td>${fmtMoney(perCat[c].expected)}</td>
                   <td><input type="number" min="0" max="${perCat[c].expected}" class="disc-amt-input" data-student="${id}" data-cat="${c}" data-total="${perCat[c].expected}" value="0" oninput="onDiscAmtInput(this)"></td>
                   <td><input type="number" min="0" max="100" class="disc-pct-input" data-student="${id}" data-cat="${c}" data-total="${perCat[c].expected}" value="0" oninput="onDiscPctInput(this)"></td>
-                </tr>
-              `).join('')}
+                </tr>`;
+              }).join('')}
               </tbody>
             </table>
             ` : `<div style="font-size:0.82rem; color:var(--ink-soft); padding:6px 0 2px;">No fee items set up yet for ${s.className} — Section ${s.section}.</div>`}
@@ -668,14 +691,26 @@ let refundPaymentId = null;
       .filter(x => x.value > 0);
     if(perStudentAmounts.length === 0){ showToast('Enter a discount amount for at least one fee type.'); return; }
 
+    // One discount per fee head per student. Re-read the saved list first so a
+    // discount another user created a moment ago is also caught.
+    try{ const fresh = await storageGet(STUDENT_DISCOUNTS_KEY, null); if(Array.isArray(fresh)) studentDiscounts = fresh; }catch(e){}
+    const dupes = perStudentAmounts.filter(x => discExistingFor(x.studentId, x.cat).length);
+    if(dupes.length){
+      const names = dupes.map(x => { const st = students.find(y => y.id === x.studentId); return (st ? st.firstName + ' ' + st.lastName : 'Student') + ' – ' + (CATS[x.cat] || x.cat); });
+      showToast('Discount already exists for: ' + names.slice(0,3).join(', ') + (names.length > 3 ? ' +' + (names.length - 3) + ' more' : '') + '. Not created again.');
+      renderDiscStudentFeePanels();
+      return;
+    }
+
     // Admin-recorded discounts are approved immediately — Admin is trusted to
     // self-approve rather than needing a Principal's sign-off. Anyone else
     // still needs the selected approver (Admin or Principal) to sign off.
     const status = isAdminSelfApprove ? 'Approved' : 'Pending';
     const batchId = 'batch_' + Date.now();
 
+    const _ccAdded = [];
     perStudentAmounts.forEach(entry => {
-      studentDiscounts.push({
+      const _rec = {
         id: 'sdisc_' + Date.now() + '_' + entry.studentId + '_' + entry.cat,
         batchId, studentId: entry.studentId, type, appliesTo: entry.cat, mode: 'amount', value: entry.value,
         note, status,
@@ -684,10 +719,17 @@ let refundPaymentId = null;
         approverId: isAdminSelfApprove ? currentUser.id : approver.id,
         approverName: isAdminSelfApprove ? currentUser.name : approver.name,
         ...(status==='Approved' ? { approvedBy: currentUser.name, approvedDate: new Date().toISOString().slice(0,10) } : {}),
-      });
+      };
+      studentDiscounts.push(_rec); _ccAdded.push(_rec);
     });
     const studentsAffected = new Set(perStudentAmounts.map(x => x.studentId)).size;
-    await storageSet(STUDENT_DISCOUNTS_KEY, studentDiscounts);
+    const _saved = await saveKeySafely(STUDENT_DISCOUNTS_KEY, studentDiscounts, 'The discount');
+    if(!_saved){
+      studentDiscounts = studentDiscounts.filter(d => !_ccAdded.includes(d));
+      showToast('Discount was NOT saved. Nothing was changed — please try again.');
+      renderDiscStudentFeePanels();
+      return;
+    }
     renderDashboard();
     showToast(status === 'Approved'
       ? `Discount approved and applied to ${studentsAffected} student(s).`

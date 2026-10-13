@@ -197,7 +197,8 @@ async function cpSaveRules(){ await storageSet(FP_RULES_KEY, fpRules); }
 function cpMatches(rule){
   const out = [];
   const act = students.filter(s => isActive(s));
-  const done = new Set(studentDiscounts.filter(d => d.ruleId === rule.id && d.status !== 'Rejected').map(d => d.studentId));
+  // skip anyone who already holds a live discount on this fee head (one discount per head)
+  const done = new Set(studentDiscounts.filter(d => d.status !== 'Rejected' && d.status !== 'Cancelled' && (d.ruleId === rule.id || d.appliesTo === rule.cat)).map(d => d.studentId));
   if(rule.trigger === 'rte'){
     act.filter(s => s.isRTE && !done.has(s.id)).forEach(s => out.push(s));
   } else {
