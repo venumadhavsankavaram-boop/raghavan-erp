@@ -226,7 +226,13 @@ function urxCatHead(cat, n){
 function renderPermissionEditor(body){
   const roleName = permEditingRoleName;
   const existing = findRoleOverride(roleName);
-  const permissions = existing ? existing.permissions : seedPermissionsFromDefault(roleName);
+  const permissions = Object.assign({}, existing ? existing.permissions : seedPermissionsFromDefault(roleName));
+  // Dashboard sections a saved role has no choice for yet follow that role's Dashboard permission
+  // (that's how they behave in practice), so the editor shows the truth instead of blank boxes.
+  if(typeof DASHBOARD_SUBMODULE_KEYS !== 'undefined'){
+    const dashView = !!(permissions.dashboard && permissions.dashboard.view);
+    DASHBOARD_SUBMODULE_KEYS.forEach(k => { if(!permissions[k]) permissions[k] = Object.fromEntries(PERMISSION_ACTIONS.map(a => [a, a === 'view' && dashView])); });
+  }
   const visibleModules = urxVisibleModules();
   const categories = [...new Set(visibleModules.map(m => m.category))];
   const builtIn = ROLES.includes(roleName);
@@ -257,7 +263,7 @@ function renderPermissionEditor(body){
     </section>
     <div class="iv-toolbar perm-toolbar urx-toolbar">
       <input type="search" class="input iv-search perm-search urx-search" id="permSearchBox" placeholder="Search modules (e.g. fee, attendance, inventory)" aria-label="Search modules" oninput="filterPermRows(this.value)">
-      <div class="iv-toolbar-actions"><button type="button" class="sf-btn sf-btn--soft perm-toolbar-btn" onclick="applyPermPresetToAll('none')">Clear all</button></div>
+      <div class="iv-toolbar-actions"><button type="button" class="sf-btn sf-btn--soft perm-toolbar-btn" onclick="permCollapseAll(true)">▸ Collapse all</button><button type="button" class="sf-btn sf-btn--soft perm-toolbar-btn" onclick="permCollapseAll(false)">▾ Expand all</button><button type="button" class="sf-btn sf-btn--soft perm-toolbar-btn" onclick="applyPermPresetToAll('none')">Clear all</button></div>
     </div>
     ${categories.map(cat => {
       const mods = visibleModules.filter(m => m.category === cat);
@@ -274,18 +280,18 @@ function renderPermissionEditor(body){
                 : Object.fromEntries(PERMISSION_ACTIONS.map(a => [a, false])));
               const full = PERMISSION_ACTIONS.every(a => p[a]);
               const hasChildren = (CHILDREN_OF_PARENT[m.key] || []).length > 0;
-              return `<tr class="${m.parent ? 'perm-row-sub urx-sub' : ''}" data-search="${escapeHtml((m.label + ' ' + cat).toLowerCase())}">
+              return `<tr class="${m.parent ? 'perm-row-sub urx-sub' : ''}" data-key="${escapeHtml(m.key)}" ${m.parent ? `data-parent="${escapeHtml(m.parent)}"` : ''} data-search="${escapeHtml((m.label + ' ' + cat).toLowerCase())}">
                 <td class="urx-mod">
-                  <div class="urx-mod-name">${escapeHtml(m.label)}${m.comingSoon ? ' <span class="pill urx-pill">Coming Soon</span>' : ''}${m.isNew ? ' <span class="perm-new-pill">New</span>' : ''}${hasChildren ? ' <span class="perm-auto-hint">Auto-visible from items below</span>' : ''}</div>
+                  <div class="urx-mod-name">${hasChildren ? `<button type="button" class="perm-sub-toggle" title="Show / hide the items under ${escapeHtml(m.label)}" aria-expanded="true" onclick="permToggleChildren('${urxJs(m.key)}',this)">▾</button>` : ''}${escapeHtml(m.label)}${m.comingSoon ? ' <span class="pill urx-pill">Coming Soon</span>' : ''}${m.isNew ? ' <span class="perm-new-pill">New</span>' : ''}${hasChildren ? ' <span class="perm-auto-hint">Auto-visible from items below</span>' : ''}</div>
                   <div class="perm-preset-row urx-presets">
                     <button type="button" class="perm-preset-btn" onclick="applyPermPreset('${urxJs(m.key)}','none')">None</button>
-                    <button type="button" class="perm-preset-btn" onclick="applyPermPreset('${urxJs(m.key)}','view')">View</button>
-                    <button type="button" class="perm-preset-btn" onclick="applyPermPreset('${urxJs(m.key)}','entry')">Entry</button>
-                    <button type="button" class="perm-preset-btn" onclick="applyPermPreset('${urxJs(m.key)}','full')">Full</button>
+                    <button type="button" class="perm-preset-btn" onclick="applyPermPreset('${urxJs(m.key)}','view')">${m.viewOnly ? 'Show' : 'View'}</button>
+                    ${m.viewOnly ? '' : `<button type="button" class="perm-preset-btn" onclick="applyPermPreset('${urxJs(m.key)}','entry')">Entry</button>
+                    <button type="button" class="perm-preset-btn" onclick="applyPermPreset('${urxJs(m.key)}','full')">Full</button>`}
                   </div>
                 </td>
-                <td data-l="Full"><input type="checkbox" class="perm-full" data-module="${escapeHtml(m.key)}" aria-label="Full access: ${escapeHtml(m.label)}" ${full ? 'checked' : ''} onchange="onPermFullToggle(this)"></td>
-                ${PERMISSION_ACTIONS.map(a => `<td data-l="${actionLabels[a] || a}"><input type="checkbox" class="perm-action" data-module="${escapeHtml(m.key)}" data-action="${a}" aria-label="${actionLabels[a] || a}: ${escapeHtml(m.label)}" ${p[a] ? 'checked' : ''} onchange="onPermActionToggle(this)"></td>`).join('')}
+                <td data-l="Full">${m.viewOnly ? '' : `<input type="checkbox" class="perm-full" data-module="${escapeHtml(m.key)}" aria-label="Full access: ${escapeHtml(m.label)}" ${full ? 'checked' : ''} onchange="onPermFullToggle(this)">`}</td>
+                ${PERMISSION_ACTIONS.map(a => m.viewOnly && a !== 'view' ? `<td data-l="${actionLabels[a] || a}"></td>` : `<td data-l="${actionLabels[a] || a}"><input type="checkbox" class="perm-action" data-module="${escapeHtml(m.key)}" data-action="${a}" aria-label="${actionLabels[a] || a}${m.viewOnly ? ' (show on Dashboard)' : ''}: ${escapeHtml(m.label)}" ${p[a] ? 'checked' : ''} onchange="onPermActionToggle(this)"></td>`).join('')}
               </tr>`;
             }).join('')}
             </tbody>
@@ -308,3 +314,31 @@ function renderPermissionEditor(body){
   urxPermBind(body);
   urxPermSum();
 }
+
+
+/* Collapse controls for the permission editor */
+function permToggleChildren(parentKey, btn){
+  const root = document.getElementById('rolesPermissionsBody'); if(!root) return;
+  const collapse = btn ? btn.getAttribute('aria-expanded') === 'true' : true;
+  root.querySelectorAll('tr[data-parent="' + parentKey + '"]').forEach(tr => tr.classList.toggle('perm-sub-collapsed', collapse));
+  if(btn){ btn.setAttribute('aria-expanded', collapse ? 'false' : 'true'); btn.textContent = collapse ? '▸' : '▾'; }
+}
+function permCollapseAll(collapse){
+  const root = document.getElementById('rolesPermissionsBody'); if(!root) return;
+  root.querySelectorAll('.perm-category').forEach(cat => {
+    const head = cat.querySelector('.perm-category-head'), body = cat.querySelector('.perm-category-body');
+    if(!head || !body) return;
+    body.style.display = collapse ? 'none' : 'block';
+    const ch = head.querySelector('.perm-chevron'); if(ch) ch.textContent = collapse ? '▸' : '▾';
+  });
+  root.querySelectorAll('.perm-sub-toggle').forEach(btn => {
+    btn.setAttribute('aria-expanded', collapse ? 'false' : 'true'); btn.textContent = collapse ? '▸' : '▾';
+    root.querySelectorAll('tr[data-parent="' + (btn.getAttribute('onclick').match(/'([^']+)'/) || [])[1] + '"]').forEach(tr => tr.classList.toggle('perm-sub-collapsed', collapse));
+  });
+}
+(function(){
+  if(document.getElementById('permCollapseCss')) return;
+  const st = document.createElement('style'); st.id = 'permCollapseCss';
+  st.textContent = '.perm-sub-collapsed{display:none !important;} .perm-sub-toggle{border:1px solid var(--border);background:var(--cream,#faf6ee);color:var(--navy,#222);border-radius:8px;width:24px;height:24px;line-height:1;margin-right:8px;cursor:pointer;font-size:.85rem;vertical-align:middle;} .perm-sub-toggle:hover{background:var(--white,#fff);} .perm-toolbar-btn{white-space:nowrap;}';
+  document.head.appendChild(st);
+})();

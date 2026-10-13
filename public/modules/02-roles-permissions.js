@@ -11,6 +11,15 @@ const CUSTOM_ROLES_KEY = "custom-roles";
   // target — it no longer gets its own row in the matrix.
   const PERMISSION_MODULES = [
     { key:'dashboard',   label:'Dashboard',          icon:'📊', category:'Overview' },
+    { key:'dashboard_headcount', label:'Live Headcount card (total strength, boys / girls)', icon:'👥', category:'Overview', parent:'dashboard', isNew:true, viewOnly:true },
+    { key:'dashboard_quickaccess', label:'Quick Access shortcuts', icon:'⚡', category:'Overview', parent:'dashboard', isNew:true, viewOnly:true },
+    { key:'dashboard_fee_totals', label:'Fee totals (expected, collected, discount, receivable)', icon:'💰', category:'Overview', parent:'dashboard', isNew:true, viewOnly:true },
+    { key:'dashboard_fee_overview', label:'Collection overview ("Where the Money Stands")', icon:'🎯', category:'Overview', parent:'dashboard', isNew:true, viewOnly:true },
+    { key:'dashboard_fee_category', label:'Fee category breakdown (Tuition, Bus, Stock, Hostel)', icon:'🍩', category:'Overview', parent:'dashboard', isNew:true, viewOnly:true },
+    { key:'dashboard_students', label:'Student demographics (class, gender, section, category)', icon:'🎓', category:'Overview', parent:'dashboard', isNew:true, viewOnly:true },
+    { key:'dashboard_fee_trend', label:'Fee collection trend (last 6 months)', icon:'📈', category:'Overview', parent:'dashboard', isNew:true, viewOnly:true },
+    { key:'dashboard_attendance_trend', label:'Attendance trend (last 6 months)', icon:'📋', category:'Overview', parent:'dashboard', isNew:true, viewOnly:true },
+    { key:'dashboard_payments', label:'Recent payment history', icon:'🧾', category:'Overview', parent:'dashboard', isNew:true, viewOnly:true },
 
     { key:'admissions',  label:'Manage Student',     icon:'🎓', category:'Academics' },
     { key:'attendance',  label:'Manage Attendance',  icon:'📋', category:'Academics' },
@@ -337,6 +346,12 @@ const CUSTOM_ROLES_KEY = "custom-roles";
   function getCommsTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'announcements', action); }
   const NOTICEBOARD_SUBMODULE_KEYS = ['noticeboard_post','noticeboard_headings','noticeboard_website'];
   function getNoticeBoardTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'noticeboard', action); }
+  // Dashboard sections: each one is its own View-only row in Roles & Permissions, so an
+  // admin can choose exactly which parts of the Dashboard each role sees. A role with no
+  // saved choice for a section follows its Dashboard permission (nothing changes for
+  // existing roles until an admin edits them).
+  const DASHBOARD_SUBMODULE_KEYS = ['dashboard_headcount','dashboard_quickaccess','dashboard_fee_totals','dashboard_fee_overview','dashboard_fee_category','dashboard_students','dashboard_fee_trend','dashboard_attendance_trend','dashboard_payments'];
+  function canDashboardSection(key){ return canSub(key, 'dashboard', 'view'); }
   const MANAGEFEE_SUBMODULE_KEYS = ['managefee_collection','managefee_refunds','managefee_reports','managefee_structure','managefee_types','managefee_discounts','managefee_extra','managefee_late','managefee_defaulters'];
   function getManageFeeTabAccess(role, moduleKey, action){
     if(moduleKey === 'managefee_refunds') return refundPermFor(role, action || 'view');
@@ -392,6 +407,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
       promotransfer: PROMOTRANSFER_SUBMODULE_KEYS,
       announcements: COMMS_SUBMODULE_KEYS,
       noticeboard: NOTICEBOARD_SUBMODULE_KEYS,
+      dashboard: DASHBOARD_SUBMODULE_KEYS,
       managefee: MANAGEFEE_SUBMODULE_KEYS,
       inventory: INVENTORY_SUBMODULE_KEYS,
       transport: TRANSPORT_SUBMODULE_KEYS,
