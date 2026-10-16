@@ -75,6 +75,7 @@ const WEBSITE_CORS_RULES = {
   '/api/comms-messages': 'GET, OPTIONS',
   '/api/website-gallery': 'GET, OPTIONS',
   '/api/school-info': 'GET, OPTIONS',
+  '/api/website-extras': 'GET, OPTIONS',
 };
 // WEBSITE_ORIGIN may list several origins separated by commas, and the bare
 // and "www." forms of each are always treated as the same site, so a visitor
@@ -1008,6 +1009,7 @@ const PUBLIC_API_ROUTES = [
   { path: '/api/comms-messages', methods: ['GET'] },
   { path: '/api/website-gallery', methods: ['GET'] },
   { path: '/api/school-info', methods: ['GET'] },
+  { path: '/api/website-extras', methods: ['GET'] },
   // Called by the on-site biometric bridge (a machine, not a logged-in
   // person) — authenticated by its own BIOMETRIC_API_KEY header check
   // inside the route, same pattern as /api/vendor/admission-inquiries above.
@@ -1118,6 +1120,37 @@ app.all('/api/kv/:key', async (req, res) => {
     return await handleKv(req, res, req.params.key);
   } catch (err) {
     console.error(`kv API error (${req.params.key}):`, err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+
+// ---------- Public website extras (read-only, no login) ----------
+// Everything the public site shows beyond notices/gallery/leadership: alumni, achievements, safety
+// points, vehicles + tracking links, admission copy. Authored in the ERP (Website Gallery > Website
+// Content, stored under kv key 'website-extras'). Only items marked visible are sent, and the
+// teacher:student ratio is computed from counts only — no names or per-student data ever leave here.
+app.get('/api/website-extras', async (req, res) => {
+  try {
+    const rows = await sql`SELECT value FROM kv_store WHERE \`key\` = 'website-extras'`;
+    const x = (rows.length && rows[0].value) || {};
+    const vis = a => (Array.isArray(a) ? a : []).filter(i => i && i.show !== false);
+    const out = {
+      alumni: vis(x.alumni), achievements: vis(x.achievements), safety: vis(x.safety),
+      vehicles: vis(x.vehicles).map(v => ({ id: v.id, label: v.label, route: v.route, timing: v.timing })),
+      downloads: vis(x.downloads).filter(d => /^https?:\/\//i.test(d.url || '')).map(d => ({ id: d.id, title: d.title, url: d.url })),
+      transport: x.transport || {}, recognition: x.recognition || {}, admission: x.admission || {}, academics: x.academics || {}, ratio: x.ratio || {}
+    };
+    let students = 0, teachers = 0;
+    try {
+      students = Number((await sql`SELECT COUNT(*) AS c FROM students WHERE deleted_at IS NULL AND (status IS NULL OR status = '' OR status = 'Active')`)[0].c) || 0;
+      teachers = Number((await sql`SELECT COUNT(*) AS c FROM staff WHERE (status IS NULL OR status = '' OR status = 'Active') AND LOWER(COALESCE(designation, '')) LIKE '%teach%'`)[0].c) || 0;
+    } catch (e) {}
+    out.counts = { students, teachers };
+    res.set('Cache-Control', 'public, max-age=60');
+    return res.status(200).json(out);
+  } catch (err) {
+    console.error('website-extras error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });
@@ -1617,6 +1650,8 @@ const RESOURCE_TO_MODULE = {
 // actually a school-data settings blob (as opposed to internal plumbing),
 // mapped to the module(s) whose screen reads/writes it.
 const KV_KEY_TO_MODULE = {
+  // Public-website content (alumni, achievements, safety, vehicles, admission copy) — edited in Website Gallery > Website Content.
+  'website-extras': ['websitegallery'],
   'finance-settings': ['managefee'],
   'fee-types': ['managefee'],
   'discount-types': ['managefee'],
