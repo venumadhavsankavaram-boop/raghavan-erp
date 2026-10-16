@@ -21,7 +21,7 @@
     try{ const r = await fetch(KEY, { credentials:'same-origin' }); wcData = r.ok ? await r.json() : {}; }catch(e){ wcData = {}; }
     wcData = wcData || {};
     SECTIONS.forEach(s => { if(!Array.isArray(wcData[s.k])) wcData[s.k] = []; });
-    ['admission','ratio','recognition','transport','academics'].forEach(k => { wcData[k] = wcData[k] || {}; });
+    ['admission','ratio','recognition','transport','academics','results'].forEach(k => { wcData[k] = wcData[k] || {}; });
   }
   function fieldHtml(sk, i, f, val){
     const id = `wc_${sk}_${i}_${f[0]}`;
@@ -48,11 +48,28 @@
     body.innerHTML = `
       <style>.wc-item{border:1px solid var(--border);border-radius:14px;padding:14px;margin:12px 0;background:var(--cream)}.wc-actions{display:flex;justify-content:space-between;align-items:center;margin-top:10px}.wc-show{font-size:.82rem;font-weight:600}.wc-bar{position:sticky;bottom:0;background:var(--white);padding:12px 0;display:flex;gap:12px;align-items:center;z-index:3}</style>
       <section class="sf-card cm-post">
-        <h3 class="cm-h">🏛️ Recognition &amp; board</h3>
-        <p class="cm-sub">The website's "Recognition &amp; Affiliation" strip uses the recognition line, registration number and UDISE code from <b>Setup → School Info</b>. Add the board and medium here.</p>
+        <h3 class="cm-h">🏛️ Recognition, registration &amp; board</h3>
+        <p class="cm-sub">Shown in the website's "Recognition &amp; Affiliation" strip. Change these whenever recognition is renewed — the website updates by itself. Leave a box blank to hide that card (UDISE and the recognition line also fall back to Setup → School Info).</p>
         <div class="form-grid">
-          <div class="f-field"><label>Board</label><input type="text" value="${E(wcData.recognition.board)}" oninput="wcSetKey('recognition','board',this.value)" placeholder="State Board of Andhra Pradesh"></div>
-          <div class="f-field"><label>Medium of instruction</label><input type="text" value="${E(wcData.recognition.medium)}" oninput="wcSetKey('recognition','medium',this.value)" placeholder="English"></div>
+          ${[['board','Board','State Board of Andhra Pradesh'],['medium','Medium of instruction','English'],['recognition','Recognition (e.g. Recognised by Govt. of Andhra Pradesh)',''],['regNumber','Registration / Affiliation number',''],['recogNo','Recognition order no. &amp; date',''],['validTill','Recognition valid till',''],['udise','UDISE code',''],['timings','School timings (e.g. 8:45 AM – 4:00 PM)','']].map(x => `<div class="f-field"><label>${x[1]}</label><input type="text" value="${E(wcData.recognition[x[0]])}" oninput="wcSetKey('recognition','${x[0]}',this.value)" placeholder="${E(x[2])}"></div>`).join('')}
+        </div>
+      </section>
+      <section class="sf-card cm-post">
+        <h3 class="cm-h">📢 Admissions banner</h3>
+        <p class="cm-sub">A slim banner across the top of the website. Switch it on when admissions are open and off when they close.</p>
+        <label class="wc-show"><input type="checkbox" ${wcData.admission.open ? 'checked' : ''} onchange="wcSetKey('admission','open',this.checked)"> Show the admissions banner</label>
+        <div class="form-grid" style="margin-top:12px;">
+          <div class="f-field"><label>Banner text</label><input type="text" value="${E(wcData.admission.heading)}" oninput="wcSetKey('admission','heading',this.value)" placeholder="Admissions open for 2027–28"></div>
+          <div class="f-field"><label>Last date / extra note</label><input type="text" value="${E(wcData.admission.lastDate)}" oninput="wcSetKey('admission','lastDate',this.value)" placeholder="Last date: 31 March"></div>
+          <div class="f-field"><label>Office hours (shown under the admission form)</label><input type="text" value="${E(wcData.admission.hours)}" oninput="wcSetKey('admission','hours',this.value)" placeholder="Mon–Sat, 9:00 AM – 4:00 PM"></div>
+        </div>
+      </section>
+      <section class="sf-card cm-post">
+        <h3 class="cm-h">📈 Latest results snapshot</h3>
+        <p class="cm-sub">Shows as a highlight tile in "At a glance". Enter real figures only; leave blank to hide.</p>
+        <div class="form-grid">
+          <div class="f-field"><label>Exam / year (e.g. SSC 2026)</label><input type="text" value="${E(wcData.results.label)}" oninput="wcSetKey('results','label',this.value)"></div>
+          <div class="f-field"><label>Pass percentage (e.g. 100%)</label><input type="text" value="${E(wcData.results.pass)}" oninput="wcSetKey('results','pass',this.value)"></div>
         </div>
       </section>
       <section class="sf-card cm-post">
