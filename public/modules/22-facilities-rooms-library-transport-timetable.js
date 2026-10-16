@@ -1568,7 +1568,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     });
     if(schoolInfo.logo) document.getElementById('sbLogoImg').src = schoolInfo.logo;
     const nameSpan = document.getElementById('sbBrandName');
-    if(nameSpan) nameSpan.innerHTML = (schoolInfo.name||'Your School').split(' ').slice(0,2).join(' ') + '<span>ERP Portal</span>';
+    if(nameSpan) nameSpan.innerHTML = (schoolInfo.name||'Your School') + '<span>ERP Portal</span>';
     document.title = (schoolInfo.name || 'Your School') + ' — ERP';
     const loginNameEl = document.getElementById('loginSchoolName');
     if(loginNameEl && schoolInfo.name) loginNameEl.textContent = schoolInfo.name;
@@ -1670,7 +1670,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     await storageSet(SCHOOL_INFO_KEY, schoolInfo);
     if(schoolInfo.logo) document.getElementById('sbLogoImg').src = schoolInfo.logo;
     const nameSpan = document.getElementById('sbBrandName');
-    if(nameSpan) nameSpan.innerHTML = schoolInfo.name.split(' ').slice(0,2).join(' ') + '<span>ERP Portal</span>';
+    if(nameSpan) nameSpan.innerHTML = schoolInfo.name + '<span>ERP Portal</span>';
     if(schoolInfo.name) document.title = schoolInfo.name + ' — ERP';
     showToast('School profile saved.', 'burst');
   }
