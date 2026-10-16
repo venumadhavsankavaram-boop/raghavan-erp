@@ -1139,7 +1139,7 @@ app.get('/api/website-extras', async (req, res) => {
       alumni: vis(x.alumni), achievements: vis(x.achievements), safety: vis(x.safety),
       vehicles: vis(x.vehicles).map(v => ({ id: v.id, label: v.label, route: v.route, timing: v.timing })),
       downloads: vis(x.downloads).filter(d => /^https?:\/\//i.test(d.url || '')).map(d => ({ id: d.id, title: d.title, url: d.url })),
-      transport: x.transport || {}, recognition: x.recognition || {}, admission: x.admission || {}, results: x.results || {}, academics: x.academics || {}, ratio: x.ratio || {}
+      transport: x.transport || {}, recognition: x.recognition || {}, admission: x.admission || {}, results: x.results || {}, visible: x.visible || {}, academics: x.academics || {}, ratio: x.ratio || {}
     };
     let students = 0, teachers = 0;
     try {

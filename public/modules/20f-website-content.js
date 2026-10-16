@@ -6,23 +6,25 @@
   let wcTab = 'gallery', wcData = null, wcBusy = false;
   const E = v => (typeof cmEsc === 'function' ? cmEsc(v) : String(v == null ? '' : v).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])));
   const SECTIONS = [
-    { k:'alumni', one:'alumnus', icon:'🎓', title:'Alumni', hint:'Former students you are proud of. Shown on the website with name, batch and what they do now.',
+    { k:'alumni', vis:'Show the Alumni section on the website', one:'alumnus', icon:'🎓', title:'Alumni', hint:'Former students you are proud of. Shown on the website with name, batch and what they do now.',
       fields:[['name','Name','text'],['batch','Batch / year passed 10th','text'],['now','What they do now','text'],['quote','Message to students (optional)','area']] },
-    { k:'achievements', one:'achievement', icon:'🏆', title:'Achievements', hint:'Results, awards, sports and competitions. Only add what really happened.',
+    { k:'achievements', vis:'Show the Achievements section on the website', one:'achievement', icon:'🏆', title:'Achievements', hint:'Results, awards, sports and competitions. Only add what really happened.',
       fields:[['title','Achievement','text'],['year','Year','text'],['category','Type (Academics / Sports / Arts / Other)','text'],['detail','Details','area']] },
-    { k:'safety', one:'safety point', icon:'🛡️', title:'Safety & Women Safety', hint:'Each point appears as a card. Write only measures the school actually follows.',
+    { k:'safety', vis:'Show the Safety section on the website', one:'safety point', icon:'🛡️', title:'Safety & Women Safety', hint:'Each point appears as a card. Write only measures the school actually follows.',
       fields:[['title','Heading (e.g. CCTV on campus)','text'],['detail','Details','area']] },
     { k:'vehicles', one:'vehicle', icon:'🚌', title:'School Vehicles & GPS', hint:'Optional list of routes and timings. The "GPS-enabled vehicles" badge is controlled by the tick box in the Transport box above.',
       fields:[['label','Vehicle (e.g. Bus 1 – AP00 XX 0000)','text'],['route','Route / areas covered','text'],['timing','Timings','text']] },
-    { k:'downloads', one:'download', icon:'📥', title:'Downloads & Forms', hint:'Forms, syllabus or calendar files people can download. Paste the link to the file (https://…). Shown as buttons on the website.',
+    { k:'downloads', vis:'Show the quick-links buttons strip on the website', visKey:'explore', one:'download', icon:'📥', title:'Downloads & Forms', hint:'Forms, syllabus or calendar files people can download. Paste the link to the file (https://…). Shown as buttons on the website.',
       fields:[['title','Button name (e.g. Academic Calendar)','text'],['url','Link to the file (https://…)','text']] },
   ];
   async function wcLoad(){
     try{ const r = await fetch(KEY, { credentials:'same-origin' }); wcData = r.ok ? await r.json() : {}; }catch(e){ wcData = {}; }
     wcData = wcData || {};
     SECTIONS.forEach(s => { if(!Array.isArray(wcData[s.k])) wcData[s.k] = []; });
-    ['admission','ratio','recognition','transport','academics','results'].forEach(k => { wcData[k] = wcData[k] || {}; });
+    ['admission','ratio','recognition','transport','academics','results','visible'].forEach(k => { wcData[k] = wcData[k] || {}; });
   }
+  const vis = (k, label) => `<label class="wc-show wc-vis"><input type="checkbox" ${(wcData.visible || {})[k] !== false ? 'checked' : ''} onchange="wcVis('${k}',this.checked)"> 👁 ${label}</label>`;
+  window.wcVis = (k, v) => { wcData.visible = wcData.visible || {}; wcData.visible[k] = !!v; };
   function fieldHtml(sk, i, f, val){
     const id = `wc_${sk}_${i}_${f[0]}`;
     const inp = f[2] === 'area'
@@ -35,6 +37,7 @@
     return `<section class="sf-card cm-post">
       <h3 class="cm-h">${s.icon} ${s.title} <span class="iv-count">${arr.length}</span></h3>
       <p class="cm-sub">${s.hint}</p>
+      ${s.vis ? vis(s.visKey || s.k, s.vis) : ''}
       ${arr.map((it, i) => `<div class="wc-item">
         <div class="form-grid">${s.fields.map(f => fieldHtml(s.k, i, f, it[f[0]])).join('')}</div>
         <div class="wc-actions"><label class="wc-show"><input type="checkbox" ${it.show !== false ? 'checked' : ''} onchange="wcSet('${s.k}',${i},'show',this.checked)"> Show on website</label>
@@ -46,10 +49,11 @@
   function paintContent(body){
     const r = wcData.ratio;
     body.innerHTML = `
-      <style>.wc-item{border:1px solid var(--border);border-radius:14px;padding:14px;margin:12px 0;background:var(--cream)}.wc-actions{display:flex;justify-content:space-between;align-items:center;margin-top:10px}.wc-show{font-size:.82rem;font-weight:600}.wc-bar{position:sticky;bottom:0;background:var(--white);padding:12px 0;display:flex;gap:12px;align-items:center;z-index:3}</style>
+      <style>.wc-item{border:1px solid var(--border);border-radius:14px;padding:14px;margin:12px 0;background:var(--cream)}.wc-actions{display:flex;justify-content:space-between;align-items:center;margin-top:10px}.wc-show{font-size:.82rem;font-weight:600}.wc-vis{display:block;margin:6px 0 12px;color:var(--brand-navy)}.wc-bar{position:sticky;bottom:0;background:var(--white);padding:12px 0;display:flex;gap:12px;align-items:center;z-index:3}</style>
       <section class="sf-card cm-post">
         <h3 class="cm-h">🏛️ Recognition, registration &amp; board</h3>
         <p class="cm-sub">Shown in the website's "Recognition &amp; Affiliation" strip. Change these whenever recognition is renewed — the website updates by itself. Leave a box blank to hide that card (UDISE and the recognition line also fall back to Setup → School Info).</p>
+        ${vis('recognition','Show the Recognition &amp; Affiliation strip on the website')}
         <div class="form-grid">
           ${[['board','Board','State Board of Andhra Pradesh'],['medium','Medium of instruction','English'],['recognition','Recognition (e.g. Recognised by Govt. of Andhra Pradesh)',''],['regNumber','Registration / Affiliation number',''],['recogNo','Recognition order no. &amp; date',''],['validTill','Recognition valid till',''],['udise','UDISE code',''],['timings','School timings (e.g. 8:45 AM – 4:00 PM)','']].map(x => `<div class="f-field"><label>${x[1]}</label><input type="text" value="${E(wcData.recognition[x[0]])}" oninput="wcSetKey('recognition','${x[0]}',this.value)" placeholder="${E(x[2])}"></div>`).join('')}
         </div>
@@ -75,12 +79,14 @@
       <section class="sf-card cm-post">
         <h3 class="cm-h">📍 Transport &amp; GPS</h3>
         <p class="cm-sub">Tick if your vehicles have GPS. The website then shows a "GPS-enabled vehicles" badge in the Transport section.</p>
+        ${vis('transport','Show the Transport section on the website')}
         <label class="wc-show"><input type="checkbox" ${wcData.transport.gps ? 'checked' : ''} onchange="wcSetKey('transport','gps',this.checked)"> Our vehicles are GPS-enabled</label>
         <div class="form-grid" style="margin-top:12px;"><div class="f-field full"><label>Short note (optional)</label><input type="text" value="${E(wcData.transport.note)}" oninput="wcSetKey('transport','note',this.value)" placeholder="e.g. Parents can ask the office about live location"></div></div>
       </section>
       <section class="sf-card cm-post">
         <h3 class="cm-h">📚 What is taught (optional)</h3>
         <p class="cm-sub">Leave blank to use the standard text. One point per line; replaces the list on that stage's card.</p>
+        ${vis('academics','Show the Academics section on the website')}
         <div class="form-grid">
           ${[['preKg','Pre-KG (Baby, LKG, UKG)'],['primary','Primary (1st–5th)'],['high','High School (6th–10th)']].map(x => `<div class="f-field full"><label>${x[1]}</label><textarea rows="4" oninput="wcSetKey('academics','${x[0]}',this.value)">${E(wcData.academics[x[0]])}</textarea></div>`).join('')}
         </div>
@@ -88,6 +94,7 @@
       <section class="sf-card cm-post">
         <h3 class="cm-h">👩‍🏫 Teacher : student ratio</h3>
         <p class="cm-sub">Currently counted from the ERP: <b>${wcData._counts ? wcData._counts.students : '—'}</b> active students and <b>${wcData._counts ? wcData._counts.teachers : '—'}</b> staff whose designation contains "teacher". Type your own figure below to override.</p>
+        ${vis('glance','Show the "At a glance" strip (students, teachers, ratio) on the website')}
         <div class="form-grid"><div class="f-field"><label>Show this instead (optional, e.g. 1 : 20)</label><input type="text" value="${E(r.manual)}" oninput="wcSetKey('ratio','manual',this.value)"></div></div>
       </section>
       ${SECTIONS.map(sectionHtml).join('')}
