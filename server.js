@@ -1137,9 +1137,8 @@ app.get('/api/website-extras', async (req, res) => {
     const vis = a => (Array.isArray(a) ? a : []).filter(i => i && i.show !== false);
     const out = {
       alumni: vis(x.alumni), achievements: vis(x.achievements), safety: vis(x.safety),
-      vehicles: vis(x.vehicles).map(v => ({ id: v.id, label: v.label, route: v.route, timing: v.timing })),
       downloads: vis(x.downloads).filter(d => /^https?:\/\//i.test(d.url || '')).map(d => ({ id: d.id, title: d.title, url: d.url })),
-      transport: x.transport || {}, recognition: x.recognition || {}, admission: x.admission || {}, results: x.results || {}, visible: x.visible || {}, academics: x.academics || {}, ratio: x.ratio || {}
+      transport: x.transport || {}, recognition: { board: (x.recognition || {}).board, medium: (x.recognition || {}).medium, recognition: (x.recognition || {}).recognition, timings: (x.recognition || {}).timings }, admission: x.admission || {}, results: x.results || {}, visible: x.visible || {}, academics: x.academics || {}, ratio: x.ratio || {}
     };
     let students = 0, teachers = 0;
     try {

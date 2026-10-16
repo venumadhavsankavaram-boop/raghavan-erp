@@ -10,11 +10,9 @@
       fields:[['name','Name','text'],['batch','Batch / year passed 10th','text'],['now','What they do now','text'],['quote','Message to students (optional)','area']] },
     { k:'achievements', vis:'Show the Achievements section on the website', one:'achievement', icon:'🏆', title:'Achievements', hint:'Results, awards, sports and competitions. Only add what really happened.',
       fields:[['title','Achievement','text'],['year','Year','text'],['category','Type (Academics / Sports / Arts / Other)','text'],['detail','Details','area']] },
-    { k:'safety', vis:'Show the Safety section on the website', one:'safety point', icon:'🛡️', title:'Safety & Women Safety', hint:'Each point appears as a card. Write only measures the school actually follows.',
+    { k:'safety', vis:'Show the safety / Women Safety facility on the website', one:'safety point', icon:'🛡️', title:'Extra safety facilities', hint:'Optional. Each point becomes a card inside the website Facilities section (replacing the standard Women &amp; Child Safety card). Write only measures the school actually follows.',
       fields:[['title','Heading (e.g. CCTV on campus)','text'],['detail','Details','area']] },
-    { k:'vehicles', one:'vehicle', icon:'🚌', title:'School Vehicles & GPS', hint:'Optional list of routes and timings. The "GPS-enabled vehicles" badge is controlled by the tick box in the Transport box above.',
-      fields:[['label','Vehicle (e.g. Bus 1 – AP00 XX 0000)','text'],['route','Route / areas covered','text'],['timing','Timings','text']] },
-    { k:'downloads', vis:'Show the quick-links buttons strip on the website', visKey:'explore', one:'download', icon:'📥', title:'Downloads & Forms', hint:'Forms, syllabus or calendar files people can download. Paste the link to the file (https://…). Shown as buttons on the website.',
+    { k:'downloads', vis:'Show the download buttons on the website', visKey:'explore', one:'download', icon:'📥', title:'Downloads & Forms', hint:'Forms, syllabus or calendar files people can download. Paste the link to the file (https://…). Shown as buttons under Facilities.',
       fields:[['title','Button name (e.g. Academic Calendar)','text'],['url','Link to the file (https://…)','text']] },
   ];
   async function wcLoad(){
@@ -52,10 +50,10 @@
       <style>.wc-item{border:1px solid var(--border);border-radius:14px;padding:14px;margin:12px 0;background:var(--cream)}.wc-actions{display:flex;justify-content:space-between;align-items:center;margin-top:10px}.wc-show{font-size:.82rem;font-weight:600}.wc-vis{display:block;margin:6px 0 12px;color:var(--brand-navy)}.wc-bar{position:sticky;bottom:0;background:var(--white);padding:12px 0;display:flex;gap:12px;align-items:center;z-index:3}</style>
       <section class="sf-card cm-post">
         <h3 class="cm-h">🏛️ Recognition, registration &amp; board</h3>
-        <p class="cm-sub">Shown in the website's "Recognition &amp; Affiliation" strip. Change these whenever recognition is renewed — the website updates by itself. Leave a box blank to hide that card (UDISE and the recognition line also fall back to Setup → School Info).</p>
-        ${vis('recognition','Show the Recognition &amp; Affiliation strip on the website')}
+        <p class="cm-sub">Shown in the website's recognition strip. Registration, UDISE and other numbers are deliberately NOT shown on the public site.</p>
+        ${vis('recognition','Show the Recognition strip on the website')}
         <div class="form-grid">
-          ${[['board','Board','State Board of Andhra Pradesh'],['medium','Medium of instruction','English'],['recognition','Recognition (e.g. Recognised by Govt. of Andhra Pradesh)',''],['regNumber','Registration / Affiliation number',''],['recogNo','Recognition order no. &amp; date',''],['validTill','Recognition valid till',''],['udise','UDISE code',''],['timings','School timings (e.g. 8:45 AM – 4:00 PM)','']].map(x => `<div class="f-field"><label>${x[1]}</label><input type="text" value="${E(wcData.recognition[x[0]])}" oninput="wcSetKey('recognition','${x[0]}',this.value)" placeholder="${E(x[2])}"></div>`).join('')}
+          ${[['board','Board','State Board of Andhra Pradesh'],['medium','Medium of instruction','English'],['recognition','Recognition heading (shown as the strip title)','Recognised by Govt. of AP'],['timings','School timings (e.g. 8:45 AM – 4:00 PM)','']].map(x => `<div class="f-field"><label>${x[1]}</label><input type="text" value="${E(wcData.recognition[x[0]])}" oninput="wcSetKey('recognition','${x[0]}',this.value)" placeholder="${E(x[2])}"></div>`).join('')}
         </div>
       </section>
       <section class="sf-card cm-post">
@@ -77,9 +75,9 @@
         </div>
       </section>
       <section class="sf-card cm-post">
-        <h3 class="cm-h">📍 Transport &amp; GPS</h3>
-        <p class="cm-sub">Tick if your vehicles have GPS. The website then shows a "GPS-enabled vehicles" badge in the Transport section.</p>
-        ${vis('transport','Show the Transport section on the website')}
+        <h3 class="cm-h">📍 Vehicle facility &amp; GPS</h3>
+        <p class="cm-sub">Tick if your vehicles have GPS. The website's Vehicle Facility card then shows a "GPS enabled" badge (no tracking link is shown).</p>
+        ${vis('transport','Show the Vehicle Facility card on the website')}
         <label class="wc-show"><input type="checkbox" ${wcData.transport.gps ? 'checked' : ''} onchange="wcSetKey('transport','gps',this.checked)"> Our vehicles are GPS-enabled</label>
         <div class="form-grid" style="margin-top:12px;"><div class="f-field full"><label>Short note (optional)</label><input type="text" value="${E(wcData.transport.note)}" oninput="wcSetKey('transport','note',this.value)" placeholder="e.g. Parents can ask the office about live location"></div></div>
       </section>
