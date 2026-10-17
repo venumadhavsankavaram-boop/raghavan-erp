@@ -642,6 +642,7 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     if(!(await acctSaveVoucherSafely(ACCT_INCOME_KEY, acctIncome, incRec))){ renderAcctIncomeTab(document.getElementById('accountingBody')); return; }
     renderDashboard();
     renderAcctIncomeTab(document.getElementById('accountingBody'));
+    docDraftDone('income_voucher');
     if(!acctIncome.includes(incRec)) return; // duplicate refused by the server
     showToast('Income voucher ' + voucherNo + ' saved.');
   }
@@ -681,6 +682,7 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     if(!(await acctSaveVoucherSafely(ACCT_EXPENSES_KEY, acctExpenses, expRec))){ renderAcctExpenseTab(document.getElementById('accountingBody')); return; }
     renderDashboard();
     renderAcctExpenseTab(document.getElementById('accountingBody'));
+    docDraftDone('payment_voucher');
     if(!acctExpenses.includes(expRec)) return; // duplicate refused by the server
     showToast('Expense voucher ' + voucherNo + ' saved.');
   }

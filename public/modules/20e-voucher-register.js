@@ -27,7 +27,7 @@ async function acctSaveVoucherSafely(key, arr, rec){
   while(ok === false){
     const retry = await showConfirmDialog(
       'Voucher ' + rec.voucherNo + ' could NOT be saved to the server — most likely the internet connection dropped. ' +
-      'It is not stored yet. Check the connection, then press "Retry save". (If you stop, nothing is saved and this number stays unused.)',
+      'It is not stored yet. Check the connection, then press "Retry save". (If you stop, nothing is saved — the number is kept aside and will be given to your next voucher, so no number is lost.)',
       { title: 'Voucher not saved', okText: 'Retry save', cancelText: 'Stop — do not save' });
     if(!retry){
       const ix = arr.indexOf(rec);

@@ -473,8 +473,28 @@ function salaryDisbursementData(monthStr){
   // UPDATE...RETURNING, so two staff saving at the same instant still get
   // two different numbers, guaranteed by Postgres row locking rather than by
   // hoping no one clicks Save at the same second.
-  async function issueDocNumber(series){
-    const res = await fetch('/api/next-doc-number', { method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify({series}) });
+  // Each voucher attempt carries a "draft key" kept in this browser. If the connection drops and the same
+  // voucher is tried again (even after a page reload), the server gives back the SAME number instead of using a
+  // new one, and numbers that were issued but never saved are handed out again before a new number is opened.
+  // `slot` separates several numbers needed for one action (e.g. a refund with several lines).
+  const _draftMem = {};
+  function docDraftKey(series, slot){
+    const k = 'docDraft:' + series + ':' + (slot || 0);
+    try{ let v = localStorage.getItem(k); if(!v){ v = newDraftId(); localStorage.setItem(k, v); } return v; }
+    catch(e){ return _draftMem[k] || (_draftMem[k] = newDraftId()); }
+  }
+  function newDraftId(){
+    const a = new Uint8Array(12); (window.crypto || {}).getRandomValues ? crypto.getRandomValues(a) : a.forEach((_, i) => a[i] = Math.floor(Math.random()*256));
+    return Array.from(a).map(b => b.toString(16).padStart(2,'0')).join('');
+  }
+  // Called once the voucher is safely saved, so the next voucher starts a fresh attempt.
+  function docDraftDone(series, slot){
+    const k = 'docDraft:' + series + ':' + (slot || 0);
+    try{ localStorage.removeItem(k); }catch(e){}
+    delete _draftMem[k];
+  }
+  async function issueDocNumber(series, slot){
+    const res = await fetch('/api/next-doc-number', { method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify({series, draftKey: docDraftKey(series, slot)}) });
     await throwIfNotOk(res);
     const data = await res.json();
     return data.docNumber;

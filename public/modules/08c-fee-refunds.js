@@ -391,7 +391,7 @@ async function rfProcess(refundId){
   const voucherNos = [];
   if(r.method !== 'credit'){
     try{
-      for(let i = 0; i < r.lines.length; i++) voucherNos.push(await issueDocNumber('payment_voucher'));
+      for(let i = 0; i < r.lines.length; i++) voucherNos.push(await issueDocNumber('payment_voucher', i + 1));
     }catch(e){
       showToast('Could not get a voucher number from the server (' + e.message + ') — nothing was changed. Try again once you are back online.');
       return false;
