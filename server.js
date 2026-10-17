@@ -1263,6 +1263,8 @@ app.post('/api/next-doc-number', async (req, res) => {
       }
       if (!seq) seq = await nextDocSeq(series, period);
       if (src && draftKey) {
+        // Another attempt may still point at this number: it must not get it back as well.
+        await sql.query('DELETE FROM doc_draft_keys WHERE series = $1 AND period = $2 AND seq = $3 AND draft_key <> $4', [series, period, seq, draftKey]);
         await sql.query(
           `INSERT INTO doc_draft_keys (series, draft_key, period, seq) VALUES ($1, $2, $3, $4)
            ON DUPLICATE KEY UPDATE period = VALUES(period), seq = VALUES(seq), updated_at = CURRENT_TIMESTAMP`,
@@ -1409,25 +1411,82 @@ app.post('/api/receipt-numbers', async (req, res) => {
     if (!/^[A-Za-z0-9-]{2,20}$/.test(prefix)) return res.status(400).json({ error: 'Invalid receipt prefix.' });
     const count = Math.max(1, Math.min(parseInt(b.count, 10) || 1, 20));
     const start = Math.max(1, parseInt(b.start, 10) || 1);
-    let minNext = start;
-    const existing = await sql.query('SELECT next_seq FROM doc_counters WHERE series = $1 AND period = $2', ['fee_receipt', prefix]);
-    if (!existing.length) {
-      const rows = await sql.query('SELECT receipt_no FROM payments WHERE receipt_no LIKE $1', [prefix + '%']);
-      let max = 0;
-      rows.forEach(r => {
-        const m = /(\d+)$/.exec(String(r.receipt_no || ''));
-        if (m) max = Math.max(max, parseInt(m[1], 10));
-      });
-      minNext = Math.max(start, max + 1);
-    }
-    const first = await reserveDocSeqRange('fee_receipt', prefix, count, minNext);
-    const numbers = Array.from({ length: count }, (_, i) => prefix + String(first + i).padStart(6, '0'));
+    const rawKey = b.draftKey;
+    const draftKey = typeof rawKey === 'string' && /^[A-Za-z0-9_-]{8,40}$/.test(rawKey) ? rawKey : null;
+    const by = req.authUser.name || '', role = req.authUser.role || '';
+    const SERIES = 'fee_receipt';
+    const out = await withKeyLock('docno:' + SERIES + ':' + prefix, async () => {
+      await ensureRegisterTables();
+      await ensureDraftKeyTable();
+      // Receipt numbers already saved on payments, e.g. "REHS-26-000041" -> 41.
+      const tail = new RegExp('^' + prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(\\d+)$');
+      const saved = new Set();
+      (await sql.query('SELECT DISTINCT receipt_no FROM payments WHERE receipt_no LIKE $1', [prefix + '%']))
+        .forEach(r => { const m = tail.exec(String(r.receipt_no || '')); if (m) saved.add(parseInt(m[1], 10)); });
+      const seqs = new Array(count).fill(0);
+      const taken = new Set();
+      // 1. Same attempt asking again (retry, lost reply, page reloaded): give back the numbers it already has.
+      if (draftKey) {
+        for (let i = 0; i < count; i++) {
+          const k = await sql.query('SELECT period, seq FROM doc_draft_keys WHERE series = $1 AND draft_key = $2', [SERIES, draftKey + '_' + i]);
+          if (k.length && k[0].period === prefix) {
+            const n = Number(k[0].seq);
+            if (n > 0 && !saved.has(n) && !taken.has(n)) { seqs[i] = n; taken.add(n); }
+          }
+        }
+      }
+      // 2. Numbers the server issued earlier but no receipt was ever saved for: use them before opening new ones.
+      //    Only numbers actually issued (they have a log row) are refilled, so a deliberately raised
+      //    "next receipt starts at" is never filled in below.
+      if (seqs.includes(0)) {
+        const counter = await sql.query('SELECT next_seq FROM doc_counters WHERE series = $1 AND period = $2', [SERIES, prefix]);
+        const top = counter.length ? (Number(counter[0].next_seq) || 1) - 1 : 0;
+        if (top > 0) {
+          const notes = new Set((await sql.query('SELECT seq FROM doc_gap_notes WHERE series = $1 AND period = $2', [SERIES, prefix])).map(r => Number(r.seq)));
+          const logged = await sql.query(
+            `SELECT seq, MAX(issued_at) AS last_at, MAX(issued_at) > (NOW() - INTERVAL ${DOC_ORPHAN_GRACE_MIN} MINUTE) AS recent
+               FROM doc_number_log WHERE series = $1 AND period = $2 GROUP BY seq ORDER BY seq`, [SERIES, prefix]);
+          const heldRecently = new Set((await sql.query(
+            `SELECT seq FROM doc_draft_keys WHERE series = $1 AND period = $2 AND updated_at > (NOW() - INTERVAL ${DOC_ORPHAN_GRACE_MIN} MINUTE)`, [SERIES, prefix])).map(r => Number(r.seq)));
+          for (const row of logged) {
+            const n = Number(row.seq);
+            if (n > top || saved.has(n) || notes.has(n) || taken.has(n) || heldRecently.has(n) || Number(row.recent)) continue;
+            const slot = seqs.indexOf(0);
+            if (slot < 0) break;
+            seqs[slot] = n; taken.add(n);
+          }
+        }
+      }
+      // 3. Anything still missing gets brand-new numbers from the shared counter.
+      const need = seqs.filter(n => !n).length;
+      if (need > 0) {
+        let minNext = start;
+        const existing = await sql.query('SELECT next_seq FROM doc_counters WHERE series = $1 AND period = $2', [SERIES, prefix]);
+        if (!existing.length) {
+          const mx = saved.size ? Math.max(...saved) : 0;
+          minNext = Math.max(start, mx + 1);
+        }
+        const first = await reserveDocSeqRange(SERIES, prefix, need, minNext);
+        let k = 0;
+        for (let i = 0; i < count; i++) if (!seqs[i]) seqs[i] = first + (k++);
+      }
+      if (draftKey) {
+        for (let i = 0; i < count; i++) {
+          await sql.query('DELETE FROM doc_draft_keys WHERE series = $1 AND period = $2 AND seq = $3 AND draft_key <> $4', [SERIES, prefix, seqs[i], draftKey + '_' + i]);
+          await sql.query(
+            `INSERT INTO doc_draft_keys (series, draft_key, period, seq) VALUES ($1, $2, $3, $4)
+             ON DUPLICATE KEY UPDATE period = VALUES(period), seq = VALUES(seq), updated_at = CURRENT_TIMESTAMP`,
+            [SERIES, draftKey + '_' + i, prefix, seqs[i]]);
+        }
+      }
+      return seqs;
+    });
+    const numbers = out.map(n => prefix + String(n).padStart(6, '0'));
     // Remember who these numbers went to (best-effort — see doc_number_log).
     try {
-      await ensureRegisterTables();
       for (let i = 0; i < count; i++) {
         await sql.query('INSERT INTO doc_number_log (series, period, seq, doc_number, issued_by, issued_role) VALUES ($1, $2, $3, $4, $5, $6)',
-          ['fee_receipt', prefix, first + i, numbers[i], req.authUser.name || '', req.authUser.role || '']);
+          ['fee_receipt', prefix, out[i], numbers[i], by, role]);
       }
     } catch (logErr) { console.error('doc_number_log write failed (numbers still issued):', logErr.message); }
     return res.status(200).json({ numbers });

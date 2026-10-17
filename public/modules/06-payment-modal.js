@@ -120,6 +120,7 @@ function openPaymentModal(presetStudentId){
   // server cannot be reached, nextReceiptNo() falls back to the old count-based formula but
   // skips any number already on record.
   let rcPool = [];
+  let rcPoolAt = 0;
   function receiptPrefix(){
     // Receipt code comes from School Profile > Identity. Installs that never set one keep
     // 'REHS' so their existing numbering carries on unchanged.
@@ -136,15 +137,22 @@ function openPaymentModal(presetStudentId){
     n = Math.max(1, Math.min(Number(n) || 1, 20));
     const prefix = receiptPrefix();
     rcPool = rcPool.filter(x => x.indexOf(prefix) === 0);
+    // Numbers left over in the pool for more than 5 minutes are let go: the server hands them out again
+    // to the next receipt, so none is lost and none is used twice.
+    if(rcPool.length && Date.now() - rcPoolAt > 5*60*1000) rcPool = [];
     if(rcPool.length >= n) return true;
     try{
+      // The draft key makes a retry of the same receipt (after a dropped connection or a reload) get the SAME
+      // number back. Only sent when nothing is left in the pool, so leftovers are never issued twice.
+      const body = { prefix, start: Number(receiptSettings.startNumber) || 1, count: n - rcPool.length };
+      if(!rcPool.length && typeof docDraftKey === 'function') body.draftKey = docDraftKey('fee_receipt', 0);
       const res = await fetch('/api/receipt-numbers', {
         method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()},
-        body: JSON.stringify({ prefix, start: Number(receiptSettings.startNumber) || 1, count: n - rcPool.length })
+        body: JSON.stringify(body)
       });
       if(!res.ok) throw new Error('bad response');
       const data = await res.json();
-      if(Array.isArray(data.numbers)) rcPool = rcPool.concat(data.numbers);
+      if(Array.isArray(data.numbers)){ rcPool = rcPool.concat(data.numbers); rcPoolAt = Date.now(); }
       return true;
     }catch(e){ return false; }
   }
