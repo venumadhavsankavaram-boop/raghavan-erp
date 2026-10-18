@@ -5146,6 +5146,8 @@ app.post('/api/admin/neon-import', async (req, res) => {
 // needed for a log meant for "what changed recently," not full history
 // mining).
 app.get('/api/audit-log', async (req, res) => {
+  // Admin only — the log names every user and every record they changed.
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only an Admin can view the audit log.' });
   try {
     const rows = await sql`SELECT * FROM audit_log FORCE INDEX (idx_audit_log_created_at) ORDER BY created_at DESC LIMIT 500`;
     return res.status(200).json(rows);
