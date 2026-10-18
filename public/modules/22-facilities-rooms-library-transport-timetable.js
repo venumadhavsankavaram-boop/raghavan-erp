@@ -1180,8 +1180,10 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
 
       <div class="profile-card" style="max-width:480px; margin-bottom:24px;">
         <h4>💾 Full Data Backup</h4>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Download every record in the database — students, staff, payments, attendance, everything — as one JSON file. Keep it somewhere safe; it's a full copy of the school's data.</p>
-        <button class="btn btn-primary btn-sm" id="backupDownloadBtn" onclick="downloadFullBackup()">Download Backup</button><span class="mo-blob-mini" id="backupBlob"><span class="mo-blob-shape"></span></span>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Download every record in the database — students, staff, payments, attendance, everything — as one JSON file. Keep it somewhere safe; it's a full copy of the school's data (only the Admin can download it).</p>
+        <button class="btn btn-primary btn-sm" id="backupDownloadBtn" onclick="downloadFullBackup()">Download Backup</button>
+        <button class="btn btn-sm" type="button" id="backupCheckBtn" onclick="showBackupSummary()" style="margin-left:6px;">Check what is in my database</button><span class="mo-blob-mini" id="backupBlob"><span class="mo-blob-shape"></span></span>
+        <div id="backupResult" style="margin-top:12px; font-size:0.8rem;"></div>
       </div>
 
       <div class="profile-card" style="max-width:560px; margin-bottom:24px; border-top:4px solid #C0264B;">
@@ -1258,6 +1260,20 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>Could not load the audit log</b>${escapeHtml(e.message)}</div></td></tr>`;
     }
   }
+  async function showBackupSummary(){
+    const out = document.getElementById('backupResult'); if(!out) return;
+    out.innerHTML = '<span style="color:var(--ink-soft);">Checking the database…</span>';
+    try{
+      const res = await fetch('/api/backup/summary'); await throwIfNotOk(res);
+      const d = await res.json();
+      const rows = d.tables.slice().sort((a, b) => b.rows - a.rows);
+      out.innerHTML = '<b>' + d.totalTables + ' tables · ' + d.totalRows.toLocaleString('en-IN') + ' records in the database right now</b> <span style="color:var(--ink-soft);">(login sessions are never included in a backup)</span>' +
+        '<div style="max-height:220px; overflow:auto; margin-top:8px; border:1px solid var(--border); border-radius:10px;"><table style="width:100%; font-size:0.78rem;"><tbody>' +
+        rows.map(t => '<tr><td style="padding:4px 10px;">' + escapeHtml(t.name) + '</td><td style="padding:4px 10px; text-align:right;">' + t.rows.toLocaleString('en-IN') + '</td></tr>').join('') + '</tbody></table></div>';
+    }catch(e){
+      out.innerHTML = '<span style="color:var(--magenta);">Could not check (' + escapeHtml(e.message) + ').</span>';
+    }
+  }
   async function downloadFullBackup(){
     const btn = document.getElementById('backupDownloadBtn');
     const blob2 = document.getElementById('backupBlob');
@@ -1268,7 +1284,9 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     try{
       const res = await fetch('/api/backup');
       await throwIfNotOk(res);
+      const nTables = Number(res.headers.get('X-Backup-Tables')) || 0, nRows = Number(res.headers.get('X-Backup-Rows')) || 0;
       const blob = await res.blob();
+      if(!nTables || blob.size < 500){ throw new Error('the file came out empty — nothing was downloaded'); }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -1277,7 +1295,9 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      showToast('Backup downloaded.', 'burst');
+      showToast('Backup downloaded: ' + nTables + ' tables, ' + nRows.toLocaleString('en-IN') + ' records.', 'burst');
+      const out = document.getElementById('backupResult');
+      if(out) out.innerHTML = '<b style="color:var(--teal);">✓ Backup file saved</b> — ' + nTables + ' tables, ' + nRows.toLocaleString('en-IN') + ' records, ' + (blob.size / 1048576 >= 1 ? (blob.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(blob.size / 1024)) + ' KB') + '.<br><span style="color:var(--ink-soft);">Open the file in Notepad: near the top, <i>counts</i> lists every table and its number of records. Click “Check what is in my database” to compare.</span>';
     }catch(e){
       showToast('Could not generate the backup (' + e.message + ').');
     }finally{

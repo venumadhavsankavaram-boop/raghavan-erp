@@ -4974,30 +4974,64 @@ app.get('/api/me', async (req, res) => {
 // Postgres's own catalog, not from any request input, so building the
 // SELECT with a template string is safe — there's no user-controlled value
 // anywhere in it.
-app.get('/api/backup', async (req, res) => {
+// MySQL/MariaDB version (the first version of this was written for Postgres and listed no tables here).
+// Admin only: the file holds every record, including login hashes.
+// Tables left out on purpose: `sessions` (live login tokens — useless in a restore and a risk if the file leaks).
+const BACKUP_SKIP_TABLES = ['sessions'];
+async function backupTableNames() {
+  const rows = await sql`
+    SELECT TABLE_NAME AS table_name FROM information_schema.TABLES
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'
+    ORDER BY TABLE_NAME
+  `;
+  return rows.map(r => String(r.table_name || r.TABLE_NAME)).filter(n => /^[A-Za-z0-9_]+$/.test(n) && !BACKUP_SKIP_TABLES.includes(n));
+}
+app.get('/api/backup/summary', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can use the backup.' });
   try {
-    const tableRows = await sql`
-      SELECT table_name FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-      ORDER BY table_name
-    `;
-    const backup = { generatedAt: new Date().toISOString(), tables: {} };
-    for (const row of tableRows) {
-      const name = row.table_name;
-      backup.tables[name] = await sql.query(`SELECT * FROM "${name}"`);
+    const names = await backupTableNames();
+    const tables = [];
+    for (const name of names) {
+      const c = await sql.query(`SELECT COUNT(*) AS c FROM \`${name}\``);
+      tables.push({ name, rows: Number(c[0] && c[0].c) || 0 });
     }
-    // Name the download after this school, not whichever school this shared
-    // template server was first written for — same slug logic as the
-    // frontend's slugifySchoolName().
+    return res.status(200).json({ tables, totalTables: tables.length, totalRows: tables.reduce((n, t) => n + t.rows, 0), skipped: BACKUP_SKIP_TABLES });
+  } catch (err) {
+    console.error('backup summary error:', err);
+    return res.status(500).json({ error: 'Could not read the database summary.' });
+  }
+});
+app.get('/api/backup', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can download the full backup.' });
+  try {
+    const names = await backupTableNames();
+    const backup = { generatedAt: new Date().toISOString(), format: 'erp-full-backup-v2', skippedTables: BACKUP_SKIP_TABLES, counts: {}, totalRows: 0, tables: {} };
+    const mismatches = [];
+    for (const name of names) {
+      const before = Number((await sql.query(`SELECT COUNT(*) AS c FROM \`${name}\``))[0].c) || 0;
+      const rows = await sql.query(`SELECT * FROM \`${name}\``);
+      backup.tables[name] = rows;
+      backup.counts[name] = rows.length;
+      backup.totalRows += rows.length;
+      // A row saved by someone else while the dump runs can make the two numbers differ by a few; anything bigger is a problem.
+      if (Math.abs(rows.length - before) > 0) mismatches.push({ table: name, counted: before, exported: rows.length });
+    }
+    backup.complete = true;
+    backup.totalTables = names.length;
+    if (mismatches.length) backup.notes = { changedWhileExporting: mismatches };
+    // Name the download after this school.
     let schoolSlug = 'school';
     try {
       const infoRows = await sql`SELECT data FROM school_info WHERE id = 1`;
-      const rawName = infoRows[0] && infoRows[0].data && infoRows[0].data.name;
-      const slug = String(rawName || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      let data = infoRows[0] && infoRows[0].data;
+      if (typeof data === 'string') { try { data = JSON.parse(data); } catch (e) { data = {}; } }
+      const slug = String((data && data.name) || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
       if (slug) schoolSlug = slug;
-    } catch (e) { /* fall back to 'school' below */ }
+    } catch (e) { /* fall back to 'school' */ }
     const filename = `${schoolSlug}-erp-backup-${new Date().toISOString().slice(0, 10)}.json`;
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('X-Backup-Tables', String(names.length));
+    res.setHeader('X-Backup-Rows', String(backup.totalRows));
     return res.status(200).json(backup);
   } catch (err) {
     console.error('backup error:', err);
