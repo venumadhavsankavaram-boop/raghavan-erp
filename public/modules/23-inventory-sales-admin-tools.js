@@ -79,7 +79,7 @@ const PENDING_APPROVALS_KEY = "pending-approvals";
           <table><thead><tr><th></th><th>Student</th><th>Section</th><th>Outstanding Due</th><th>Carry Forward As</th><th>Target Class</th></tr></thead>
           <tbody>
           ${list.map(s => {
-            const due = computeStudentFinance(s).totals.receivable;
+            const due = (typeof fyhClassTotals === 'function') ? Math.round(fyhClassTotals(s).receivable) : computeStudentFinance(s).totals.receivable;
             return `<tr>
               <td><input type="checkbox" class="pt-student-check" value="${s.id}"></td>
               <td class="name-cell">${s.firstName} ${s.lastName}</td>

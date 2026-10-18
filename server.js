@@ -227,6 +227,17 @@ async function ensureSchema() {
   await addColumnIfMissing('payments', 'ref TEXT');
   await addColumnIfMissing('payments', 'bank_account_id TEXT');
   await addColumnIfMissing('payments', 'collected_by TEXT');
+  // Year-end fee record: one row per student each time they are promoted or
+  // graduated, frozen at that moment (what was billed, discounted, paid, left
+  // unpaid and how much of that was carried into the next class). It lets the
+  // fee page and the parent portal show every earlier academic year after the
+  // live ledger has moved on to the new class.
+  await sql`CREATE TABLE IF NOT EXISTS fee_year_history (
+    id VARCHAR(191) PRIMARY KEY, student_id VARCHAR(191), student_name TEXT, academic_year VARCHAR(32), class_name TEXT, section TEXT,
+    billed DECIMAL(14,2) DEFAULT 0, discount DECIMAL(14,2) DEFAULT 0, paid DECIMAL(14,2) DEFAULT 0, balance DECIMAL(14,2) DEFAULT 0,
+    carried DECIMAL(14,2) DEFAULT 0, carried_as TEXT, outcome VARCHAR(32), moved_to TEXT, date VARCHAR(32), by_user TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`;
   await sql`CREATE TABLE IF NOT EXISTS student_discounts (
     id VARCHAR(191) PRIMARY KEY, batch_id VARCHAR(191), student_id VARCHAR(191), type TEXT, applies_to TEXT, mode TEXT,
     value DECIMAL(14,2) DEFAULT 0, note TEXT, status TEXT, requested_by TEXT, requested_role TEXT, requested_date TEXT,
@@ -685,6 +696,7 @@ async function ensureSchema() {
   await createIndexIfMissing('idx_payments_student_id', 'payments', 'student_id');
   await createIndexIfMissing('idx_payments_date', 'payments', 'date');
   await createIndexIfMissing('idx_student_discounts_student_id', 'student_discounts', 'student_id');
+  await createIndexIfMissing('idx_fee_year_history_student_id', 'fee_year_history', 'student_id');
   await createIndexIfMissing('idx_student_discounts_batch_id', 'student_discounts', 'batch_id');
   await createIndexIfMissing('idx_student_extra_fees_student_id', 'student_extra_fees', 'student_id');
   await createIndexIfMissing('idx_attendance_records_student_id', 'attendance_records', 'student_id');
@@ -741,6 +753,7 @@ async function ensureSchema() {
   await createIndexIfMissing('idx_student_submissions_created_at', 'student_submissions', 'created_at');
   await createIndexIfMissing('idx_payments_created_at', 'payments', 'created_at');
   await createIndexIfMissing('idx_student_discounts_created_at', 'student_discounts', 'created_at');
+  await createIndexIfMissing('idx_fee_year_history_created_at', 'fee_year_history', 'created_at');
   await createIndexIfMissing('idx_student_extra_fees_created_at', 'student_extra_fees', 'created_at');
   await createIndexIfMissing('idx_attendance_records_created_at', 'attendance_records', 'created_at');
   await createIndexIfMissing('idx_holidays_created_at', 'holidays', 'created_at');
@@ -1559,6 +1572,17 @@ const SIMPLE_RESOURCES = {
       { app: 'cancelledBy', col: 'cancelled_by' }, { app: 'cancelledDate', col: 'cancelled_date' },
     ],
   },
+  'fee-year-history': {
+    table: 'fee_year_history',
+    fields: [
+      { app: 'id', col: 'id' }, { app: 'studentId', col: 'student_id' }, { app: 'studentName', col: 'student_name' },
+      { app: 'academicYear', col: 'academic_year' }, { app: 'className', col: 'class_name' }, { app: 'section', col: 'section' },
+      { app: 'billed', col: 'billed', numeric: true }, { app: 'discount', col: 'discount', numeric: true },
+      { app: 'paid', col: 'paid', numeric: true }, { app: 'balance', col: 'balance', numeric: true },
+      { app: 'carried', col: 'carried', numeric: true }, { app: 'carriedAs', col: 'carried_as' },
+      { app: 'outcome', col: 'outcome' }, { app: 'movedTo', col: 'moved_to' }, { app: 'date', col: 'date' }, { app: 'byUser', col: 'by_user' },
+    ],
+  },
   'extra-fees': {
     table: 'student_extra_fees',
     fields: [
@@ -1758,6 +1782,8 @@ const RESOURCE_TO_MODULE = {
   payments: ['managefee'],
   discounts: ['managefee'],
   'extra-fees': ['managefee'],
+  // Year-end fee records are written at promotion time (promotransfer) and read on the fee screens (managefee).
+  'fee-year-history': ['managefee', 'promotransfer'],
   'fee-structure': ['managefee'],
   'acct-income': ['accounting'],
   'acct-expenses': ['accounting'],
@@ -4049,6 +4075,7 @@ const PARENT_OWN_RECORD_RESOURCES = {
   payments: { table: 'payments', fields: () => SIMPLE_RESOURCES.payments.fields },
   discounts: { table: 'student_discounts', fields: () => SIMPLE_RESOURCES.discounts.fields },
   'extra-fees': { table: 'student_extra_fees', fields: () => SIMPLE_RESOURCES['extra-fees'].fields },
+  'fee-year-history': { table: 'fee_year_history', fields: () => SIMPLE_RESOURCES['fee-year-history'].fields },
   'exam-results': { table: 'exam_results', fields: () => SIMPLE_RESOURCES['exam-results'].fields },
   attendance: { table: 'attendance_records', fields: () => SIMPLE_RESOURCES.attendance.fields },
 };
@@ -4282,7 +4309,7 @@ app.get('/api/vendor/admission-inquiries', async (req, res) => {
 // can do.
 const WIPE_TABLES = [
   'exam_hall_tickets', 'exam_results', 'attendance_records', 'staff_attendance_records',
-  'biometric_punches', 'payments', 'student_discounts', 'student_extra_fees',
+  'biometric_punches', 'payments', 'student_discounts', 'student_extra_fees', 'fee_year_history',
   'certificates_issued', 'purge_log', 'deletion_requests', 'comms_messages',
   'acct_income', 'acct_expenses', 'student_concerns', 'student_submissions',
   'notification_events', 'admission_inquiries', 'staff_payroll', 'staff', 'students',
@@ -4323,6 +4350,7 @@ app.post('/api/vendor/wipe-data', async (req, res) => {
       sql`DELETE FROM payments`,
       sql`DELETE FROM student_discounts`,
       sql`DELETE FROM student_extra_fees`,
+      sql`DELETE FROM fee_year_history`,
       sql`DELETE FROM certificates_issued`,
       sql`DELETE FROM purge_log`,
       sql`DELETE FROM deletion_requests`,
