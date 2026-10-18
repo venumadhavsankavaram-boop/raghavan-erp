@@ -251,6 +251,31 @@ async function ensureSchema() {
   await sql`CREATE TABLE IF NOT EXISTS holidays (
     id VARCHAR(191) PRIMARY KEY, date TEXT, name TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
+  // One holiday list for the whole ERP (Attendance + Exams share it). type/note are new; the old
+  // separate Exam Holidays list (kv_store 'exam-holidays') is merged in once, then kept as a backup key.
+  await addColumnIfMissing('holidays', 'type VARCHAR(40) NULL');
+  await addColumnIfMissing('holidays', 'note TEXT NULL');
+  try {
+    const legacy = await sql`SELECT value FROM kv_store WHERE \`key\` = 'exam-holidays'`;
+    if (legacy.length) {
+      let arr = legacy[0].value;
+      if (typeof arr === 'string') { try { arr = JSON.parse(arr); } catch (e) { arr = []; } }
+      if (Array.isArray(arr)) {
+        let moved = 0;
+        for (const h of arr) {
+          const d = h && String(h.date || '').slice(0, 10);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(d || '')) continue;
+          const have = await sql`SELECT 1 FROM holidays WHERE date = ${d} LIMIT 1`;
+          if (have.length) continue;
+          await sql`INSERT INTO holidays (id, date, name, type, note) VALUES (${d}, ${d}, ${String(h.name || 'Holiday').slice(0, 200)}, ${String(h.type || 'Custom').slice(0, 40)}, ${String(h.note || '').slice(0, 500)})`;
+          moved++;
+        }
+        if (moved) console.log('[holidays] merged ' + moved + ' exam holiday(s) into the shared holiday list');
+      }
+      await sql`DELETE FROM kv_store WHERE \`key\` = 'exam-holidays-legacy'`;
+      await sql`UPDATE kv_store SET \`key\` = 'exam-holidays-legacy' WHERE \`key\` = 'exam-holidays'`;
+    }
+  } catch (e) { console.error('[holidays] legacy exam-holiday merge skipped:', e.message); }
   await sql`CREATE TABLE IF NOT EXISTS exam_results (
     id VARCHAR(191) PRIMARY KEY, exam_id VARCHAR(191), student_id VARCHAR(191), subject TEXT, marks DECIMAL(10,2), absent BOOLEAN DEFAULT false,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -1552,7 +1577,7 @@ const SIMPLE_RESOURCES = {
   },
   holidays: {
     table: 'holidays',
-    fields: [{ app: 'id', col: 'id' }, { app: 'date', col: 'date' }, { app: 'name', col: 'name' }],
+    fields: [{ app: 'id', col: 'id' }, { app: 'date', col: 'date' }, { app: 'name', col: 'name' }, { app: 'type', col: 'type' }, { app: 'note', col: 'note' }],
   },
   'exam-results': {
     table: 'exam_results',
@@ -1738,7 +1763,7 @@ const RESOURCE_TO_MODULE = {
   'acct-expenses': ['accounting'],
   // Academics
   attendance: ['attendance'],
-  holidays: ['attendance'],
+  holidays: ['attendance', 'exams', 'result'],
   'attendance-settings': ['attendance'],
   'staff-attendance': ['staff', 'attendance'],
   'exam-results': ['exams', 'result'],
