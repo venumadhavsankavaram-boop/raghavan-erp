@@ -49,7 +49,7 @@
   .cc-type{display:inline-block; padding:3px 10px; border-radius:99px; font-size:.72rem; font-weight:700;}
   .cc-t-General{background:rgba(84,76,107,.14); color:#3d3556;} .cc-t-Special{background:rgba(124,58,237,.14); color:#6d28d9;}
   .cc-t-RTE{background:rgba(24,143,134,.16); color:#0f6a63;} .cc-t-Sibling{background:rgba(47,128,237,.14); color:#1c5cbd;}
-  .cc-t-Personal{background:rgba(203,154,46,.18); color:#8a6a1f;}
+  .cc-t-Personal{background:rgba(203,154,46,.18); color:#8a6a1f;} .cc-t-Employee{background:rgba(214,64,120,.13); color:#a3224f;}
   .cc-note{display:block; color:var(--ink-soft); font-size:.72rem; margin-top:3px;}
   .cc-heads{display:flex; flex-wrap:wrap; gap:6px;}
   .cc-head{padding:4px 10px; border-radius:10px; background:rgba(33,26,78,.06); font-size:.78rem; line-height:1.25;}
@@ -80,7 +80,7 @@
 })();
 
 let ccHeadFilter = '', ccTypeFilter = '';
-const CC_TYPE_KEY = { 'General Discount':'General', 'Special Discount':'Special', 'RTE Discount':'RTE', 'Sibling Discount':'Sibling', 'Personal Discount':'Personal' };
+const CC_TYPE_KEY = { 'General Discount':'General', 'Special Discount':'Special', 'RTE Discount':'RTE', 'Sibling Discount':'Sibling', 'Personal Discount':'Personal', 'Employee Discount':'Employee' };
 const CC_STATUS = {
   Approved:  { cls:'paid',    icon:'✓', text:'Approved' },
   Pending:   { cls:'due',     icon:'◐', text:'Pending approval' },

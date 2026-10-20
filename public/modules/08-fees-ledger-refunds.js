@@ -527,8 +527,48 @@ let refundPaymentId = null;
   function onDiscTypeChange(){
     const type = document.getElementById('discCreateType').value;
     const isGeneral = type === 'General Discount';
+    const isEmployee = type === 'Employee Discount';
     document.getElementById('discRemarkHint').style.display = isGeneral ? 'block' : 'none';
     document.getElementById('discRemarkStar').style.display = isGeneral ? 'inline' : 'none';
+    discEnsureEmployeeField(isEmployee);
+  }
+  // Employee Discount names exactly WHICH employee it is for (the staff member whose
+  // child/ward gets the concession), so it can be checked later. Picked from the staff
+  // list; if this login cannot read the staff list, the name can be typed instead.
+  async function discEnsureEmployeeField(show){
+    let wrap = document.getElementById('discEmployeeWrap');
+    if(!show){ if(wrap) wrap.style.display = 'none'; return; }
+    if(!wrap){
+      const typeField = document.getElementById('discCreateType').closest('.f-field');
+      wrap = document.createElement('div');
+      wrap.className = 'f-field full';
+      wrap.id = 'discEmployeeWrap';
+      wrap.innerHTML = '<label>Employee <span class="required-star">*</span></label><select id="discEmployee"></select>'
+        + '<input type="text" id="discEmployeeName" placeholder="Type the employee\'s name and staff ID" style="display:none;">'
+        + '<div style="color:var(--ink-soft); font-size:0.76rem; margin-top:4px;">The staff member whose child (or ward) receives this discount.</div>';
+      typeField.insertAdjacentElement('afterend', wrap);
+    }
+    wrap.style.display = '';
+    const sel = document.getElementById('discEmployee'), txt = document.getElementById('discEmployeeName');
+    let list = [];
+    try{ await ensureDataLoaded('staffList', loadStaff); list = (typeof staffList !== 'undefined' ? staffList : []) || []; }catch(e){}
+    list = list.filter(st => typeof staffIsActive === 'function' ? staffIsActive(st) : true)
+      .sort((a, b) => String((a.firstName || '') + (a.lastName || '')).localeCompare(String((b.firstName || '') + (b.lastName || ''))));
+    if(!list.length){ sel.style.display = 'none'; txt.style.display = ''; return; }
+    sel.style.display = ''; txt.style.display = 'none';
+    const keep = sel.value;
+    sel.innerHTML = '<option value="">Select employee…</option>' + list.map(st =>
+      `<option value="${escapeHtml(String(st.id))}">${escapeHtml(((st.firstName || '') + ' ' + (st.lastName || '')).trim())}${st.staffId ? ' — ' + escapeHtml(st.staffId) : ''}${st.designation ? ' (' + escapeHtml(st.designation) + ')' : ''}</option>`).join('');
+    if(keep) sel.value = keep;
+  }
+  // "Employee: Name (StaffID)" is written at the front of the remark so every list, export and audit shows who it was for.
+  function discEmployeeLabel(){
+    const sel = document.getElementById('discEmployee'), txt = document.getElementById('discEmployeeName');
+    if(sel && sel.style.display !== 'none'){
+      const st = (typeof staffList !== 'undefined' ? staffList : []).find(x => String(x.id) === sel.value);
+      return st ? ((st.firstName || '') + ' ' + (st.lastName || '')).trim() + (st.staffId ? ' (' + st.staffId + ')' : '') : '';
+    }
+    return txt ? txt.value.trim() : '';
   }
 
   function renderDiscSelectedStudentsBox(){
@@ -683,8 +723,13 @@ let refundPaymentId = null;
       approver = users.find(u => u.id === approverSel.value);
     }
     const type = document.getElementById('discCreateType').value;
-    const note = document.getElementById('discCreateNote').value.trim();
+    let note = document.getElementById('discCreateNote').value.trim();
     if(type === 'General Discount' && !note){ showToast('Remark is mandatory for General Discount.'); return; }
+    if(type === 'Employee Discount'){
+      const emp = discEmployeeLabel();
+      if(!emp){ showToast('Select the employee this discount is for.'); return; }
+      note = 'Employee: ' + emp + (note ? ' — ' + note : '');
+    }
 
     const perStudentAmounts = Array.from(document.querySelectorAll('.disc-amt-input'))
       .map(inp => ({ studentId: inp.dataset.student, cat: inp.dataset.cat, value: Number(inp.value) || 0 }))

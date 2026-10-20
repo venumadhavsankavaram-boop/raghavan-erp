@@ -5,7 +5,7 @@ const FEE_TYPES_KEY = "fee-types";
   const STUDENT_EXTRA_FEES_KEY = "student-extra-fees";
   const LATE_FEE_SETTINGS_KEY = "late-fee-settings";
   const RECEIPT_SETTINGS_KEY = "receipt-settings";
-  const DISCOUNT_TYPE_OPTIONS = ['General Discount','Special Discount','RTE Discount','Sibling Discount','Personal Discount'];
+  const DISCOUNT_TYPE_OPTIONS = ['General Discount','Special Discount','RTE Discount','Sibling Discount','Personal Discount','Employee Discount'];
   // These two keys are declared here rather than up with the others, since
   // API_BACKED_KEYS is created before this point in the file — adding them
   // as separate assignments avoids a "used before declaration" crash.
