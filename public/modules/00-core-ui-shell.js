@@ -46,7 +46,7 @@
     staffdirectory:'staffsec', staffdepts:'staffsec', staffidcards:'staffsec', staffpayroll:'staffsec', staffattendance:'staffsec', staffreports:'staffsec', staffactivity:'staffsec',
     inventory:'facilities', transport:'facilities', library:'facilities', hostel:'facilities',
     reports:'reportssec',
-    schoolprofile:'configuration', classessetup:'configuration', academicyear:'configuration', feestructuresetup:'configuration', promotions:'configuration', refundpolicy:'configuration', usersroles:'configuration', rolespermissions:'configuration', admintools2:'configuration',
+    schoolprofile:'configuration', classessetup:'configuration', academicyear:'configuration', feestructuresetup:'configuration', promotions:'configuration', refundpolicy:'configuration', deleteditems:'configuration', usersroles:'configuration', rolespermissions:'configuration', admintools2:'configuration',
   };
   // Each Staff sidebar page is its own view key, but they all share the one view-staff
   // container/content pieces internally — this maps the view key to the internal staff tab.

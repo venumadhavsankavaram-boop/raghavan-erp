@@ -3283,6 +3283,7 @@
       <button class="sb-link" id="navFeeStructureSetup" onclick="switchView('feestructuresetup')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="18" x2="20" y2="18"/><line x1="4" y1="6" x2="4" y2="6"/><line x1="4" y1="12" x2="4" y2="12"/><line x1="4" y1="18" x2="4" y2="18"/></svg></span> Fee Structure</button>
       <button class="sb-link" id="navPromotions" onclick="switchView('promotions')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3,17 9,11 13,15 21,6"/><polyline points="15,6 21,6 21,12"/></svg></span> Promotions</button>
       <button class="sb-link" id="navRefundPolicy" onclick="switchView('refundpolicy')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3,4 3,9 8,9"/><path d="M12 8v8M9.5 10.5h4a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3h4"/></svg></span> Refund Policy</button>
+      <button class="sb-link" id="navDeletedItems" onclick="switchView('deleteditems')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3,6 5,6 21,6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></span> Deleted Items</button>
       <button class="sb-link" id="navUsersRoles" onclick="switchView('usersroles')" style="display:none;"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 L20 6 V12 C20 17 16.5 20.5 12 22 C7.5 20.5 4 17 4 12 V6 Z"/></svg></span> Users &amp; Roles</button>
       <button class="sb-link" id="navStudentParentLogins" onclick="switchView('studentparentlogins')" style="display:none;"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="14.5" r="3.5"/><path d="M10.5 12 L20 2.5"/><path d="M16.5 6 L19 8.5"/><path d="M13.5 9 L16 11.5"/></svg></span> Student/Parent Logins</button>
       <button class="sb-link" id="navRolesPermissions" onclick="switchView('rolespermissions')" style="display:none;"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11 V7.5 C8 5 9.8 3 12 3 C14.2 3 16 5 16 7.5 V11"/></svg></span> Roles &amp; Permissions</button>
@@ -3611,6 +3612,11 @@
     <div id="view-refundpolicy" style="display:none;">
       <div class="topbar"><div><h1>Refund Policy</h1><p>Approval limit, default return method and non-refundable fee heads.</p></div></div>
       <div id="refundPolicyBody"></div>
+    </div>
+
+    <div id="view-deleteditems" style="display:none;">
+      <div class="topbar"><div><h1>Deleted Items</h1><p>Deleted students, voided receipts and vouchers, and removed users — restore, review or correct them here.</p></div></div>
+      <div id="deletedItemsBody"></div>
     </div>
 
     <div id="view-promotions" style="display:none;">
@@ -4940,6 +4946,7 @@
 <script src="modules/28-study-certificate-wizard-bootstrap.js"></script>
 <script src="modules/07c-fee-year-history.js"></script>
 <script src="modules/29-demo-mode.js"></script>
+<script src="modules/31-deleted-items.js"></script>
 
 <!-- PWA installability — registered standalone, after everything else, so a
      school whose deploy doesn't yet include sw.js/manifest.json just skips

@@ -209,6 +209,7 @@ async function ensureSchema() {
   await addColumnIfMissing('payments', 'voided BOOLEAN DEFAULT false');
   await addColumnIfMissing('payments', 'void_type TEXT');
   await addColumnIfMissing('payments', 'void_reason TEXT');
+  await addColumnIfMissing('payments', 'void_history TEXT');   // JSON log of restore / reason-edit actions (Deleted Items page)
   await addColumnIfMissing('payments', 'voided_by TEXT');
   // TEXT, not DATETIME: the frontend always sends a full ISO timestamp
   // string (new Date().toISOString()), and simpleToAppShape() below only
@@ -513,6 +514,8 @@ async function ensureSchema() {
     voided BOOLEAN NOT NULL DEFAULT false, void_reason TEXT, voided_by TEXT, voided_at DATETIME,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
+  await addColumnIfMissing('acct_income', 'void_history TEXT');
+  await addColumnIfMissing('acct_expenses', 'void_history TEXT');
   // A Student/Parent login reaching out to their Class Teacher, a specific
   // Subject Teacher, or Management (Admin/Principal) with a concern.
   // recipient_staff_id is the resolved staff.id for class_teacher/
@@ -1555,7 +1558,7 @@ const SIMPLE_RESOURCES = {
       { app: 'date', col: 'date' }, { app: 'note', col: 'note' }, { app: 'classAtPayment', col: 'class_at_payment' },
       { app: 'extraFeeName', col: 'extra_fee_name' }, { app: 'extraFeeId', col: 'extra_fee_id' },
       { app: 'voided', col: 'voided' }, { app: 'voidType', col: 'void_type' }, { app: 'voidReason', col: 'void_reason' },
-      { app: 'voidedBy', col: 'voided_by' }, { app: 'voidedAt', col: 'voided_at' },
+      { app: 'voidedBy', col: 'voided_by' }, { app: 'voidedAt', col: 'voided_at' }, { app: 'voidHistoryJson', col: 'void_history' },
       { app: 'chequeNo', col: 'cheque_no' }, { app: 'chequeBank', col: 'cheque_bank' }, { app: 'chequeDate', col: 'cheque_date' }, { app: 'chequeStatus', col: 'cheque_status' }, { app: 'chequeStatusDate', col: 'cheque_status_date' }, { app: 'chequeNote', col: 'cheque_note' }, { app: 'ref', col: 'ref' }, { app: 'bankAccountId', col: 'bank_account_id' }, { app: 'collectedBy', col: 'collected_by' },
     ],
   },
@@ -1643,7 +1646,7 @@ const SIMPLE_RESOURCES = {
       { app: 'amount', col: 'amount', numeric: true }, { app: 'party', col: 'party' }, { app: 'mode', col: 'mode' },
       { app: 'referenceNo', col: 'reference_no' }, { app: 'description', col: 'description' }, { app: 'addedBy', col: 'added_by' },
       { app: 'voided', col: 'voided' }, { app: 'voidReason', col: 'void_reason' },
-      { app: 'voidedBy', col: 'voided_by' }, { app: 'voidedAt', col: 'voided_at' },
+      { app: 'voidedBy', col: 'voided_by' }, { app: 'voidedAt', col: 'voided_at' }, { app: 'voidHistoryJson', col: 'void_history' },
     ],
   },
   'acct-expenses': {
@@ -1654,7 +1657,7 @@ const SIMPLE_RESOURCES = {
       { app: 'amount', col: 'amount', numeric: true }, { app: 'party', col: 'party' }, { app: 'mode', col: 'mode' },
       { app: 'referenceNo', col: 'reference_no' }, { app: 'description', col: 'description' }, { app: 'addedBy', col: 'added_by' },
       { app: 'voided', col: 'voided' }, { app: 'voidReason', col: 'void_reason' },
-      { app: 'voidedBy', col: 'voided_by' }, { app: 'voidedAt', col: 'voided_at' },
+      { app: 'voidedBy', col: 'voided_by' }, { app: 'voidedAt', col: 'voided_at' }, { app: 'voidHistoryJson', col: 'void_history' },
     ],
   },
 };

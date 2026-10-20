@@ -22,6 +22,7 @@ function switchView(view){
     let permitted;
     if(universalPages.includes(view)) permitted = true;
     else if(setupPages.includes(view)) permitted = allowed.includes('setup');
+    else if(view === 'deleteditems') permitted = ['Admin','Principal'].includes(currentUser.role);
     else if(adminOnlyPages.includes(view)) permitted = currentUser.role === 'Admin';
     else if(STAFF_SUBVIEWS[view]){
       const stab = STAFF_SUBVIEWS[view];
@@ -54,6 +55,7 @@ function switchView(view){
     document.getElementById('view-feestructuresetup').style.display = view === 'feestructuresetup' ? 'block' : 'none';
     document.getElementById('view-promotions').style.display = view === 'promotions' ? 'block' : 'none';
     document.getElementById('view-refundpolicy').style.display = view === 'refundpolicy' ? 'block' : 'none';
+    document.getElementById('view-deleteditems').style.display = view === 'deleteditems' ? 'block' : 'none';
     document.getElementById('view-usersroles').style.display = view === 'usersroles' ? 'block' : 'none';
     document.getElementById('view-studentparentlogins').style.display = view === 'studentparentlogins' ? 'block' : 'none';
     document.getElementById('view-rolespermissions').style.display = view === 'rolespermissions' ? 'block' : 'none';
@@ -95,6 +97,7 @@ function switchView(view){
     document.getElementById('navFeeStructureSetup').classList.toggle('active', view === 'feestructuresetup');
     document.getElementById('navPromotions').classList.toggle('active', view === 'promotions');
     document.getElementById('navRefundPolicy').classList.toggle('active', view === 'refundpolicy');
+    document.getElementById('navDeletedItems').classList.toggle('active', view === 'deleteditems');
     document.getElementById('navUsersRoles').classList.toggle('active', view === 'usersroles');
     document.getElementById('navStudentParentLogins').classList.toggle('active', view === 'studentparentlogins');
     document.getElementById('navRolesPermissions').classList.toggle('active', view === 'rolespermissions');
@@ -130,6 +133,7 @@ function switchView(view){
     if(view === 'feestructuresetup'){ initFeeStructureSetupPage(); }
     if(view === 'promotions'){ initPromotionsPage(); }
     if(view === 'refundpolicy'){ initRefundPolicyPage(); }
+    if(view === 'deleteditems'){ initDeletedItemsPage(); }
     if(view === 'usersroles'){ initUsersRolesPage(); }
     if(view === 'studentparentlogins'){ initStudentParentLoginsPage(); }
     if(view === 'rolespermissions'){ initRolesPermissionsPage(); }

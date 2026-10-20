@@ -860,7 +860,8 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     document.getElementById('navAcademicYear').style.display = getSetupTabAccess(currentUser.role, 'setup_academicyear') ? 'flex' : 'none';
     document.getElementById('navFeeStructureSetup').style.display = getSetupTabAccess(currentUser.role, 'setup_feestructure') ? 'flex' : 'none';
     document.getElementById('navPromotions').style.display = getSetupTabAccess(currentUser.role, 'setup_promotions') ? 'flex' : 'none';
-    document.getElementById('navRefundPolicy').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';   // Admin only: the refund limit is not shown to other roles
+    document.getElementById('navRefundPolicy').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';
+    document.getElementById('navDeletedItems').style.display = ['Admin','Principal'].includes(currentUser.role) ? 'flex' : 'none';   // Admin only: the refund limit is not shown to other roles
     document.getElementById('navUsersRoles').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';
     document.getElementById('navStudentParentLogins').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';
     document.getElementById('navRolesPermissions').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';
