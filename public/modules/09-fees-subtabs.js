@@ -321,31 +321,87 @@ const ATTENDANCE_KEY = "attendance-records";
     await storageSet(STAFF_ATTENDANCE_KEY, staffAttendanceRecords);
     showToast('Staff attendance saved for ' + staffAttMarkDate + ' (' + staffAttMarkSession + ').');
   }
-  // See computeAttendanceStats' comment — same session-weighting rule.
+  /* Staff attendance is counted in DAYS (not sessions). Per staff + date:
+     - a legacy sessionless row is one full day; if a date has legacy rows, session rows
+       for the same date are ignored (no double count);
+     - otherwise each distinct session (last write wins) counts 1/expected, where expected is
+       1 on single-session dates (Morning only) and 2 otherwise, so Morning-only in the
+       single-session period = one full day and Morning-only in a two-session period = half a day. */
+  function staffAttDayFractions(staffId, fromDate, toDate){
+    const byDate = {};
+    staffAttendanceRecords.forEach(r => {
+      if(r.staffId !== staffId || !r.date) return;
+      if(fromDate && r.date < fromDate) return;
+      if(toDate && r.date > toDate) return;
+      (byDate[r.date] = byDate[r.date] || []).push(r);
+    });
+    const out = [];
+    Object.keys(byDate).forEach(d => {
+      const rows = byDate[d];
+      const legacy = rows.filter(r => !r.session);
+      if(legacy.length){ out.push({ date:d, status:legacy[legacy.length-1].status, frac:1 }); return; }
+      const exp = attIsSingleSession(d) ? 1 : 2;
+      const bySess = {};
+      rows.forEach(r => { bySess[r.session] = r; });
+      Object.keys(bySess).forEach(k => out.push({ date:d, status:bySess[k].status, frac:Math.min(1, 1/exp) }));
+    });
+    return out;
+  }
+  function staffAttDaysByStatus(staffId, fromDate, toDate, statuses){
+    return staffAttDayFractions(staffId, fromDate, toDate).filter(x => statuses.includes(x.status)).reduce((n,x) => n + x.frac, 0);
+  }
   function computeStaffAttendanceStats(staffId, fromDate, toDate){
-    let recs = staffAttendanceRecords.filter(r => r.staffId === staffId);
-    if(fromDate) recs = recs.filter(r => r.date >= fromDate);
-    if(toDate) recs = recs.filter(r => r.date <= toDate);
-    const sumBy = status => recs.filter(r => r.status===status).reduce((n,r) => n + attSessionWeight(r), 0);
-    const present = sumBy('Present');
-    const late = sumBy('Late');
-    const absent = sumBy('Absent');
-    const leave = sumBy('Leave');
-    const total = recs.reduce((n,r) => n + attSessionWeight(r), 0);
+    const fr = staffAttDayFractions(staffId, fromDate, toDate);
+    const r1 = n => Math.round(n*10)/10;
+    const sumBy = status => r1(fr.filter(x => x.status===status).reduce((n,x) => n + x.frac, 0));
+    const present = sumBy('Present'), late = sumBy('Late'), absent = sumBy('Absent'), leave = sumBy('Leave');
+    const total = r1(fr.reduce((n,x) => n + x.frac, 0));
     const attended = present + late;
     const pct = total > 0 ? Math.round((attended/total)*100) : 0;
     return { present, absent, late, leave, total, pct };
   }
+  let staffAttRepFrom = '', staffAttRepTo = '';
+  function staffAttRepRange(){
+    if(!staffAttRepFrom || !staffAttRepTo){
+      const n = new Date(), y = n.getFullYear(), m = String(n.getMonth()+1).padStart(2,'0');
+      const last = new Date(y, n.getMonth()+1, 0).getDate();
+      staffAttRepFrom = y+'-'+m+'-01'; staffAttRepTo = y+'-'+m+'-'+String(last).padStart(2,'0');
+    }
+    return [staffAttRepFrom, staffAttRepTo];
+  }
+  function staffAttRepSetRange(f, t){
+    if(f) staffAttRepFrom = f; if(t) staffAttRepTo = t;
+    if(staffAttRepFrom > staffAttRepTo){ const x = staffAttRepFrom; staffAttRepFrom = staffAttRepTo; staffAttRepTo = x; }
+    renderStaffAttReports(document.getElementById('staffAttContentBody'));
+  }
+  function staffAttRepPreset(kind){
+    const n = new Date(), y = n.getFullYear(), mo = n.getMonth();
+    const iso = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    let f, t;
+    if(kind==='month'){ f = new Date(y,mo,1); t = new Date(y,mo+1,0); }
+    else if(kind==='last'){ f = new Date(y,mo-1,1); t = new Date(y,mo,0); }
+    else { const sy = mo>=5 ? y : y-1; f = new Date(sy,5,1); t = new Date(sy+1,4,31); } // academic year Jun–May
+    staffAttRepFrom = iso(f); staffAttRepTo = iso(t);
+    renderStaffAttReports(document.getElementById('staffAttContentBody'));
+  }
   function renderStaffAttReports(body){
     const list = filteredStaffForAttendance();
+    const [rf, rt] = staffAttRepRange();
     const rows = list.map(st => {
-      const stats = computeStaffAttendanceStats(st.id);
+      const stats = computeStaffAttendanceStats(st.id, rf, rt);
       const pctClass = stats.pct >= 90 ? 'good' : stats.pct >= 75 ? 'warn' : 'bad';
       return { st, stats, pctClass };
     }).sort((a,b) => a.stats.pct - b.stats.pct);
     body.innerHTML = `
-      <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
-        <button class="btn btn-ghost btn-sm" onclick="downloadStaffAttendanceExcel()">📥 Excel</button> <button class="btn btn-ghost btn-sm" onclick="downloadStaffAttendancePDF()">📄 PDF</button>
+      <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+        <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
+          <label style="font-size:0.74rem;">From<br><input type="date" id="staffAttRepFrom" value="${rf}" onchange="staffAttRepSetRange(this.value,null)"></label>
+          <label style="font-size:0.74rem;">To<br><input type="date" id="staffAttRepTo" value="${rt}" onchange="staffAttRepSetRange(null,this.value)"></label>
+          <button class="btn btn-ghost btn-sm" onclick="staffAttRepPreset('month')">This month</button>
+          <button class="btn btn-ghost btn-sm" onclick="staffAttRepPreset('last')">Last month</button>
+          <button class="btn btn-ghost btn-sm" onclick="staffAttRepPreset('year')">This academic year</button>
+        </div>
+        <div><button class="btn btn-ghost btn-sm" onclick="downloadStaffAttendanceExcel()">📥 Excel</button> <button class="btn btn-ghost btn-sm" onclick="downloadStaffAttendancePDF()">📄 PDF</button></div>
       </div>
       <div class="att-legend">
         <span><span class="dot2" style="background:var(--teal);"></span>Present</span>
@@ -353,7 +409,7 @@ const ATTENDANCE_KEY = "attendance-records";
         <span><span class="dot2" style="background:var(--magenta);"></span>Absent</span>
         <span><span class="dot2" style="background:var(--brand-navy);"></span>Leave (counts as absent)</span>
       </div>
-      <p style="font-size:0.74rem; color:var(--ink-soft); margin:-4px 0 10px;">Counts are per <b>session</b> (Morning + Afternoon), not per day — a fully-present day now shows as 2, not 1. Payroll's Loss-of-Pay calculation already converts this back to days. Attendance marked before the two-session change counts as 2 (a full day) either way, so % stays consistent across the change.</p>
+      <p style="font-size:0.74rem; color:var(--ink-soft); margin:-4px 0 10px;">Counts are in <b>days</b> for ${rf} to ${rt} (half a day = one session missed in a two-session day). Single-session period Morning-only counts as a full day.</p>
       <div class="table-wrap">
         <table><thead><tr><th>Staff</th><th>Designation</th><th>Department</th><th>Present</th><th>Absent</th><th>Late</th><th>Leave</th><th>Total Marked</th><th>%</th></tr></thead>
         <tbody>
@@ -372,13 +428,14 @@ const ATTENDANCE_KEY = "attendance-records";
   }
   function staffAttendanceReportRows(){
     return filteredStaffForAttendance().map(st => {
-      const stats = computeStaffAttendanceStats(st.id);
+      const [rf, rt] = staffAttRepRange();
+      const stats = computeStaffAttendanceStats(st.id, rf, rt);
       return { 'Staff': st.firstName+' '+st.lastName, 'Designation': st.designation||'', 'Department': st.department||'',
-        'Present': stats.present, 'Absent': stats.absent, 'Late': stats.late, 'Leave': stats.leave, 'Total Marked': stats.total, '%': stats.pct };
+        'Present': stats.present, 'Absent': stats.absent, 'Late': stats.late, 'Leave': stats.leave, 'Total Days Marked': stats.total, '%': stats.pct };
     });
   }
   function downloadStaffAttendanceExcel(){ exportRowsToExcel('staff_attendance_report.xlsx', 'Staff Attendance', staffAttendanceReportRows()); }
-  function downloadStaffAttendancePDF(){ exportRowsToPDF('Staff Attendance Report', staffAttMarkDate, staffAttendanceReportRows()); }
+  function downloadStaffAttendancePDF(){ exportRowsToPDF('Staff Attendance Report', staffAttRepRange().join(' to '), staffAttendanceReportRows()); }
 
   function studentAttendanceReportRows(){
     const classF = document.getElementById('atClassFilter').value;
@@ -389,7 +446,7 @@ const ATTENDANCE_KEY = "attendance-records";
     return list.map(s => {
       const stats = computeAttendanceStats(s.id, atReportsFrom || undefined, atReportsTo || undefined);
       return { 'Student': s.firstName+' '+s.lastName, 'Admission No': s.admissionNo, 'Class': s.className, 'Section': s.section,
-        'Present': stats.present, 'Absent': stats.absent, 'Late': stats.late, 'Leave': stats.leave, 'Total Marked': stats.total, '%': stats.pct };
+        'Present': stats.present, 'Absent': stats.absent, 'Late': stats.late, 'Leave': stats.leave, 'Total Days Marked': stats.total, '%': stats.pct };
     });
   }
   function setAttReportsRange(which, val){

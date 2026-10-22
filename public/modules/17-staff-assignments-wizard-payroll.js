@@ -13,10 +13,7 @@ function daysInPayrollMonth(monthStr){
   // total weight by 2 gives whole days for a fully-absent day and 0.5 for a
   // single missed session (e.g. left after lunch) either way.
   function staffAttendanceCountInMonth(staffId, monthStr, statuses){
-    const weight = staffAttendanceRecords
-      .filter(r => r.staffId===staffId && (r.date||'').slice(0,7)===monthStr && statuses.includes(r.status))
-      .reduce((n,r) => n + attSessionWeight(r), 0);
-    return weight / 2;
+    return staffAttDaysByStatus(staffId, monthStr+'-01', monthStr+'-31', statuses);
   }
   function findPayrollRecord(staffId, monthStr){
     return staffPayrollRecords.find(p => p.staffId === staffId && p.month === monthStr);
