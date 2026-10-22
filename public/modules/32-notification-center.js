@@ -177,6 +177,31 @@
       NC.pushState = (sub && Notification.permission === 'granted') ? 'on' : 'off';
     }catch(_){ NC.pushState = ''; }
   }
+  // Plain-language help shown when a phone can't register for push (typically
+  // "Registration failed - push service error": the phone could not reach Google's push service).
+  function ncPushHelp(err){
+    const ua = navigator.userAgent || '';
+    const android = /Android/i.test(ua), ios = /iPhone|iPad|iPod/i.test(ua);
+    const standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone;
+    const notChrome = android && (!/Chrome\//.test(ua) || /UCBrowser|MiuiBrowser|OPR\/|Opera|FBAN|FBAV|Instagram|; wv\)/i.test(ua));
+    const steps = [];
+    if(ios && !standalone) steps.push(['📲', 'Add the ERP to your Home Screen first', 'Tap the Share button, then “Add to Home Screen”. Open the ERP from that new icon, then try again.']);
+    if(notChrome) steps.push(['🌐', 'Open the ERP in Chrome', 'Phone alerts don’t work in this browser. Copy the ERP address, open the Chrome app, paste it, sign in and try again.']);
+    steps.push(['📶', 'Switch your internet', 'If you are on Wi-Fi, turn Wi-Fi off and use mobile data (or the other way round), then try again.']);
+    if(android) steps.push(['🔄', 'Update “Google Play services”', 'Open the Play Store, search for “Google Play services” and tap Update. Phones without it can’t get phone alerts.']);
+    steps.push(['🔋', 'Turn off data saver and battery saver', 'In Chrome settings switch off “Lite mode / Data saver”, and switch off your phone’s battery saver.']);
+    steps.push(['🕶️', 'Use a normal tab', 'Phone alerts don’t work in a private / incognito tab.']);
+    ncModal('Let’s fix phone alerts', `
+      <p class="nc-sm" style="margin:0 0 12px;">Your phone couldn’t connect to the alert service. Try these, one by one, then tap <b>Try again</b>:</p>
+      ${steps.map((x, n) => `<div class="nc-todo ok"><div><b>${n + 1}. ${x[0]} ${e(x[1])}</b><div class="nc-sm">${e(x[2])}</div></div></div>`).join('')}
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
+        <button class="btn btn-primary" onclick="document.getElementById('ncModal2').classList.remove('open'); ncEnablePush()">Try again</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('ncModal2').classList.remove('open')">Skip for now</button>
+      </div>
+      <p class="nc-sm" style="margin:12px 0 0;">Skipping is fine: you will still get every alert and your to-do list inside the ERP (account menu → Notifications).</p>
+      <p class="nc-sm" style="margin:8px 0 0; opacity:.7;">Technical detail: ${e((err && err.message) || 'unknown')}</p>`);
+  }
+  window.ncPushHelp = ncPushHelp;
   window.ncEnablePush = async function(){
     try{
       const k = await fetch('/api/push/vapid-key'); if(!k.ok){ NC.pushState = 'unconfigured'; ncRenderFoot(); return; }
@@ -184,12 +209,21 @@
       const perm = await Notification.requestPermission();
       if(perm !== 'granted'){ NC.pushState = perm === 'denied' ? 'blocked' : 'off'; ncRenderFoot(); return; }
       const reg = await navigator.serviceWorker.ready;
+      const key = urlBase64ToUint8Array(publicKey);
       let sub = await reg.pushManager.getSubscription();
-      if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey: urlBase64ToUint8Array(publicKey) });
+      if(!sub){
+        try{ sub = await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey: key }); }
+        catch(first){
+          // A stale half-registration is a common cause of "push service error": clear it and retry once.
+          try{ const old = await reg.pushManager.getSubscription(); if(old) await old.unsubscribe(); }catch(_){}
+          await new Promise(r => setTimeout(r, 1200));
+          sub = await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey: key });
+        }
+      }
       await fetch('/api/push/subscribe', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(sub.toJSON()) });
       NC.pushState = 'on'; ncRenderFoot();
       if(typeof showToast === 'function') showToast('Phone alerts are on for this device.', 'burst');
-    }catch(err){ if(typeof showToast === 'function') showToast('Could not turn on phone alerts (' + (err && err.message || 'error') + ').'); }
+    }catch(err){ ncPushHelp(err); }
   };
 
   /* ---------- My to-do (staff) ---------- */
