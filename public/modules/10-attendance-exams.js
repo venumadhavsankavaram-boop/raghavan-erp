@@ -2257,3 +2257,39 @@ const ROOMS_KEY = "exam-rooms";
 
   /* ===== ROOM ALLOTMENT MODULE (Hall Ticket Numbers, Class Selection, Rooms & Matrix, Final Printout, Notice Board) ===== */
   
+/* Marks sheet: jump to the next box automatically once a mark is "complete" (typing one more
+   digit could not give a valid mark), and on Enter / the phone keyboard's Next/Go key.
+   Order = the order of boxes on the sheet (next student for a single-subject teacher). */
+(function(){
+  function nextBox(cur){
+    const all = Array.from(document.querySelectorAll('.marks-input')).filter(i => !i.disabled && i.offsetParent !== null);
+    const i = all.indexOf(cur);
+    return i >= 0 ? all[i + 1] : null;
+  }
+  function go(cur){
+    const n = nextBox(cur);
+    if(n){ n.focus(); try{ n.select(); }catch(e){} }
+    else { try{ cur.blur(); }catch(e){} }
+  }
+  document.addEventListener('input', function(e){
+    const t = e.target;
+    if(!t || !t.classList || !t.classList.contains('marks-input')) return;
+    const it = e.inputType || '';
+    if(it.indexOf('delete') === 0 || it === 'historyUndo') return;
+    const raw = String(t.value || '');
+    if(!raw || raw.indexOf('.') >= 0 || raw.indexOf('-') >= 0) return;
+    const v = Number(raw), max = Number(t.max);
+    if(!isFinite(v) || !isFinite(max) || max <= 0) return;
+    if(v > max) return;                          // invalid: leave it so the sheet highlights it
+    if(v * 10 > max) setTimeout(function(){ go(t); }, 60);
+  }, true);
+  document.addEventListener('keydown', function(e){
+    const t = e.target;
+    if(!t || !t.classList || !t.classList.contains('marks-input')) return;
+    if(e.key === 'Enter'){ e.preventDefault(); go(t); }
+  }, true);
+  document.addEventListener('focusin', function(e){
+    const t = e.target;
+    if(t && t.classList && t.classList.contains('marks-input')){ try{ t.select(); }catch(x){} }
+  });
+})();
