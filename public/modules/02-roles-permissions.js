@@ -581,7 +581,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
   }
   async function maybeSubscribeToPush(){
-    if(!currentUser || !['Student','Parent','Admin','Principal'].includes(currentUser.role)) return;
+    if(!currentUser) return;   // every login (teachers and other staff included) can subscribe
     if(!('serviceWorker' in navigator) || !('PushManager' in window)) return;
     try{
       const keyRes = await fetch('/api/push/vapid-key');

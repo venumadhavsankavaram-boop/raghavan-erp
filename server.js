@@ -1837,6 +1837,7 @@ const KV_KEY_TO_MODULE = {
   // Fee refund requests (request → approval → credit note) and the refund policy.
   'fee-refunds': ['managefee'],
   'refund-policy': ['managefee'],
+  'teacher-alert-settings': ['staff'],
   'fee-pro-settings': ['managefee'],
   'fee-day-closings': ['managefee'],
   'fee-late-waivers': ['managefee'],
@@ -3762,6 +3763,35 @@ app.put('/api/notifications/:id/read', async (req, res) => {
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });
+// Delivery health for staff alerts (Admin / Principal only): for every staff member —
+// do they have an active app login linked, how many phones/browsers are subscribed to
+// push, how many alerts are still unread and when they last opened one. Lets the
+// reminder screens say honestly "this teacher cannot receive app alerts" instead of
+// reporting success for a message nobody can see.
+app.get('/api/notifications/reach', async (req, res) => {
+  try {
+    if (!req.authUser) return res.status(401).json({ error: 'Not signed in.' });
+    if (!['Admin', 'Principal'].includes(req.authUser.role)) return res.status(403).json({ error: 'Only an Admin or Principal can view this.' });
+    const staffRows = await sql`SELECT id, extra FROM staff`;
+    const userRows = await sql`SELECT id, role FROM users WHERE deleted_at IS NULL`;
+    const push = await sql`SELECT user_id, COUNT(*) AS c FROM push_subscriptions GROUP BY user_id`;
+    const unread = await sql`SELECT user_id, COUNT(*) AS c, MAX(created_at) AS last_sent FROM user_notifications WHERE read_at IS NULL GROUP BY user_id`;
+    const reads = await sql`SELECT user_id, MAX(read_at) AS last_read FROM user_notifications WHERE read_at IS NOT NULL GROUP BY user_id`;
+    const uOk = new Set(userRows.map(u => u.id));
+    const pMap = new Map(push.map(r => [r.user_id, Number(r.c)]));
+    const uMap = new Map(unread.map(r => [r.user_id, { c: Number(r.c), last: r.last_sent }]));
+    const rMap = new Map(reads.map(r => [r.user_id, r.last_read]));
+    const out = staffRows.map(r => {
+      const uid = r.extra && r.extra.linkedUserId;
+      return { staffId: r.id, userId: uid || null, hasLogin: !!(uid && uOk.has(uid)), pushDevices: uid ? (pMap.get(uid) || 0) : 0,
+        unread: uid && uMap.get(uid) ? uMap.get(uid).c : 0, lastRead: uid ? (rMap.get(uid) || null) : null };
+    });
+    return res.status(200).json({ pushConfigured: webPushConfigured(), staff: out });
+  } catch (err) {
+    console.error('notifications reach error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
 // Fans a Communications ("Notice Board") message out to the actual logins
 // its audience resolves to, replacing the old behavior where every
 // "In-App" message was simply readable by every Student/Parent regardless
@@ -3799,11 +3829,18 @@ app.post('/api/notifications/broadcast', async (req, res) => {
       staffRows.forEach(r => { const uid = r.extra && r.extra.linkedUserId; if (uid) userIds.add(uid); });
     }
     const wantPush = b.push === true;
+    // Optional once-only guard (used by the automatic daily teacher reminders): the
+    // same dedupeKey never reaches the same login twice, even if several Admin /
+    // Principal sessions run the check at once.
+    const dedupeKey = b.dedupeKey ? String(b.dedupeKey).slice(0, 150) : '';
+    let notified = 0, skipped = 0;
     for (const uid of userIds) {
+      if (dedupeKey && !(await insertNotificationEventIfNew('u:' + uid, 'broadcast', dedupeKey))) { skipped++; continue; }
       if (wantPush) await sendPushToUser(uid, { title, body, tag: type, url });
       else await recordNotification(uid, { title, body, tag: type, url });
+      notified++;
     }
-    return res.status(200).json({ ok: true, notified: userIds.size, pushed: wantPush });
+    return res.status(200).json({ ok: true, notified, skipped, resolved: userIds.size, pushed: wantPush });
   } catch (err) {
     console.error('notifications broadcast error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
