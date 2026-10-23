@@ -415,12 +415,28 @@
 
   /* ---------- lifecycle ---------- */
   let tickN = 0;
+  /* Admin only, at most once a day: if no backup was downloaded in the last 7 days, say so. */
+  async function ncBackupNag(){
+    if(!currentUser || currentUser.role !== 'Admin') return;
+    const day = new Date().toISOString().slice(0, 10);
+    try{ if(localStorage.getItem('bk-nag-day') === day) return; }catch(_){}
+    try{
+      const res = await fetch('/api/backup/status'); if(!res.ok) return;
+      const lb = (await res.json()).lastBackup;
+      const days = lb && lb.lastAt ? Math.floor((Date.now() - new Date(lb.lastAt).getTime()) / 86400000) : null;
+      try{ localStorage.setItem('bk-nag-day', day); }catch(_){}
+      if(days === null || days > 7){
+        showToast((days === null ? 'No backup has been downloaded yet.' : 'Your last backup is ' + days + ' days old.') + ' Open Admin Tools in the sidebar and tap Download Backup.');
+      }
+    }catch(_){}
+  }
   async function ncTick(){
     if(!currentUser || document.hidden) return;
     ncEnsureDom();
     await ncFetch();
     if(isStaffRole()){ await ncLoadTodo(false); }
     if(isMgr() && tickN % 5 === 0) ncAutoRun();
+    if(tickN === 1) ncBackupNag();
     tickN++;
   }
   document.addEventListener('visibilitychange', () => { if(!document.hidden) ncTick(); });

@@ -14,6 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+import { AsyncLocalStorage } from 'async_hooks';
 import zlib from 'zlib';
 import bcrypt from 'bcryptjs';
 import { sql, nextDocSeq, reserveDocSeqRange, insertNotificationEventIfNew, addColumnIfMissing, createIndexIfMissing } from './db.js';
@@ -53,6 +54,81 @@ const app = express();
 // stuff giant payloads into the database.
 app.use('/api/admission-inquiries', express.json({ limit: '20kb' }));
 app.use(express.json({ limit: '25mb' }));
+
+// ---------- Problem alerts: tell the Admin when the server fails ----------
+// Every response with status 500+ is recorded (what was being done + the reason, never request data),
+// shown under Admin Tools -> "Server problems", and — at most once per half hour for the same problem and
+// six per hour overall — sent to every Admin's bell / phone, so a failure is heard about before a teacher
+// reports it. It is also forwarded to the vendor dashboard (a no-op unless that is configured).
+const errCtx = new AsyncLocalStorage();
+const origConsoleError = console.error.bind(console);
+console.error = (...a) => {
+  origConsoleError(...a);
+  try {
+    const st = errCtx.getStore();
+    if (st && st.notes.length < 3) st.notes.push(a.map(x => (x && x.message) ? x.message : (typeof x === 'string' ? x : '')).filter(Boolean).join(' ').slice(0, 220));
+  } catch (_) {}
+};
+let serverErrors = null;            // [{ at, sig, where, status, message, count }]
+let errWriteTimer = null;
+const errAlertedAt = new Map();     // signature -> last alert time
+let errAlertHour = [];              // recent alert timestamps
+async function loadServerErrors() {
+  if (serverErrors) return serverErrors;
+  try {
+    const r = await sql`SELECT value FROM kv_store WHERE \`key\` = 'error-log'`;
+    let v = r[0] && r[0].value; if (typeof v === 'string') { try { v = JSON.parse(v); } catch (e) { v = null; } }
+    serverErrors = Array.isArray(v) ? v : [];
+  } catch (e) { serverErrors = []; }
+  return serverErrors;
+}
+function saveServerErrorsSoon() {
+  if (errWriteTimer) return;
+  errWriteTimer = setTimeout(async () => {
+    errWriteTimer = null;
+    try { await sql`INSERT INTO kv_store (\`key\`, value) VALUES ('error-log', ${JSON.stringify((serverErrors || []).slice(0, 50))}) ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP`; } catch (e) { /* best effort */ }
+  }, 5000);
+}
+function errRouteOf(req) {
+  return req.method + ' ' + String(req.path || '').replace(/\/[A-Za-z0-9_-]*\d[A-Za-z0-9_-]*/g, '/:id').slice(0, 80);
+}
+async function recordServerProblem(req, status, message) {
+  try {
+    const list = await loadServerErrors();
+    const where = errRouteOf(req);
+    const sig = where + '|' + status + '|' + String(message).slice(0, 60);
+    const now = new Date().toISOString();
+    const hit = list.find(x => x.sig === sig);
+    if (hit) { hit.count = (hit.count || 1) + 1; hit.at = now; list.splice(list.indexOf(hit), 1); list.unshift(hit); }
+    else list.unshift({ at: now, sig, where, status, message: String(message).slice(0, 220), count: 1 });
+    if (list.length > 50) list.length = 50;
+    saveServerErrorsSoon();
+    // throttle the alert
+    const t = Date.now();
+    errAlertHour = errAlertHour.filter(x => t - x < 3600000);
+    if ((errAlertedAt.get(sig) || 0) > t - 1800000 || errAlertHour.length >= 6) return;
+    errAlertedAt.set(sig, t); errAlertHour.push(t);
+    if (errAlertedAt.size > 200) for (const [k, v] of errAlertedAt) if (v < t - 1800000) errAlertedAt.delete(k);
+    const admins = await sql`SELECT id FROM users WHERE role = 'Admin' AND deleted_at IS NULL`;
+    for (const a of admins) {
+      await sendPushToUser(a.id, { tag: 'system_problem', title: '⚠️ ERP problem detected', body: `${where} failed${message ? ': ' + String(message).slice(0, 120) : ''}. See Admin Tools → Server problems.`, url: '/' }).catch(() => {});
+    }
+  } catch (e) { origConsoleError('recordServerProblem failed:', e && e.message); }
+}
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/')) return next();
+  errCtx.run({ notes: [] }, () => {
+    res.on('finish', () => {
+      if (res.statusCode < 500 || res.statusCode === 501) return;
+      const st = errCtx.getStore();
+      const message = (st && st.notes[0]) || 'Server error';
+      recordServerProblem(req, res.statusCode, message);
+      try { reportVendorError(new Error(errRouteOf(req) + ' -> ' + res.statusCode + ': ' + message), { route: req.path }); } catch (_) {}
+    });
+    next();
+  });
+});
+
 
 // The public school website (a separate static site, on its own domain) talks to
 // this ERP straight over the network for a handful of resources — it isn't hosted
@@ -5046,6 +5122,21 @@ app.get('/api/me', async (req, res) => {
 // Admin only: the file holds every record, including login hashes.
 // Tables left out on purpose: `sessions` (live login tokens — useless in a restore and a risk if the file leaks).
 const BACKUP_SKIP_TABLES = ['sessions'];
+// kv_store 'backup-status' = { lastAt, tables, rows, by } — written each time the Admin downloads a full backup,
+// so the app can show "last backup" and warn when it is overdue. Never blocks a backup if it can't be written.
+async function readBackupStatus() {
+  try {
+    const r = await sql`SELECT value FROM kv_store WHERE \`key\` = 'backup-status'`;
+    let v = r[0] && r[0].value;
+    if (typeof v === 'string') { try { v = JSON.parse(v); } catch (e) { v = null; } }
+    return v && v.lastAt ? v : null;
+  } catch (e) { return null; }
+}
+async function writeBackupStatus(status) {
+  try {
+    await sql`INSERT INTO kv_store (\`key\`, value) VALUES ('backup-status', ${JSON.stringify(status)}) ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP`;
+  } catch (e) { console.error('backup-status write failed:', e.message); }
+}
 async function backupTableNames() {
   const rows = await sql`
     SELECT TABLE_NAME AS table_name FROM information_schema.TABLES
@@ -5054,6 +5145,20 @@ async function backupTableNames() {
   `;
   return rows.map(r => String(r.table_name || r.TABLE_NAME)).filter(n => /^[A-Za-z0-9_]+$/.test(n) && !BACKUP_SKIP_TABLES.includes(n));
 }
+app.get('/api/error-log', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can see server problems.' });
+  return res.status(200).json({ errors: await loadServerErrors() });
+});
+app.delete('/api/error-log', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can clear server problems.' });
+  serverErrors = [];
+  try { await sql`DELETE FROM kv_store WHERE \`key\` = 'error-log'`; } catch (e) { /* ignore */ }
+  return res.status(200).json({ ok: true });
+});
+app.get('/api/backup/status', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can see the backup status.' });
+  return res.status(200).json({ lastBackup: await readBackupStatus() });
+});
 app.get('/api/backup/summary', async (req, res) => {
   if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can use the backup.' });
   try {
@@ -5063,7 +5168,7 @@ app.get('/api/backup/summary', async (req, res) => {
       const c = await sql.query(`SELECT COUNT(*) AS c FROM \`${name}\``);
       tables.push({ name, rows: Number(c[0] && c[0].c) || 0 });
     }
-    return res.status(200).json({ tables, totalTables: tables.length, totalRows: tables.reduce((n, t) => n + t.rows, 0), skipped: BACKUP_SKIP_TABLES });
+    return res.status(200).json({ tables, totalTables: tables.length, totalRows: tables.reduce((n, t) => n + t.rows, 0), skipped: BACKUP_SKIP_TABLES, lastBackup: await readBackupStatus() });
   } catch (err) {
     console.error('backup summary error:', err);
     return res.status(500).json({ error: 'Could not read the database summary.' });
@@ -5073,7 +5178,7 @@ app.get('/api/backup', async (req, res) => {
   if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can download the full backup.' });
   try {
     const names = await backupTableNames();
-    const backup = { generatedAt: new Date().toISOString(), format: 'erp-full-backup-v2', skippedTables: BACKUP_SKIP_TABLES, counts: {}, totalRows: 0, tables: {} };
+    const backup = { generatedAt: new Date().toISOString(), format: 'erp-full-backup-v2', serverTzOffsetMin: new Date().getTimezoneOffset(), skippedTables: BACKUP_SKIP_TABLES, counts: {}, totalRows: 0, tables: {} };
     const mismatches = [];
     for (const name of names) {
       const before = Number((await sql.query(`SELECT COUNT(*) AS c FROM \`${name}\``))[0].c) || 0;
@@ -5100,6 +5205,7 @@ app.get('/api/backup', async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('X-Backup-Tables', String(names.length));
     res.setHeader('X-Backup-Rows', String(backup.totalRows));
+    await writeBackupStatus({ lastAt: backup.generatedAt, tables: names.length, rows: backup.totalRows, by: String((req.authUser && (req.authUser.name || req.authUser.username)) || 'Admin') });
     return res.status(200).json(backup);
   } catch (err) {
     console.error('backup error:', err);

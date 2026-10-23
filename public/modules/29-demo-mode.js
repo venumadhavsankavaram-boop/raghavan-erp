@@ -6,9 +6,19 @@
     if(!info || !info.demo) return;
     const bar = document.createElement('div');
     bar.id = 'demoRibbon';
-    bar.textContent = 'DEMO — sample data only. Nothing here is real, and no messages or payments are sent.';
-    bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99999;background:#7a2e8f;color:#fff;text-align:center;font:600 12px system-ui,sans-serif;padding:6px 10px;';
+    const narrow = window.matchMedia && window.matchMedia('(max-width:600px)').matches;
+    bar.textContent = narrow
+      ? 'DEMO \u2014 sample data only \u00b7 \u00a9 SVM EdTech \u00b7 copying not permitted'
+      : 'DEMO \u2014 sample data only. Nothing here is real, and no messages or payments are sent.  \u00b7  \u00a9 SVM EdTech. For evaluation only; copying not permitted.';
+    bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99999;background:#7a2e8f;color:#fff;text-align:center;font:600 ' + (narrow ? '11' : '12') + 'px system-ui,sans-serif;padding:5px 10px;line-height:1.35;';
     document.body.appendChild(bar);
+    /* Keep the ribbon from covering the app: shrink the sidebar and pad the page by its height. */
+    const st = document.createElement('style');
+    st.textContent = '.sidebar{height:calc(100vh - var(--demo-h,0px)) !important;height:calc(100dvh - var(--demo-h,0px)) !important}' +
+      '.main{padding-bottom:calc(22px + var(--demo-h,0px)) !important}';
+    document.head.appendChild(st);
+    const setH = () => document.documentElement.style.setProperty('--demo-h', bar.offsetHeight + 'px');
+    setH(); window.addEventListener('resize', setH);
     document.title = 'DEMO — ' + document.title;
     const form = document.getElementById('loginForm');
     if(form && !document.getElementById('demoLogins')){

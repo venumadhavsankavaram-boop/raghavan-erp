@@ -1166,6 +1166,8 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     adminDownloads = await storageGet(DOWNLOADS_KEY, []);
   }
   function renderAdminToolsTab(body){
+    setTimeout(refreshBackupStatusLine, 0);
+    setTimeout(loadServerProblems, 0);
     body.innerHTML = `
       <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:20px; max-width:640px;">Tools visible to the Admin role only — not Principal, not any other role, regardless of what's granted in Roles &amp; Permissions.</p>
 
@@ -1181,9 +1183,18 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       <div class="profile-card" style="max-width:480px; margin-bottom:24px;">
         <h4>💾 Full Data Backup</h4>
         <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Download every record in the database — students, staff, payments, attendance, everything — as one JSON file. Keep it somewhere safe; it's a full copy of the school's data (only the Admin can download it).</p>
+        <div id="backupStatusLine" style="font-size:0.8rem; margin:0 0 12px; padding:8px 10px; border-radius:10px; background:var(--surface-2, #f4f4f8);">Checking last backup…</div>
         <button class="btn btn-primary btn-sm" id="backupDownloadBtn" onclick="downloadFullBackup()">Download Backup</button>
         <button class="btn btn-sm" type="button" id="backupCheckBtn" onclick="showBackupSummary()" style="margin-left:6px;">Check what is in my database</button><span class="mo-blob-mini" id="backupBlob"><span class="mo-blob-shape"></span></span>
         <div id="backupResult" style="margin-top:12px; font-size:0.8rem;"></div>
+      </div>
+
+      <div class="profile-card" style="max-width:640px; margin-bottom:24px;">
+        <h4>⚠️ Server problems</h4>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 12px;">When something fails on the server, it is listed here and you get an alert on your bell and phone (at most one alert per problem every 30 minutes). If a problem keeps repeating, send a screenshot of this list to support.</p>
+        <button class="btn btn-sm" type="button" onclick="loadServerProblems()">Refresh</button>
+        <button class="btn btn-sm" type="button" onclick="clearServerProblems()" style="margin-left:6px;">Clear list</button>
+        <div id="serverProblems" style="margin-top:12px; font-size:0.8rem;">Loading…</div>
       </div>
 
       <div class="profile-card" style="max-width:560px; margin-bottom:24px; border-top:4px solid #C0264B;">
@@ -1260,6 +1271,39 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>Could not load the audit log</b>${escapeHtml(e.message)}</div></td></tr>`;
     }
   }
+  // "Last backup" line + overdue warning (green ≤ 7 days, amber ≤ 14, red older or never).
+  function backupAgeInfo(lb){
+    if(!lb || !lb.lastAt) return { days:null, tone:'bad', text:'⚠️ No backup has been downloaded yet. Download one now and keep it safe.' };
+    const days = Math.floor((Date.now() - new Date(lb.lastAt).getTime()) / 86400000);
+    const when = new Date(lb.lastAt).toLocaleString('en-IN', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+    const tone = days <= 7 ? 'good' : days <= 14 ? 'warn' : 'bad';
+    const icon = tone === 'good' ? '✅' : tone === 'warn' ? '🟠' : '🔴';
+    const age = days <= 0 ? 'today' : days === 1 ? 'yesterday' : days + ' days ago';
+    return { days, tone, text: icon + ' Last backup: <b>' + when + '</b> (' + age + ') — ' + Number(lb.tables||0) + ' tables, ' + Number(lb.rows||0).toLocaleString('en-IN') + ' records' + (lb.by ? ' · by ' + escapeHtml(lb.by) : '') + (tone === 'good' ? '' : '. <b>Download a fresh one.</b>') };
+  }
+  async function refreshBackupStatusLine(){
+    const el = document.getElementById('backupStatusLine'); if(!el) return;
+    try{
+      const res = await fetch('/api/backup/status'); await throwIfNotOk(res);
+      const info = backupAgeInfo((await res.json()).lastBackup);
+      el.innerHTML = info.text;
+      el.style.background = info.tone === 'good' ? 'rgba(0,150,120,.10)' : info.tone === 'warn' ? 'rgba(230,160,0,.14)' : 'rgba(192,38,75,.10)';
+    }catch(e){ el.textContent = 'Could not check the last backup.'; }
+  }
+  async function loadServerProblems(){
+    const el = document.getElementById('serverProblems'); if(!el) return;
+    try{
+      const res = await fetch('/api/error-log'); await throwIfNotOk(res);
+      const list = (await res.json()).errors || [];
+      if(!list.length){ el.innerHTML = '<b style="color:var(--teal);">✓ No server problems recorded.</b>'; return; }
+      el.innerHTML = '<div style="max-height:260px; overflow:auto; border:1px solid var(--border); border-radius:10px;"><table style="width:100%; font-size:0.76rem;"><thead><tr><th style="text-align:left; padding:6px 10px;">Last seen</th><th style="text-align:left; padding:6px 10px;">What failed</th><th style="padding:6px 10px;">Times</th></tr></thead><tbody>' +
+        list.map(x => '<tr><td style="padding:5px 10px; white-space:nowrap;">' + escapeHtml(new Date(x.at).toLocaleString('en-IN', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })) + '</td><td style="padding:5px 10px;"><b>' + escapeHtml(x.where) + '</b> (' + escapeHtml(x.status) + ')<div style="color:var(--ink-soft);">' + escapeHtml(x.message) + '</div></td><td style="padding:5px 10px; text-align:center;">' + Number(x.count||1) + '</td></tr>').join('') + '</tbody></table></div>';
+    }catch(e){ el.textContent = 'Could not load (' + e.message + ').'; }
+  }
+  async function clearServerProblems(){
+    try{ const res = await fetch('/api/error-log', { method:'DELETE' }); await throwIfNotOk(res); showToast('Server problem list cleared.'); loadServerProblems(); }
+    catch(e){ showToast('Could not clear (' + e.message + ').'); }
+  }
   async function showBackupSummary(){
     const out = document.getElementById('backupResult'); if(!out) return;
     out.innerHTML = '<span style="color:var(--ink-soft);">Checking the database…</span>';
@@ -1295,6 +1339,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+      refreshBackupStatusLine();
       showToast('Backup downloaded: ' + nTables + ' tables, ' + nRows.toLocaleString('en-IN') + ' records.', 'burst');
       const out = document.getElementById('backupResult');
       if(out) out.innerHTML = '<b style="color:var(--teal);">✓ Backup file saved</b> — ' + nTables + ' tables, ' + nRows.toLocaleString('en-IN') + ' records, ' + (blob.size / 1048576 >= 1 ? (blob.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(blob.size / 1024)) + ' KB') + '.<br><span style="color:var(--ink-soft);">Open the file in Notepad: near the top, <i>counts</i> lists every table and its number of records. Click “Check what is in my database” to compare.</span>';

@@ -9,7 +9,8 @@
   "scripts": {
     "build": "echo build",
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "test": "node tests/run-all.mjs"
   },
   "engines": {
     "node": ">=18"
