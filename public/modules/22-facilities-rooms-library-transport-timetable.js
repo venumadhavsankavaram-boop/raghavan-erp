@@ -1369,39 +1369,77 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
         </div>
       </div>
 
-      <div class="profile-card" style="max-width:900px; margin-top:24px;">
-        <h4>🕵️ Audit Log</h4>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">The most recent 500 changes made anywhere in the ERP — who, what, and when. Actor identity is self-reported by the app on each save, not a cryptographic guarantee.</p>
-        <button class="btn btn-ghost btn-sm" style="margin-bottom:12px;" onclick="loadAuditLogTab()">Refresh</button>
-        <div class="table-wrap" style="max-height:420px; overflow-y:auto;">
-          <table><thead><tr><th>When</th><th>Actor</th><th>Role</th><th>Action</th><th>Resource</th><th>Record</th></tr></thead>
+      <div class="profile-card" style="max-width:1000px; margin-top:24px;">
+        <h4>🕵️ Audit trail</h4>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Who did what, and when: every save and delete, settings and fee-discount changes, sign-ins (including failed tries), password changes and backups. Names come from the signed-in account, not from the browser.</p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
+          <label style="font-size:0.74rem;">Show<br><select class="input" id="auditKind" style="min-width:150px;"><option value="">Everything</option><option value="signins">Sign-ins</option><option value="security">Security</option><option value="create">Added</option><option value="change">Changed</option><option value="delete">Deleted / restored</option></select></label>
+          <label style="font-size:0.74rem;">From<br><input type="date" class="input" id="auditFrom"></label>
+          <label style="font-size:0.74rem;">To<br><input type="date" class="input" id="auditTo"></label>
+          <label style="font-size:0.74rem;">Person<br><input type="text" class="input" id="auditActor" placeholder="name" style="width:130px;"></label>
+          <label style="font-size:0.74rem;">Search<br><input type="text" class="input" id="auditQ" placeholder="record, detail…" style="width:170px;"></label>
+          <button class="btn btn-primary btn-sm" onclick="loadAuditLogTab(true)">Show</button>
+          <button class="btn btn-ghost btn-sm" onclick="resetAuditFilters()">Clear</button>
+          <button class="btn btn-ghost btn-sm" onclick="downloadAuditCsv()">⬇ Download (Excel)</button>
+        </div>
+        <div class="table-wrap" style="max-height:480px; overflow-y:auto;">
+          <table><thead><tr><th>When</th><th>Who</th><th>What happened</th><th>Where</th><th>Record</th><th>Details</th></tr></thead>
           <tbody id="auditLogTableBody">${moLoadingRow(6)}</tbody></table>
         </div>
+        <div id="auditMoreBox" style="margin-top:10px;"></div>
       </div>
     `;
     moMountLotties();
     loadAuditLogTab();
   }
-  async function loadAuditLogTab(){
+  let auditBeforeId = null;
+  const AUDIT_WORDS = {
+    POST:['Added','#0a8f6a'], PUT:['Changed','#b7791f'], DELETE:['Deleted','#C0264B'], RESTORE:['Restored','#0a8f6a'], SETTING:['Saved settings / list','#b7791f'],
+    LOGIN:['Signed in','#0a8f6a'], LOGIN_FAILED:['Failed sign-in','#C0264B'], LOGIN_BLOCKED:['Sign-in blocked (too many tries)','#C0264B'], LOGOUT:['Signed out','#6b7280'],
+    TWOFA_FAILED:['Wrong two-step code','#C0264B'], PASSWORD_CHANGED:['Changed own password','#b7791f'], BACKUP_DOWNLOAD:['Downloaded full backup','#b7791f'], AUDIT_EXPORT:['Downloaded audit trail','#6b7280'],
+  };
+  const AUDIT_NOTES = { twofa_enabled_app:'Turned ON two-step sign-in (app)', twofa_enabled_email:'Turned ON two-step sign-in (email)', twofa_disabled:'Turned OFF two-step sign-in', twofa_reset:'Reset someone\'s two-step sign-in', twofa_recovery_code_used:'Signed in with a recovery code', voucher_gap:'Voucher number gap noted' };
+  function auditPretty(s){ s = String(s || '').replace(/[-_]+/g, ' ').trim(); return s ? s.charAt(0).toUpperCase() + s.slice(1) : '—'; }
+  function auditQuery(extra){
+    const g = id => (document.getElementById(id) || {}).value || '';
+    const p = new URLSearchParams();
+    [['kind','auditKind'],['from','auditFrom'],['to','auditTo'],['actor','auditActor'],['q','auditQ']].forEach(([k,id]) => { if(g(id)) p.set(k, g(id)); });
+    Object.entries(extra || {}).forEach(([k,v]) => p.set(k, v));
+    return p.toString();
+  }
+  function resetAuditFilters(){ ['auditKind','auditFrom','auditTo','auditActor','auditQ'].forEach(id => { const e = document.getElementById(id); if(e) e.value = ''; }); loadAuditLogTab(true); }
+  async function downloadAuditCsv(){
+    try{
+      const res = await fetch('/api/audit-log?' + auditQuery({ format:'csv' })); await throwIfNotOk(res);
+      const blob = await res.blob(); const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = 'audit-trail.csv'; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    }catch(e){ showToast('Could not download: ' + e.message); }
+  }
+  function auditRowHtml(r){
+    const w = r.method === 'NOTE' ? [AUDIT_NOTES[r.resource] || auditPretty(r.resource), '#b7791f'] : (AUDIT_WORDS[r.method] || [auditPretty(r.method), '#6b7280']);
+    const where = (r.method === 'NOTE' || r.resource === 'sign-in' || r.resource === 'audit-log') ? '' : (r.resource === 'kv' ? 'Settings & lists' : auditPretty(r.resource));
+    const who = r.actor_name ? escapeHtml(r.actor_name) + (r.actor_role ? ' <span style="color:var(--ink-soft); font-size:0.72rem;">(' + escapeHtml(r.actor_role) + ')</span>' : '') : '—';
+    const det = [r.detail ? escapeHtml(r.detail) : '', r.ip ? '<span style="color:var(--ink-soft);">IP ' + escapeHtml(r.ip) + '</span>' : ''].filter(Boolean).join(' · ');
+    return '<tr><td style="white-space:nowrap;">' + escapeHtml(new Date(r.created_at).toLocaleString('en-IN', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })) + '</td><td>' + who + '</td>' +
+      '<td><b style="color:' + w[1] + ';">' + escapeHtml(w[0]) + '</b></td><td>' + escapeHtml(where) + '</td><td style="max-width:170px; overflow:hidden; text-overflow:ellipsis;">' + (escapeHtml(r.record_id) || '—') + '</td><td style="font-size:0.74rem;">' + (det || '—') + '</td></tr>';
+  }
+  async function loadAuditLogTab(reset){
     const tbody = document.getElementById('auditLogTableBody');
     if(!tbody) return;
-    tbody.innerHTML = moLoadingRow(6);
-    moMountLotties();
+    const more = document.getElementById('auditMoreBox');
+    if(reset !== false){ auditBeforeId = null; tbody.innerHTML = moLoadingRow(6); moMountLotties(); if(more) more.innerHTML = ''; }
     try{
-      const res = await fetch('/api/audit-log');
+      const res = await fetch('/api/audit-log?' + auditQuery(auditBeforeId ? { before: auditBeforeId } : {}));
       await throwIfNotOk(res);
-      const rows = await res.json();
-      if(!rows.length){ tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>No changes logged yet</b></div></td></tr>`; return; }
-      tbody.innerHTML = rows.map(r => `<tr>
-        <td>${escapeHtml(new Date(r.created_at).toLocaleString())}</td>
-        <td>${escapeHtml(r.actor_name) || '—'}</td>
-        <td>${escapeHtml(r.actor_role) || '—'}</td>
-        <td>${escapeHtml(r.method)}</td>
-        <td>${escapeHtml(r.resource)}</td>
-        <td>${escapeHtml(r.record_id) || '—'}</td>
-      </tr>`).join('');
+      const d = await res.json(); const rows = d.rows || [];
+      if(auditBeforeId === null) tbody.innerHTML = '';
+      if(!rows.length && auditBeforeId === null){ tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>Nothing found</b>Try a wider date range or clear the filters.</div></td></tr>`; return; }
+      tbody.insertAdjacentHTML('beforeend', rows.map(auditRowHtml).join(''));
+      if(rows.length) auditBeforeId = rows[rows.length - 1].id;
+      if(more) more.innerHTML = d.hasMore ? '<button class="btn btn-ghost btn-sm" onclick="loadAuditLogTab(false)">Show older entries</button>' : '<span style="font-size:0.76rem; color:var(--ink-soft);">That is everything for this view.</span>';
     }catch(e){
-      tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>Could not load the audit log</b>${escapeHtml(e.message)}</div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>Could not load the audit trail</b>${escapeHtml(e.message)}</div></td></tr>`;
     }
   }
   // "Last backup" line + overdue warning (green ≤ 7 days, amber ≤ 14, red older or never).

@@ -837,6 +837,8 @@ async function ensureSchema() {
   // this can never happen regardless of how large `extra` gets.
   await createIndexIfMissing('idx_staff_created_at', 'staff', 'created_at');
   await createIndexIfMissing('idx_students_created_at', 'students', 'created_at');
+  await addColumnIfMissing('audit_log', 'detail TEXT');
+  await addColumnIfMissing('audit_log', 'ip VARCHAR(64)');
   await createIndexIfMissing('idx_audit_log_created_at', 'audit_log', 'created_at DESC');
   await createIndexIfMissing('idx_audit_log_resource', 'audit_log', 'resource');
   await createIndexIfMissing('idx_sessions_expires_at', 'sessions', 'expires_at');
@@ -1210,6 +1212,41 @@ app.use(async (req, res, next) => {
   }
 });
 
+
+// ---------- Audit trail helpers ----------
+function clientIp(req) {
+  const fwd = req.headers['x-forwarded-for'];
+  return ((fwd ? String(fwd).split(',').pop().trim() : '') || (req.socket && req.socket.remoteAddress) || '').slice(0, 64);
+}
+// Best-effort: an audit write must never break the request it describes.
+function auditNote(actorName, actorRole, method, resource, recordId, detail, ip) {
+  return sql`INSERT INTO audit_log (actor_name, actor_role, method, resource, record_id, detail, ip)
+    VALUES (${String(actorName || '').slice(0, 200)}, ${String(actorRole || '')}, ${method}, ${resource}, ${recordId == null ? null : String(recordId).slice(0, 300)}, ${detail ? String(detail).slice(0, 900) : null}, ${ip || null})`
+    .catch(err => console.error('audit log insert failed:', err.message));
+}
+// Failed-sign-in rows are capped (per hour, school-wide) so a script guessing names cannot fill the table.
+let failedLoginAudit = { n: 0, since: Date.now() };
+function auditFailedLogin(req, username, why) {
+  const now = Date.now();
+  if (now - failedLoginAudit.since > 3600000) failedLoginAudit = { n: 0, since: now };
+  if (++failedLoginAudit.n > 300) return;
+  return auditNote(String(username || '').slice(0, 80) || '(blank)', '', why || 'LOGIN_FAILED', 'sign-in', null, null, clientIp(req));
+}
+// A short, readable summary of what changed in a settings/records list saved through /api/kv/:key.
+function kvChangeSummary(before, after) {
+  const arr = v => Array.isArray(v) ? v : null;
+  const b = arr(before), a = arr(after);
+  if (b && a && [...b, ...a].every(x => x && typeof x === 'object' && x.id != null)) {
+    const bm = new Map(b.map(x => [String(x.id), JSON.stringify(x)])), am = new Map(a.map(x => [String(x.id), JSON.stringify(x)]));
+    const added = [...am.keys()].filter(k => !bm.has(k)), removed = [...bm.keys()].filter(k => !am.has(k)), changed = [...am.keys()].filter(k => bm.has(k) && bm.get(k) !== am.get(k));
+    if (!added.length && !removed.length && !changed.length) return null;
+    const ids = x => x.slice(0, 3).join(', ') + (x.length > 3 ? ' +' + (x.length - 3) : '');
+    return [added.length ? 'added ' + added.length + ' (' + ids(added) + ')' : '', changed.length ? 'changed ' + changed.length + ' (' + ids(changed) + ')' : '', removed.length ? 'removed ' + removed.length + ' (' + ids(removed) + ')' : ''].filter(Boolean).join('; ');
+  }
+  if (JSON.stringify(before) === JSON.stringify(after)) return null;
+  return 'setting updated';
+}
+
 async function handleKv(req, res, key) {
   if (!key) return res.status(400).json({ error: 'Missing key.' });
   if (ADMIN_ONLY_KV_KEYS.includes(key) && (!req.authUser || req.authUser.role !== 'Admin')) {
@@ -1238,10 +1275,17 @@ async function handleKv(req, res, key) {
   if (req.method === 'PUT') {
     const value = req.body;
     const json = JSON.stringify(value === undefined ? {} : value);
+    let summary = null;
+    try {
+      const prev = await sql`SELECT value FROM kv_store WHERE \`key\` = ${key}`;
+      let before = prev.length ? prev[0].value : {}; if (typeof before === 'string') { try { before = JSON.parse(before); } catch (_) {} }
+      summary = kvChangeSummary(before, value === undefined ? {} : value);
+    } catch (_) { summary = 'updated'; }
     await sql`
       INSERT INTO kv_store (\`key\`, value, updated_at) VALUES (${key}, ${json}::jsonb, now())
       ON DUPLICATE KEY UPDATE value = ${json}::jsonb, updated_at = now()
     `;
+    if (summary && req.authUser) auditNote(req.authUser.name, req.authUser.role, 'SETTING', 'kv', key, summary, null);
     return res.status(200).json({ ok: true });
   }
   return res.status(405).json({ error: 'Method not allowed.' });
@@ -4606,14 +4650,15 @@ app.post('/api/login', async (req, res) => {
     const rateKey = loginRateKey(req, username);
     const blockedForSeconds = checkLoginRateLimit(rateKey) || userBlockSeconds(username);
     if (blockedForSeconds) {
+      auditFailedLogin(req, username, 'LOGIN_BLOCKED');
       const mins = Math.ceil(blockedForSeconds / 60);
       return res.status(429).json({ error: `Too many failed attempts. Try again in ${mins} minute${mins === 1 ? '' : 's'}.` });
     }
     const rows = await sql`SELECT * FROM users WHERE LOWER(username) = LOWER(${String(username)}) AND deleted_at IS NULL`;
-    if (!rows.length) { recordLoginFailure(rateKey); userFailure(username); return res.status(401).json({ error: 'Invalid username or password.' }); }
+    if (!rows.length) { recordLoginFailure(rateKey); userFailure(username); auditFailedLogin(req, username); return res.status(401).json({ error: 'Invalid username or password.' }); }
     const user = rows[0];
     const ok = await bcrypt.compare(String(password), user.password || '');
-    if (!ok) { recordLoginFailure(rateKey); userFailure(username); return res.status(401).json({ error: 'Invalid username or password.' }); }
+    if (!ok) { recordLoginFailure(rateKey); userFailure(username); auditFailedLogin(req, username); return res.status(401).json({ error: 'Invalid username or password.' }); }
     // Checked only after the password is already confirmed correct, so this
     // never gives anyone a way to learn an account's role without already
     // knowing its password — at that point they could just switch tabs
@@ -4682,6 +4727,7 @@ async function completeLogin(req, res, user) {
   shaped.moduleAccess = getModuleAccess();
   shaped.twofaEnabled = !!user.twofa_method;
   await createSession(req, res, user);
+  auditNote(user.name, user.role, 'LOGIN', 'sign-in', user.id, user.twofa_method ? 'with two-step code' : null, clientIp(req));
   return res.status(200).json(shaped);
 }
 async function sendLoginEmailCode(p, user) {
@@ -4727,6 +4773,7 @@ app.post('/api/login/2fa', async (req, res) => {
     if (!r.ok) {
       recordLoginFailure(p.rateKey);
       userFailure(user.username);
+      auditNote(user.name, user.role, 'TWOFA_FAILED', 'sign-in', user.id, 'wrong two-step code', clientIp(req));
       p.tries++;
       if (p.tries >= 5) { pending2fa.delete(token); return res.status(401).json({ error: 'Too many wrong codes. Please sign in again.', expired: true }); }
       return res.status(401).json({ error: 'That code is not right. Check the code and try again.' });
@@ -4868,6 +4915,7 @@ app.get('/api/approvers', async (req, res) => {
 
 app.post('/api/logout', async (req, res) => {
   try {
+    if (req.authUser) auditNote(req.authUser.name, req.authUser.role, 'LOGOUT', 'sign-in', req.authUser.id, null, clientIp(req));
     await destroySession(req, res);
     return res.status(200).json({ ok: true });
   } catch (err) {
@@ -4917,6 +4965,7 @@ app.post('/api/account/password', async (req, res) => {
     // Anyone else signed in with the old password (another device, a stolen session) is signed out; this device stays in.
     const mine = parseCookies(req).sid ? hashSessionToken(parseCookies(req).sid) : '';
     await sql`DELETE FROM sessions WHERE user_id = ${req.authUser.id} AND id <> ${mine}`.catch(() => {});
+    auditNote(req.authUser.name, req.authUser.role, 'PASSWORD_CHANGED', 'account', req.authUser.id, 'own password changed', clientIp(req));
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('account password error:', err);
@@ -5766,6 +5815,7 @@ app.get('/api/backup/summary', async (req, res) => {
 app.get('/api/backup', async (req, res) => {
   if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can download the full backup.' });
   try {
+    auditNote(req.authUser.name, req.authUser.role, 'BACKUP_DOWNLOAD', 'backup', null, 'full backup downloaded', clientIp(req));
     const names = await backupTableNames();
     const backup = { generatedAt: new Date().toISOString(), format: 'erp-full-backup-v2', serverTzOffsetMin: new Date().getTimezoneOffset(), skippedTables: BACKUP_SKIP_TABLES, counts: {}, totalRows: 0, tables: {} };
     const mismatches = [];
@@ -5880,12 +5930,50 @@ app.post('/api/admin/neon-import', async (req, res) => {
 // (the Admin-only UI reads this straight through, no further pagination
 // needed for a log meant for "what changed recently," not full history
 // mining).
+const AUDIT_KINDS = {
+  signins:  { sql: "method IN ('LOGIN','LOGIN_FAILED','LOGIN_BLOCKED','LOGOUT','TWOFA_FAILED')" },
+  security: { sql: "(method IN ('TWOFA_FAILED','PASSWORD_CHANGED','BACKUP_DOWNLOAD','LOGIN_BLOCKED') OR resource LIKE 'twofa%' OR resource = 'users')" },
+  create:   { sql: "method = 'POST'" },
+  change:   { sql: "method IN ('PUT','SETTING')" },
+  delete:   { sql: "method IN ('DELETE','RESTORE')" },
+};
+function auditFilters(q) {
+  const where = [], params = [];
+  const add = (cond, ...vals) => { let i = params.length; where.push(cond.replace(/\?/g, () => '$' + (++i))); params.push(...vals); };
+  const kind = String(q.kind || '');
+  if (AUDIT_KINDS[kind]) where.push(AUDIT_KINDS[kind].sql);
+  if (q.actor) add('actor_name LIKE ?', '%' + String(q.actor).slice(0, 60) + '%');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(q.from || ''))) add('created_at >= ?', q.from + ' 00:00:00');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(q.to || ''))) add('created_at <= ?', q.to + ' 23:59:59');
+  if (q.q) { const t = '%' + String(q.q).slice(0, 80) + '%'; add('(actor_name LIKE ? OR resource LIKE ? OR record_id LIKE ? OR detail LIKE ? OR method LIKE ?)', t, t, t, t, t); }
+  return { where, params };
+}
+const csvCell = v => {
+  let t = v == null ? '' : String(v instanceof Date ? v.toISOString() : v);
+  if (/^[=+\-@]/.test(t)) t = "'" + t;                       // a cell starting with = + - @ would run as a formula in Excel
+  return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+};
 app.get('/api/audit-log', async (req, res) => {
   // Admin only — the log names every user and every record they changed.
   if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only an Admin can view the audit log.' });
   try {
-    const rows = await sql`SELECT * FROM audit_log FORCE INDEX (idx_audit_log_created_at) ORDER BY created_at DESC LIMIT 500`;
-    return res.status(200).json(rows);
+    const { where, params } = auditFilters(req.query);
+    const csv = req.query.format === 'csv';
+    const limit = csv ? 5000 : Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 200);
+    const before = parseInt(req.query.before, 10);
+    const w = [...where], p = [...params];
+    if (Number.isFinite(before) && !csv) { p.push(before); w.push('id < $' + p.length); }
+    const rows = await sql.query(`SELECT id, actor_name, actor_role, method, resource, record_id, detail, ip, created_at FROM audit_log ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY id DESC LIMIT ${limit + (csv ? 0 : 1)}`, p);
+    if (csv) {
+      const head = ['When', 'Who', 'Role', 'Action', 'Where', 'Record', 'Details', 'IP address'];
+      const lines = [head.join(',')].concat(rows.map(r => [r.created_at, r.actor_name, r.actor_role, r.method, r.resource, r.record_id, r.detail, r.ip].map(csvCell).join(',')));
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="audit-trail.csv"');
+      auditNote(req.authUser.name, req.authUser.role, 'AUDIT_EXPORT', 'audit_log', null, rows.length + ' rows exported', clientIp(req));
+      return res.status(200).send('﻿' + lines.join('\r\n'));
+    }
+    const hasMore = rows.length > limit;
+    return res.status(200).json({ rows: rows.slice(0, limit), hasMore });
   } catch (err) {
     console.error('audit-log fetch error:', err);
     return res.status(500).json({ error: 'Could not load the audit log.' });
@@ -5954,9 +6042,7 @@ app.all('/api/:resource', async (req, res) => {
     const auditMethod = (req.method === 'PUT' && req.query.restore === '1') ? 'RESTORE' : req.method;
     res.on('finish', () => {
       if (res.statusCode >= 400) return;
-      sql`INSERT INTO audit_log (actor_name, actor_role, method, resource, record_id)
-          VALUES (${actorName}, ${actorRole}, ${auditMethod}, ${resource}, ${recordId ? String(recordId) : null})`
-        .catch(err => console.error('audit log insert failed:', err));
+      auditNote(actorName, actorRole, auditMethod, resource, recordId ? String(recordId) : null, null, null);
     });
   }
   try {
