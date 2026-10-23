@@ -2157,7 +2157,17 @@ async function handleSimple(req, res, config, resourceName) {
             });
           }
         }
-        await sql.query(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`, vals);
+        try{
+          await sql.query(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`, vals);
+        }catch(e){
+          // The same record id sent twice at the same instant (a double tap, or a retry on a weak signal): both
+          // requests passed the check above, the second one hit the unique id. The record IS saved once, so
+          // that is success, not a server problem.
+          if(e && (e.code === 'ER_DUP_ENTRY' || e.errno === 1062 || /Duplicate entry .* for key '[^']*PRIMARY'|Duplicate entry .*\.PRI/i.test(String(e.message || '')))){
+            return res.status(200).json({ ok: true, alreadySaved: true });
+          }
+          throw e;
+        }
         notifyAfterResourceWrite(resourceName, body, 'POST');
         return res.status(201).json({ ok: true });
       };
@@ -2165,7 +2175,7 @@ async function handleSimple(req, res, config, resourceName) {
       // simultaneous identical requests cannot both pass the check.
       if (guard) return withKeyLock(table + ':' + (guard.lockBy ? (body[guard.lockBy] || '') : ''), doInsert);
       if (table === 'student_discounts') return withKeyLock('student_discounts:' + (body.studentId || ''), doInsert);
-      return doInsert();
+      return withKeyLock(table + ':id:' + body.id, doInsert);
     } else {
       const setClause = cols.filter(c => c !== 'id').map((c, i) => `${c} = $${i + 2}`).join(', ');
       const updateVals = [body.id, ...fields.filter(f => f.col !== 'id').map(f => (body[f.app] === undefined ? null : body[f.app]))];
