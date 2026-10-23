@@ -3849,107 +3849,206 @@ async function notifyPendingDiscountRequest({ studentId, requestedBy }) {
   await notifyUsersByRole(['Admin'], { title: 'Discount approval needed', body, tag: 'discount-approval', url: '/' });
 }
 
-// ---------- Fee-due reminders: a server-side replica of computeDefaulters() ----------
-// computeDefaulters() (fee + bus outstanding balance) only exists client-side
-// today, computed from in-memory arrays the browser already has loaded — no
-// use to a scheduled job with no browser open. This mirrors it closely
-// enough for a reminder's purposes (tuition + bus only, same as the
-// Defaulters tab; hostel/stock aren't part of that tab either).
-async function computeStudentDueBalance(student) {
-  const [feeStructRows, discountRows, paymentRows, transportRows] = await Promise.all([
-    sql`SELECT fee, bus FROM fee_structure WHERE class_name = ${student.class_name}`,
-    sql`SELECT applies_to, mode, value FROM student_discounts WHERE student_id = ${student.id} AND status = 'Approved' AND applies_to IN ('fee','bus')`,
-    sql`SELECT category, amount, discount, class_at_payment FROM payments WHERE student_id = ${student.id} AND category IN ('fee','bus')`,
-    sql`SELECT value FROM kv_store WHERE \`key\` = 'transport-routes'`,
-  ]);
-  const struct = feeStructRows[0] || { fee: 0, bus: 0 };
+// ---------- Fee reminders (follow the fee schedule) ----------
+// Uses the SAME installment arithmetic as the Fees screens (public/modules/04a-fee-schedule.js, section 1), so
+// "due" and "overdue" mean exactly what the office sees: Yearly, Terms or Monthly, per fee head (tuition, bus).
+//   * "Due soon"      — an unpaid installment falls due in `leadDays` days (once per installment).
+//   * "Overdue"       — the first notice after an installment's due date passes (once per installment; only for
+//                       installments that fell due in the last 14 days, so switching this on never floods old dues).
+//   * "Still overdue" — optional gentle repeat every `repeatEveryDays`, at most `repeatMax` times (OFF by default).
+// At most ONE message per student per day. The Admin controls it in Admin Tools > Fee reminders.
+import vm from 'vm';
+let _feeSched = null;
+function feeScheduleLogic() {
+  if (!_feeSched) {
+    const src = fs.readFileSync(path.join(__dirname, 'public', 'modules', '04a-fee-schedule.js'), 'utf8');
+    const pure = src.slice(0, src.indexOf('/* ---------- 2. Adapter over the app'));
+    const ctx = vm.createContext({ OBJECT_BACKED_KEYS: {} });
+    _feeSched = vm.runInContext(pure + '\n;({ buildInstallments, allocatePaid })', ctx);
+  }
+  return _feeSched;
+}
+const REMINDER_DEFAULTS = { enabled: true, leadDays: 3, repeatEveryDays: 7, repeatMax: 0, sendHour: 9 };
+async function readReminderSettings() {
+  try {
+    const r = await sql`SELECT value FROM kv_store WHERE \`key\` = 'fee-reminder-settings'`;
+    let v = r.length ? r[0].value : null; if (typeof v === 'string') v = JSON.parse(v);
+    return normalizeReminderSettings(v);
+  } catch (_) { return { ...REMINDER_DEFAULTS }; }
+}
+function normalizeReminderSettings(v) {
+  const n = (x, lo, hi, d) => { const k = parseInt(x, 10); return Number.isFinite(k) ? Math.min(Math.max(k, lo), hi) : d; };
+  v = v || {};
+  return {
+    enabled: v.enabled !== false,
+    leadDays: n(v.leadDays, 1, 30, REMINDER_DEFAULTS.leadDays),
+    repeatEveryDays: n(v.repeatEveryDays, 3, 60, REMINDER_DEFAULTS.repeatEveryDays),
+    repeatMax: n(v.repeatMax, 0, 12, REMINDER_DEFAULTS.repeatMax),
+    sendHour: n(v.sendHour, 0, 23, REMINDER_DEFAULTS.sendHour),
+  };
+}
+const isoAddDays = (iso, d) => { const t = new Date(iso + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + d); return t.toISOString().slice(0, 10); };
+const isoDiffDays = (a, b) => Math.round((new Date(a + 'T00:00:00Z') - new Date(b + 'T00:00:00Z')) / 86400000);
+const dmyServer = iso => /^\d{4}-\d{2}-\d{2}$/.test(iso || '') ? iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4) : (iso || '');
+// What a student still owes, per fee head, broken into installments (pure of any sending).
+function studentInstallments(student, ctx, today) {
+  const { buildInstallments, allocatePaid } = feeScheduleLogic();
+  const struct = ctx.struct[student.class_name] || { fee: 0, bus: 0 };
   const extra = student.extra || {};
   let busExpected = Number(struct.bus) || 0;
   if (extra.transportRouteId && extra.transportStopId) {
-    const routes = (transportRows[0] && transportRows[0].value) || [];
-    const route = routes.find(r => r.id === extra.transportRouteId);
+    const route = (ctx.routes || []).find(r => r.id === extra.transportRouteId);
     const stop = route ? (route.stops || []).find(st => st.id === extra.transportStopId) : null;
     if (stop) busExpected = Number(stop.fare) || 0;
   }
   const expected = { fee: Number(struct.fee) || 0, bus: busExpected };
-  const collected = { fee: 0, bus: 0 };
-  const discount = { fee: 0, bus: 0 };
-  paymentRows.forEach(p => {
+  const collected = { fee: 0, bus: 0 }, discount = { fee: 0, bus: 0 };
+  (ctx.payments[student.id] || []).forEach(p => {
     if (expected[p.category] === undefined) return;
     if (p.class_at_payment && p.class_at_payment !== student.class_name) return;
-    collected[p.category] += Number(p.amount) || 0;
-    discount[p.category] += Number(p.discount) || 0;
+    collected[p.category] += Number(p.amount) || 0; discount[p.category] += Number(p.discount) || 0;
   });
-  discountRows.forEach(d => {
+  (ctx.discounts[student.id] || []).forEach(d => {
     if (expected[d.applies_to] === undefined) return;
-    discount[d.applies_to] += d.mode === 'percentage'
-      ? Math.round(expected[d.applies_to] * (Number(d.value) || 0) / 100)
-      : (Number(d.value) || 0);
+    discount[d.applies_to] += d.mode === 'percentage' ? Math.round(expected[d.applies_to] * (Number(d.value) || 0) / 100) : (Number(d.value) || 0);
   });
-  let total = 0;
+  const out = [];
   for (const cat of ['fee', 'bus']) {
-    const netPayable = Math.max(expected[cat] - discount[cat], 0);
-    total += Math.max(netPayable - collected[cat], 0);
+    const net = Math.max(expected[cat] - discount[cat], 0);
+    if (net <= 0) continue;
+    const cfg = ctx.schedule[cat];
+    const insts = allocatePaid(buildInstallments(cfg, net, ctx.fallbackDue), collected[cat], today);
+    insts.forEach(i => { if (i.outstanding > 0 && i.due) out.push({ cat, id: i.id, label: i.label, due: i.due, outstanding: i.outstanding }); });
   }
-  return total;
+  return out;
 }
-// Exactly two reminders per due-date cycle, per the school's own
-// late-fee-settings.dueDate (the same single due-date concept the Late Fee
-// screen already uses — nothing new to configure): one FEE_REMINDER_LEAD_DAYS
-// before it, one the day it first becomes overdue. Both are idempotent via
-// notification_events keyed on the due date itself, so changing the due
-// date later naturally opens a fresh reminder cycle instead of silently
-// never firing again.
-const FEE_REMINDER_LEAD_DAYS = 3;
-async function runFeeDueReminders() {
-  const settingsRows = await sql`SELECT value FROM kv_store WHERE \`key\` = 'late-fee-settings'`;
-  const dueDate = settingsRows.length ? settingsRows[0].value.dueDate : '';
-  if (!dueDate) return; // school hasn't set a fee due date yet — nothing to remind about
-  const today = new Date().toISOString().slice(0, 10);
-  const before = new Date(dueDate);
-  before.setDate(before.getDate() - FEE_REMINDER_LEAD_DAYS);
-  const beforeStr = before.toISOString().slice(0, 10);
-  let kind = null;
-  if (today === beforeStr) kind = 'fee_due_before';
-  else if (today > dueDate) kind = 'fee_due_after';
-  if (!kind) return;
+async function loadReminderContext() {
+  const [structRows, discRows, payRows, routeRows, ayRows, schedRows, lateRows] = await Promise.all([
+    sql`SELECT class_name, fee, bus FROM fee_structure`,
+    sql`SELECT student_id, applies_to, mode, value FROM student_discounts WHERE status = 'Approved' AND applies_to IN ('fee','bus')`,
+    sql`SELECT student_id, category, amount, discount, class_at_payment FROM payments WHERE category IN ('fee','bus') AND (voided IS NULL OR voided = 0)`,
+    sql`SELECT value FROM kv_store WHERE \`key\` = 'transport-routes'`,
+    sql`SELECT value FROM kv_store WHERE \`key\` = 'current-academic-year'`,
+    sql`SELECT value FROM kv_store WHERE \`key\` = 'fee-schedule'`,
+    sql`SELECT value FROM kv_store WHERE \`key\` = 'late-fee-settings'`,
+  ]);
+  const js = r => { let v = r.length ? r[0].value : null; if (typeof v === 'string') { try { v = JSON.parse(v); } catch (_) { v = null; } } return v; };
+  const struct = {}; structRows.forEach(r => { struct[r.class_name] = r; });
+  const group = rows => { const g = {}; rows.forEach(r => { (g[r.student_id] = g[r.student_id] || []).push(r); }); return g; };
+  const allSched = js(schedRows) || {};
+  let ay = js(ayRows); if (ay && typeof ay === 'object') ay = ay.value || ay.year || ay.name || '';
+  if (!ay || !allSched[ay]) { const keys = Object.keys(allSched).sort(); ay = keys.length ? keys[keys.length - 1] : ''; }
+  const late = js(lateRows) || {};
+  return { struct, discounts: group(discRows), payments: group(payRows), routes: js(routeRows) || [], schedule: allSched[ay] || {}, fallbackDue: late.dueDate || '' };
+}
+// Decides who should get which message today. Does not send anything.
+async function planFeeReminders(settings, today) {
+  const ctx = await loadReminderContext();
   const students = await sql`SELECT * FROM students WHERE (status IS NULL OR LOWER(status) = 'active') AND deleted_at IS NULL`;
+  const plans = [];
   for (const student of students) {
-    try {
-      const balance = await computeStudentDueBalance(student);
-      if (balance <= 0) continue;
-      const wasNew = await insertNotificationEventIfNew(student.id, kind, dueDate);
-      if (!wasNew) continue; // already sent for this due date
-      const title = kind === 'fee_due_before' ? 'Fee due soon' : 'Fee overdue';
-      const body = kind === 'fee_due_before'
-        ? `${student.first_name} ${student.last_name}'s fee of ${fmtMoneyServer(balance)} is due on ${dueDate}.`
-        : `${student.first_name} ${student.last_name}'s fee of ${fmtMoneyServer(balance)} was due on ${dueDate} and is now overdue.`;
-      await sendPushToStudent(student.id, { title, body, tag: 'fee-due', url: '/' });
-      if (whatsappConfigured()) {
-        const phone = getStudentParentPhone(student);
-        if (phone) {
-          await sendWhatsAppTemplate(phone, kind === 'fee_due_before' ? 'FEE_DUE_BEFORE' : 'FEE_DUE_AFTER',
-            [`${student.first_name} ${student.last_name}`, fmtMoneyServer(balance), dueDate]);
-        }
+    let insts; try { insts = studentInstallments(student, ctx, today); } catch (e) { console.error('reminder plan failed for', student.id, e.message); continue; }
+    if (!insts.length) continue;
+    const name = `${student.first_name} ${student.last_name}`;
+    const soonDate = isoAddDays(today, settings.leadDays);
+    const soon = insts.filter(i => i.due === soonDate);
+    const overdue = insts.filter(i => i.due < today);
+    const sum = l => Math.round(l.reduce((s, i) => s + i.outstanding, 0) * 100) / 100;
+    const labels = l => [...new Set(l.map(i => i.label))].join(', ');
+    if (soon.length) {
+      plans.push({ student, name, kind: 'fee_soon', ref: soon.map(i => i.cat + ':' + i.id + ':' + i.due).join('|').slice(0, 180), legacy: ['fee_due_before', soonDate],
+        title: 'Fee due soon', amount: sum(soon), dueIso: soonDate, wa: 'FEE_DUE_BEFORE',
+        body: `${name}'s fee of ${fmtMoneyServer(sum(soon))} (${labels(soon)}) is due on ${dmyServer(soonDate)}.` });
+      continue;
+    }
+    const fresh = overdue.filter(i => isoDiffDays(today, i.due) <= 14);
+    if (fresh.length) {
+      plans.push({ student, name, kind: 'fee_overdue_first', ref: fresh.map(i => i.cat + ':' + i.id + ':' + i.due).join('|').slice(0, 180), legacy: ['fee_due_after', fresh[0].due],
+        title: 'Fee overdue', amount: sum(overdue), dueIso: fresh[0].due, wa: 'FEE_DUE_AFTER',
+        body: `${name}'s fee of ${fmtMoneyServer(sum(overdue))} (${labels(overdue)}) was due on ${dmyServer(fresh[0].due)} and is now overdue.` });
+      continue;
+    }
+    if (overdue.length && settings.repeatMax > 0) {
+      const oldest = overdue.map(i => i.due).sort()[0];
+      const k = Math.floor(isoDiffDays(today, oldest) / settings.repeatEveryDays);
+      if (k >= 1 && k <= settings.repeatMax) {
+        plans.push({ student, name, kind: 'fee_overdue_repeat', ref: oldest + ':' + k, title: 'Fee still overdue', amount: sum(overdue), dueIso: oldest, wa: 'FEE_DUE_AFTER',
+          body: `Reminder: ${name}'s fee of ${fmtMoneyServer(sum(overdue))} (${labels(overdue)}) is still pending. Please pay at the school office${razorpayConfigured() ? ' or online from the app' : ''}.` });
       }
-    } catch (err) {
-      console.error('fee due reminder failed for student', student.id, err);
     }
   }
+  return plans;
 }
-// In-process daily scheduler — no new Render service/cron needed. Checked
-// hourly but only actually runs the scan once per calendar day (tracked in
-// memory), plus once shortly after boot so a reminder due "today" isn't
-// missed just because the server happened to restart that morning.
+async function alreadySent(plan) {
+  const r = await sql`SELECT 1 AS x FROM notification_events WHERE student_id = ${plan.student.id} AND kind = ${plan.kind} AND ref_key = ${plan.ref}`;
+  if (r.length) return true;
+  if (plan.legacy) {
+    const l = await sql`SELECT 1 AS x FROM notification_events WHERE student_id = ${plan.student.id} AND kind = ${plan.legacy[0]} AND ref_key = ${plan.legacy[1]}`;
+    if (l.length) return true;
+  }
+  return false;
+}
+async function runFeeDueReminders() {
+  const settings = await readReminderSettings();
+  if (!settings.enabled) return { sent: 0, skipped: 'off' };
+  const today = todayInSchoolTz();
+  const plans = await planFeeReminders(settings, today);
+  let sent = 0;
+  for (const plan of plans) {
+    try {
+      if (!(await insertNotificationEventIfNew(plan.student.id, plan.kind, plan.ref))) continue; // already sent for this installment
+      if (plan.legacy && (await sql`SELECT 1 AS x FROM notification_events WHERE student_id = ${plan.student.id} AND kind = ${plan.legacy[0]} AND ref_key = ${plan.legacy[1]}`).length) continue;
+      await sendPushToStudent(plan.student.id, { title: plan.title, body: plan.body, tag: 'fee-due', url: '/' });
+      if (whatsappConfigured()) {
+        const phone = getStudentParentPhone(plan.student);
+        if (phone) await sendWhatsAppTemplate(phone, plan.wa, [plan.name, fmtMoneyServer(plan.amount), dmyServer(plan.dueIso)]);
+      }
+      sent++;
+    } catch (err) { console.error('fee reminder failed for student', plan.student.id, err); }
+  }
+  return { sent };
+}
+// Checked hourly; runs once per school day, from `sendHour` onward (so messages go out in the morning, not at 3 am).
 let lastFeeReminderRunDate = null;
 async function feeReminderTick() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInSchoolTz();
   if (lastFeeReminderRunDate === today) return;
+  const settings = await readReminderSettings();
+  const hour = Number(new Date().toLocaleString('en-GB', { timeZone: SCHOOL_TZ, hour: '2-digit', hour12: false })) % 24;
+  if (hour < settings.sendHour) return;
   lastFeeReminderRunDate = today;
   await runFeeDueReminders().catch(err => console.error('runFeeDueReminders failed:', err));
 }
 setInterval(feeReminderTick, 60 * 60 * 1000);
 setTimeout(feeReminderTick, 120 * 1000); // after first-boot table creation has finished
+const REMINDER_ROLES = ['Admin'];
+app.get('/api/fee-reminders/settings', async (req, res) => {
+  if (!req.authUser || !REMINDER_ROLES.includes(req.authUser.role)) return res.status(403).json({ error: 'Only the Admin can use this.' });
+  return res.status(200).json({ settings: await readReminderSettings(), whatsapp: whatsappConfigured(), push: webPushConfigured() });
+});
+app.put('/api/fee-reminders/settings', async (req, res) => {
+  if (!req.authUser || !REMINDER_ROLES.includes(req.authUser.role)) return res.status(403).json({ error: 'Only the Admin can use this.' });
+  const s = normalizeReminderSettings(req.body);
+  await sql`INSERT INTO kv_store (\`key\`, value) VALUES ('fee-reminder-settings', ${JSON.stringify(s)}) ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP`;
+  return res.status(200).json({ settings: s });
+});
+// Dry run: who would be reminded today (nothing is sent, nothing is recorded).
+app.get('/api/fee-reminders/preview', async (req, res) => {
+  try {
+    if (!req.authUser || !REMINDER_ROLES.includes(req.authUser.role)) return res.status(403).json({ error: 'Only the Admin can use this.' });
+    const settings = { ...(await readReminderSettings()) };
+    const q = req.query || {};
+    if (q.repeatMax !== undefined) settings.repeatMax = normalizeReminderSettings({ repeatMax: q.repeatMax }).repeatMax;
+    const plans = [];
+    for (const p of await planFeeReminders(settings, todayInSchoolTz())) if (!(await alreadySent(p))) plans.push(p);
+    const by = k => plans.filter(p => p.kind === k).length;
+    return res.status(200).json({
+      today: todayInSchoolTz(), enabled: settings.enabled, total: plans.length,
+      soon: by('fee_soon'), overdue: by('fee_overdue_first'), repeat: by('fee_overdue_repeat'),
+      sample: plans.slice(0, 15).map(p => ({ name: p.name, className: p.student.class_name, kind: p.kind, message: p.body })),
+    });
+  } catch (err) { console.error('reminder preview error:', err); return res.status(500).json({ error: 'Could not prepare the preview.' }); }
+});
 
 // ---------- Push subscription endpoints ----------
 // Any signed-in login can call these (not just Parent/Student) so a Teacher

@@ -1169,6 +1169,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     setTimeout(refreshBackupStatusLine, 0);
     setTimeout(loadServerProblems, 0);
     setTimeout(loadOnlinePayments, 0);
+    setTimeout(loadFeeReminderSettings, 0);
     body.innerHTML = `
       <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:20px; max-width:640px;">Tools visible to the Admin role only — not Principal, not any other role, regardless of what's granted in Roles &amp; Permissions.</p>
 
@@ -1196,6 +1197,12 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
         <button class="btn btn-sm" type="button" onclick="loadServerProblems()">Refresh</button>
         <button class="btn btn-sm" type="button" onclick="clearServerProblems()" style="margin-left:6px;">Clear list</button>
         <div id="serverProblems" style="margin-top:12px; font-size:0.8rem;">Loading…</div>
+      </div>
+
+      <div class="profile-card" style="max-width:720px; margin-bottom:24px;">
+        <h4>🔔 Fee reminders</h4>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 12px;">Parents get an app alert (and WhatsApp, if your school has it) when a fee installment is coming due or has become overdue — following your Fee Schedule (Yearly / Terms / Monthly). One message per student per day, sent once per installment.</p>
+        <div id="feeRemBox" style="font-size:0.82rem;">Loading…</div>
       </div>
 
       <div class="profile-card" style="max-width:720px; margin-bottom:24px;">
@@ -1298,6 +1305,44 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       el.innerHTML = info.text;
       el.style.background = info.tone === 'good' ? 'rgba(0,150,120,.10)' : info.tone === 'warn' ? 'rgba(230,160,0,.14)' : 'rgba(192,38,75,.10)';
     }catch(e){ el.textContent = 'Could not check the last backup.'; }
+  }
+  async function loadFeeReminderSettings(){
+    const el = document.getElementById('feeRemBox'); if(!el) return;
+    try{
+      const res = await fetch('/api/fee-reminders/settings'); await throwIfNotOk(res);
+      const d = await res.json(), s = d.settings;
+      el.innerHTML = `
+        <label style="display:flex; gap:8px; align-items:center; margin-bottom:10px;"><input type="checkbox" id="frEnabled" ${s.enabled ? 'checked' : ''}> <b>Send fee reminders automatically</b></label>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin-bottom:10px;">
+          <label>"Due soon" alert, days before the due date<input class="input" type="number" min="1" max="30" id="frLead" value="${s.leadDays}" style="width:100%;"></label>
+          <label>"Still overdue" repeat every (days)<input class="input" type="number" min="3" max="60" id="frEvery" value="${s.repeatEveryDays}" style="width:100%;"></label>
+          <label>…and at most this many times (0 = no repeats)<input class="input" type="number" min="0" max="12" id="frMax" value="${s.repeatMax}" style="width:100%;"></label>
+          <label>Send from this hour of the day (0–23)<input class="input" type="number" min="0" max="23" id="frHour" value="${s.sendHour}" style="width:100%;"></label>
+        </div>
+        <p style="font-size:0.74rem; color:var(--ink-soft); margin:0 0 10px;">Alerts go to ${d.push ? 'app/phone notifications' : '<b>(phone notifications are not set up on this server)</b>'}${d.whatsapp ? ' and WhatsApp' : ''}. The first notice for an overdue installment is only sent if it fell due in the last 14 days, so turning this on never floods parents about old dues.</p>
+        <button class="btn btn-primary btn-sm" type="button" onclick="saveFeeReminderSettings()">Save</button>
+        <button class="btn btn-sm" type="button" onclick="previewFeeReminders()" style="margin-left:6px;">Who would be reminded today?</button>
+        <div id="feeRemPreview" style="margin-top:12px;"></div>`;
+    }catch(e){ el.textContent = 'Could not load (' + e.message + ').'; }
+  }
+  async function saveFeeReminderSettings(){
+    const v = id => Number((document.getElementById(id) || {}).value);
+    try{
+      const res = await fetch('/api/fee-reminders/settings', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+        enabled: document.getElementById('frEnabled').checked, leadDays: v('frLead'), repeatEveryDays: v('frEvery'), repeatMax: v('frMax'), sendHour: v('frHour') }) });
+      await throwIfNotOk(res); showToast('Fee reminder settings saved.'); loadFeeReminderSettings();
+    }catch(e){ showToast('Could not save (' + e.message + ').'); }
+  }
+  async function previewFeeReminders(){
+    const out = document.getElementById('feeRemPreview'); if(!out) return;
+    out.innerHTML = '<span style="color:var(--ink-soft);">Checking…</span>';
+    try{
+      const res = await fetch('/api/fee-reminders/preview'); await throwIfNotOk(res);
+      const d = await res.json();
+      if(!d.total){ out.innerHTML = '<b style="color:var(--teal);">✓ Nobody needs a reminder today.</b>'; return; }
+      out.innerHTML = '<div style="margin-bottom:6px;"><b>' + d.total + '</b> parent(s) would be messaged today (not sent now — this is only a preview): ' + d.soon + ' due soon, ' + d.overdue + ' newly overdue, ' + d.repeat + ' repeat.</div>' +
+        '<div style="max-height:220px; overflow:auto; border:1px solid var(--border); border-radius:10px; padding:6px 10px;">' + d.sample.map(x => '<div style="padding:3px 0;">' + escapeHtml(x.message) + '</div>').join('') + (d.total > d.sample.length ? '<div style="color:var(--ink-soft);">…and ' + (d.total - d.sample.length) + ' more</div>' : '') + '</div>';
+    }catch(e){ out.textContent = 'Could not check (' + e.message + ').'; }
   }
   async function loadOnlinePayments(){
     const el = document.getElementById('onlinePaymentsBox'); if(!el) return;
