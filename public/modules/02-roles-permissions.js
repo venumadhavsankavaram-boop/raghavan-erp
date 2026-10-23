@@ -656,9 +656,15 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     verifyLogin.lastError = '';
     verifyLogin.wrongAudience = false;
     verifyLogin.accessSuspended = false;
+    verifyLogin.networkProblem = false;
+    // On a weak mobile signal a request can hang for minutes; give up after 30 s with a clear message instead.
+    const ctl = (typeof AbortController === 'function') ? new AbortController() : null;
+    const killer = ctl ? setTimeout(() => ctl.abort(), 30000) : 0;
     try{
-      const res = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ username, password, audience }) });
+      const res = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ username, password, audience }), signal: ctl ? ctl.signal : undefined });
+      clearTimeout(killer);
       if(!res.ok){
+        if(res.status >= 500 || res.status === 502 || res.status === 503 || res.status === 504) verifyLogin.networkProblem = true;
         try{
           const body = await res.json();
           if(body && body.error) verifyLogin.lastError = body.error;
@@ -668,7 +674,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
         return null;
       }
       return await res.json();
-    }catch(e){ return null; }
+    }catch(e){ clearTimeout(killer); verifyLogin.networkProblem = true; return null; }
   }
   async function submitLogin(e){
     e.preventDefault();
@@ -686,6 +692,11 @@ const CUSTOM_ROLES_KEY = "custom-roles";
       // guidance the person needs to see verbatim — only the plain "wrong
       // password" case gets the generic copy, so a mistyped password never
       // leaks whether suspension/audience even applies to that account.
+      if(verifyLogin.networkProblem){
+        errEl.textContent = 'Could not reach the school server — your signal may be weak. Your password is fine; please wait a moment and tap Sign in again.';
+        errEl.style.display = 'block';
+        return false;
+      }
       errEl.textContent = (verifyLogin.accessSuspended || verifyLogin.wrongAudience || /too many/i.test(verifyLogin.lastError || ''))
         ? verifyLogin.lastError
         : 'Incorrect username or password.';

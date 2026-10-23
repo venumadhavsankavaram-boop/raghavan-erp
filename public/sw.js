@@ -1,12 +1,14 @@
-/* Minimal service worker — exists only to make the ERP installable
-   ("Add to Home Screen" / desktop install) and to survive a flaky
-   connection, NOT to work as a real offline app. A school's fee/attendance
-   data must always be live, so this deliberately:
-     - never intercepts /api/* requests (those always hit the network), and
-     - is network-first for everything it does cache, only falling back to
-       the cached copy when the network request itself fails.
-   Bump CACHE_NAME whenever the shell changes so old caches get cleared. */
-const CACHE_NAME = 'school-erp-shell-v2';
+/* Service worker — makes the ERP installable ("Add to Home Screen") and quick/forgiving on a weak connection.
+   NOT an offline app: school fee/attendance data must always be live, so this deliberately
+     - never touches /api/* requests (those always go to the network), and
+     - keeps only the app's own files (the page, its scripts, icons).
+   How it helps a slow connection:
+     - Scripts carry a version stamp (?v=...). A stamped script can never change, so once saved on the phone it is
+       used straight from the phone's memory — no waiting, no data used — until the app is updated.
+     - The page itself ('/') is always asked for fresh, but if the network is slow (4 s) or down, the last saved
+       copy is shown instead of a blank screen.
+   Bump CACHE_NAME whenever this file's behaviour changes so old caches get cleared. */
+const CACHE_NAME = 'school-erp-shell-v3';
 const SHELL_URLS = ['/', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -27,19 +29,56 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+const isVersionedModule = (url) => url.pathname.startsWith('/modules/') && url.pathname.endsWith('.js') && url.searchParams.has('v');
+
+// Saves a versioned script and removes older versions of the same file, so the phone never piles up old copies.
+async function saveModule(request, response) {
+  const cache = await caches.open(CACHE_NAME);
+  const url = new URL(request.url);
+  const keys = await cache.keys();
+  await Promise.all(keys.filter((k) => { const u = new URL(k.url); return u.pathname === url.pathname && u.search !== url.search; }).map((k) => cache.delete(k)));
+  await cache.put(request, response);
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
-  if (request.url.includes('/api/')) return; // ERP data is always fetched live, never cached
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith('/api/')) return; // ERP data is always fetched live, never cached
+
+  if (isVersionedModule(url)) {
+    event.respondWith(
+      caches.match(request).then((hit) => hit || fetch(request).then((response) => {
+        if (response.ok) saveModule(request, response.clone()).catch(() => {});
+        return response;
+      }))
+    );
+    return;
+  }
+
+  if (request.mode === 'navigate') {
+    // Fresh page first; fall back to the saved page if the network is slow or down.
+    event.respondWith(new Promise((resolve) => {
+      let settled = false;
+      const fallback = () => caches.match('/').then((cached) => { if (!settled && cached) { settled = true; resolve(cached); } });
+      const timer = setTimeout(fallback, 4000);
+      fetch(request).then((response) => {
+        clearTimeout(timer);
+        if (response.ok) { const copy = response.clone(); caches.open(CACHE_NAME).then((c) => c.put('/', copy)).catch(() => {}); }
+        if (!settled) { settled = true; resolve(response); }
+      }).catch(() => { clearTimeout(timer); fallback().then(() => { if (!settled) { settled = true; resolve(Response.error()); } }); });
+    }));
+    return;
+  }
 
   event.respondWith(
     fetch(request)
       .then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)).catch(() => {});
+        if (response.ok) { const copy = response.clone(); caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)).catch(() => {}); }
         return response;
       })
-      .catch(() => caches.match(request).then((cached) => cached || caches.match('/')))
+      .catch(() => caches.match(request).then((cached) => cached || Response.error()))
   );
 });
 

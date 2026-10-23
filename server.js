@@ -5973,8 +5973,19 @@ app.use((err, req, res, next) => {
 // by hitting this server fresh. The old, unversioned-request cache entries
 // are simply never asked for again; they age out on their own instead of
 // needing to be invalidated.
-const APP_BUILD = String(Date.now());
 const INDEX_HTML_PATH = path.join(__dirname, 'public', 'index.html');
+// APP_BUILD is a fingerprint of the app's own files, not of the moment the server started. A restart that
+// changes nothing therefore keeps the same script urls, so phones that already have them keep using their saved
+// copies (a big saving on slow connections); any real change to index.html or a module gives new urls at once.
+const APP_BUILD = (() => {
+  try {
+    const h = crypto.createHash('sha1');
+    h.update(fs.readFileSync(INDEX_HTML_PATH));
+    const dir = path.join(__dirname, 'public', 'modules');
+    for (const f of fs.readdirSync(dir).filter(n => n.endsWith('.js')).sort()) { h.update(f); h.update(fs.readFileSync(path.join(dir, f))); }
+    return h.digest('hex').slice(0, 12);
+  } catch (e) { return String(Date.now()); }
+})();
 function renderIndexHtml(){
   const raw = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
   return raw.replace(/(<script src="modules\/[^"]+\.js)(")/g, `$1?v=${APP_BUILD}$2`);
@@ -5985,8 +5996,10 @@ function renderIndexHtml(){
 // zlib only (no new dependency), compressed once per file version and cached.
 const _gzCache = new Map();
 function acceptsGzip(req){ return /\bgzip\b/.test(String(req.headers['accept-encoding'] || '')); }
-function sendGzipped(req, res, key, version, contentType, getBuffer){
-  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+function sendGzipped(req, res, key, version, contentType, getBuffer, immutable){
+  // A script asked for WITH its version stamp (?v=...) can never change under that url, so the phone may keep it
+  // for a year without asking again. Asked for without the stamp, it is always re-checked.
+  res.setHeader('Cache-Control', immutable ? 'public, max-age=31536000, immutable' : 'no-cache, must-revalidate');
   res.setHeader('Vary', 'Accept-Encoding');
   res.type(contentType);
   let hit = _gzCache.get(key);
@@ -6011,7 +6024,7 @@ app.get(/^\/modules\/([A-Za-z0-9._-]+\.js)$/, (req, res, next) => {
   let st;
   try { st = fs.statSync(file); } catch (e) { return next(); }
   if (!st.isFile()) return next();
-  return sendGzipped(req, res, file, st.mtimeMs + ':' + st.size, 'application/javascript', () => fs.readFileSync(file));
+  return sendGzipped(req, res, file, st.mtimeMs + ':' + st.size, 'application/javascript', () => fs.readFileSync(file), String(req.query.v || '') === APP_BUILD);
 });
 app.use(express.static(path.join(__dirname, 'public'), {
   // 'allow' (not the Express default 'ignore') so /.well-known/assetlinks.json

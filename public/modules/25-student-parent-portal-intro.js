@@ -750,6 +750,24 @@ let myProfileTab = 'notifications';
     }
   }
 
+
+  /* On a phone the fee tables become one card per fee, so the amount and the Pay button never hide off-screen. */
+  (function(){
+    if(document.getElementById('feeStackCss')) return;
+    const st = document.createElement('style'); st.id = 'feeStackCss';
+    st.textContent = '@media (max-width:640px){' +
+      '.table-wrap:has(table.fee-stack){overflow:visible!important;background:none!important;border:0!important;box-shadow:none!important}' +
+      'table.fee-stack,table.fee-stack tbody,table.fee-stack tr,table.fee-stack td{display:block;width:100%}' +
+      'table.fee-stack thead{display:none}' +
+      'table.fee-stack tr{margin:0 0 12px;padding:10px 14px;border:1px solid rgba(0,0,0,.1);border-radius:14px;background:#fff}' +
+      'table.fee-stack td{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0!important;border:0!important;text-align:right}' +
+      'table.fee-stack td[data-l]:not([data-l=""])::before{content:attr(data-l);color:#6b7280;font-size:.82rem;text-align:left}' +
+      'table.fee-stack td[data-l=""]{justify-content:flex-start}' +
+      'table.fee-stack td .btn{width:100%;padding:12px;font-size:1rem}' +
+    '}';
+    document.head.appendChild(st);
+  })();
+
   /* --- Fees & Payments tab: read-only fee ledger (same numbers as the office
      sees) plus a Pay Online button per pending item, and a payment/receipt
      history with Print Receipt for anything already paid. --- */
@@ -764,15 +782,15 @@ let myProfileTab = 'notifications';
       <div class="dash-section-title"><div><h3>Pending Fees</h3></div></div>
       ${!onlinePaymentAvailable ? `<p style="font-size:0.85rem; color:var(--ink-soft); margin:-8px 0 16px;">Online payment isn't set up for this school yet — please pay at the school office.</p>` : ''}
       <div class="table-wrap" style="overflow-x:auto; margin-bottom:16px;">
-        <table><thead><tr><th>Type</th><th>Total</th><th>Paid</th><th>Late Fee</th><th>Outstanding</th>${onlinePaymentAvailable ? '<th></th>' : ''}</tr></thead><tbody>
+        <table class="fee-stack"><thead><tr><th>Type</th><th>Total</th><th>Paid</th><th>Late Fee</th><th>Outstanding</th>${onlinePaymentAvailable ? '<th></th>' : ''}</tr></thead><tbody>
         ${pendingRows.map(r => `
           <tr>
-            <td><span class="pill">${r.label}</span></td>
-            <td>${fmtMoney(r.total)}</td>
-            <td>${fmtMoney(r.paid)}</td>
-            <td>${r.lateFee>0?`<span style="color:var(--magenta); font-weight:600;">${fmtMoney(r.lateFee)}</span>`:'-'}</td>
-            <td class="balance-tag due">${fmtMoney(r.outstanding + r.lateFee)}</td>
-            ${onlinePaymentAvailable ? `<td><button class="btn btn-primary btn-sm" onclick="payFeeOnline('${r.type}','${r.key}', ${r.outstanding + r.lateFee}, '${r.label.replace(/'/g,"\\'")}')">💳 Pay Online</button></td>` : ''}
+            <td data-l=""><span class="pill">${r.label}</span></td>
+            <td data-l="Total">${fmtMoney(r.total)}</td>
+            <td data-l="Paid">${fmtMoney(r.paid)}</td>
+            <td data-l="Late fee">${r.lateFee>0?`<span style="color:var(--magenta); font-weight:600;">${fmtMoney(r.lateFee)}</span>`:'-'}</td>
+            <td class="balance-tag due" data-l="Outstanding">${fmtMoney(r.outstanding + r.lateFee)}</td>
+            ${onlinePaymentAvailable ? `<td data-l=""><button class="btn btn-primary btn-sm" onclick="payFeeOnline('${r.type}','${r.key}', ${r.outstanding + r.lateFee}, '${r.label.replace(/'/g,"\\'")}')">💳 Pay Online</button></td>` : ''}
           </tr>`).join('')}
         </tbody></table>
       </div>
@@ -788,8 +806,8 @@ let myProfileTab = 'notifications';
       </tbody></table></div>` : ``}
 
       <div class="dash-section-title"><div><h3>Payment History &amp; Receipts</h3></div></div>
-      <div class="table-wrap"><table><thead><tr><th>Date</th><th>Category</th><th>Mode</th><th>Amount</th><th></th></tr></thead><tbody>
-        ${studentPayments.length ? studentPayments.map(p => `<tr><td>${p.date||'—'}</td><td><span class="pill">${feeLabelFor(p)}</span></td><td>${p.mode||'—'}</td><td>${fmtMoney(p.amount)}</td><td>${canSub('managefee_collection','managefee','print') ? `<button class="btn-edit-text" onclick="printReceipt('${p.id}')">Print Receipt</button>` : ''}</td></tr>`).join('') : `<tr><td colspan="5"><div class="empty-state"><b>No payments yet</b></div></td></tr>`}
+      <div class="table-wrap"><table class="fee-stack"><thead><tr><th>Date</th><th>Category</th><th>Mode</th><th>Amount</th><th></th></tr></thead><tbody>
+        ${studentPayments.length ? studentPayments.map(p => `<tr><td data-l="Date">${p.date||'—'}</td><td data-l=""><span class="pill">${feeLabelFor(p)}</span></td><td data-l="Mode">${p.mode||'—'}</td><td data-l="Amount">${fmtMoney(p.amount)}</td><td data-l="">${canSub('managefee_collection','managefee','print') ? `<button class="btn-edit-text" onclick="printReceipt('${p.id}')">Print Receipt</button>` : ''}</td></tr>`).join('') : `<tr><td colspan="5"><div class="empty-state"><b>No payments yet</b></div></td></tr>`}
       </tbody></table></div>
     `;
   }
