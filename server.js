@@ -26,6 +26,7 @@ import webpush from 'web-push';
 // yet added to the vendor dashboard), this does nothing at all.
 import { startVendorReporting, reportVendorError, isAccessSuspended, getModuleAccess } from './vendor-reporting.js';
 import { handleVendorSupportLogin } from './vendor-support-login.js';
+import { newTotpSecret, checkTotp, otpauthUrl, newRecoveryCodes, hashCode, newEmailCode, smtpConfigured, maskEmail, looksLikeEmail, sendMail } from './twofa.js';
 startVendorReporting();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -260,6 +261,13 @@ async function ensureSchema() {
   // below). Null for rows soft-deleted before this column existed.
   await addColumnIfMissing('users', 'deleted_by TEXT');
   await addColumnIfMissing('users', 'deleted_by_name TEXT');
+  // Two-step sign-in (Admin / Principal). Deliberately NOT in SIMPLE_RESOURCES.users.fields, so these
+  // secrets can never be sent to a browser by the generic users API.
+  await addColumnIfMissing('users', 'twofa_method VARCHAR(10)');
+  await addColumnIfMissing('users', 'totp_secret VARCHAR(64)');
+  await addColumnIfMissing('users', 'twofa_email VARCHAR(191)');
+  await addColumnIfMissing('users', 'twofa_recovery TEXT');
+  await addColumnIfMissing('users', 'twofa_last_step BIGINT');
   // A user's own "My Account" profile photo (base64 data URL, capped at 2MB
   // client-side — see PHOTO_UPLOAD_MAX_BYTES in index.html, well under this
   // server's 25mb JSON body limit). This column didn't exist before, so the
@@ -1109,6 +1117,8 @@ async function destroySession(req, res) {
 // logging in and out are themselves how a session is created or cleared.
 const PUBLIC_API_ROUTES = [
   { path: '/api/login', methods: ['POST'] },
+  { path: '/api/login/2fa', methods: ['POST'] },
+  { path: '/api/login/2fa/email', methods: ['POST'] },
   { path: '/api/demo-info', methods: ['GET'] },
   { path: '/api/logout', methods: ['POST'] },
   { path: '/api/vendor-support-login', methods: ['GET'] },
@@ -4567,19 +4577,215 @@ app.post('/api/login', async (req, res) => {
       recordLoginSuccess(rateKey);
       return res.status(403).json({ error: 'This is a Staff account — switch to the "Staff" tab to sign in.', wrongAudience: true });
     }
+    // Two-step sign-in: password is right, but this account has a second step turned on. No session yet —
+    // hand back a short-lived ticket; the session is only created by /api/login/2fa. The failed-attempt
+    // counter is NOT cleared here, so knowing the password never buys unlimited code guesses.
+    if (TWOFA_ROLES.includes(user.role) && user.twofa_method) {
+      const token = crypto.randomBytes(24).toString('hex');
+      const p = { userId: user.id, exp: Date.now() + 5 * 60 * 1000, tries: 0, method: user.twofa_method, rateKey, emailHash: null, emailExp: 0, lastSend: 0 };
+      pending2fa.set(token, p);
+      if (user.twofa_method === 'email') {
+        try { await sendLoginEmailCode(p, user); }
+        catch (e) { console.error('2fa email send failed:', e.message); return res.status(503).json({ error: 'Could not send the sign-in code by email right now. Use one of your recovery codes, or try again in a minute.', twofaEmailFailed: true, twofaRequired: true, token, method: 'email', emailMasked: maskEmail(user.twofa_email) }); }
+      }
+      return res.status(200).json({ twofaRequired: true, token, method: user.twofa_method, emailMasked: user.twofa_method === 'email' ? maskEmail(user.twofa_email) : '' });
+    }
     recordLoginSuccess(rateKey);
-    const shaped = simpleToAppShape(user, SIMPLE_RESOURCES.users.fields);
-    delete shaped.password;
-    // So the client can hide a nav item the school's Plan doesn't include —
-    // same idea as the ROLE_VIEWS shape it already gets, just billing-driven
-    // instead of role-driven. See checkPlanModuleAccess above for enforcement.
-    shaped.moduleAccess = getModuleAccess();
-    await createSession(req, res, user);
-    return res.status(200).json(shaped);
+    return await completeLogin(req, res, user);
   } catch (err) {
     console.error('login error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
+});
+
+
+// ---------- Two-step sign-in (Admin / Principal) ----------
+const TWOFA_ROLES = ['Admin', 'Principal'];
+const pending2fa = new Map();   // login ticket -> { userId, exp, tries, method, rateKey, emailHash, emailExp, lastSend }
+const enroll2fa = new Map();    // userId -> { method, secret|email, emailHash, exp, tries }
+setInterval(() => { const n = Date.now(); for (const [k, v] of pending2fa) if (v.exp < n) pending2fa.delete(k); for (const [k, v] of enroll2fa) if (v.exp < n) enroll2fa.delete(k); }, 60 * 1000).unref();
+const TWOFA_ISSUER = () => (process.env.SCHOOL_NAME || 'School ERP').slice(0, 40);
+
+async function completeLogin(req, res, user) {
+  const shaped = simpleToAppShape(user, SIMPLE_RESOURCES.users.fields);
+  delete shaped.password;
+  // So the client can hide a nav item the school's Plan doesn't include —
+  // same idea as the ROLE_VIEWS shape it already gets, just billing-driven
+  // instead of role-driven. See checkPlanModuleAccess above for enforcement.
+  shaped.moduleAccess = getModuleAccess();
+  shaped.twofaEnabled = !!user.twofa_method;
+  await createSession(req, res, user);
+  return res.status(200).json(shaped);
+}
+async function sendLoginEmailCode(p, user) {
+  const code = newEmailCode();
+  await sendMail({ to: user.twofa_email, subject: 'Your sign-in code', text: `Your sign-in code is ${code}\n\nIt works for 5 minutes. If this was not you, change your password.` });
+  p.emailHash = hashCode(code); p.emailExp = Date.now() + 5 * 60 * 1000; p.lastSend = Date.now();
+}
+// Tries a typed code as a recovery code, or the user's current method code. Returns { ok, usedRecovery }.
+async function check2faCode(user, p, rawCode) {
+  const code = String(rawCode || '').trim();
+  if (!code) return { ok: false };
+  const looksRecovery = /[A-Za-z]/.test(code) || /-/.test(code);
+  if (looksRecovery) {
+    let list = []; try { list = JSON.parse(user.twofa_recovery || '[]'); } catch (_) {}
+    const h = hashCode(code);
+    if (list.includes(h)) {
+      await sql`UPDATE users SET twofa_recovery = ${JSON.stringify(list.filter(x => x !== h))} WHERE id = ${user.id}`;
+      return { ok: true, usedRecovery: true };
+    }
+    return { ok: false };
+  }
+  if (p.method === 'email') {
+    if (p.emailHash && Date.now() < p.emailExp && hashCode(code) === p.emailHash) { p.emailHash = null; return { ok: true }; }
+    return { ok: false };
+  }
+  const step = checkTotp(user.totp_secret, code);
+  if (step === null) return { ok: false };
+  if (user.twofa_last_step != null && step <= Number(user.twofa_last_step)) return { ok: false }; // same code can't be used twice
+  await sql`UPDATE users SET twofa_last_step = ${step} WHERE id = ${user.id}`;
+  return { ok: true };
+}
+app.post('/api/login/2fa', async (req, res) => {
+  try {
+    const { token, code } = req.body || {};
+    const p = pending2fa.get(String(token || ''));
+    if (!p || p.exp < Date.now()) { pending2fa.delete(String(token || '')); return res.status(401).json({ error: 'Your sign-in took too long. Please sign in again.', expired: true }); }
+    const blocked = checkLoginRateLimit(p.rateKey);
+    if (blocked) { pending2fa.delete(token); return res.status(429).json({ error: `Too many failed attempts. Try again in ${Math.ceil(blocked / 60)} minute${Math.ceil(blocked / 60) === 1 ? '' : 's'}.` }); }
+    const rows = await sql`SELECT * FROM users WHERE id = ${p.userId} AND deleted_at IS NULL`;
+    if (!rows.length || !rows[0].twofa_method) { pending2fa.delete(token); return res.status(401).json({ error: 'Please sign in again.', expired: true }); }
+    const user = rows[0];
+    const r = await check2faCode(user, p, code);
+    if (!r.ok) {
+      recordLoginFailure(p.rateKey);
+      p.tries++;
+      if (p.tries >= 5) { pending2fa.delete(token); return res.status(401).json({ error: 'Too many wrong codes. Please sign in again.', expired: true }); }
+      return res.status(401).json({ error: 'That code is not right. Check the code and try again.' });
+    }
+    pending2fa.delete(token);
+    recordLoginSuccess(p.rateKey);
+    if (r.usedRecovery) await sql`INSERT INTO audit_log (actor_name, actor_role, method, resource, record_id) VALUES (${user.name}, ${user.role}, 'NOTE', 'twofa_recovery_code_used', ${user.id})`.catch(() => {});
+    const out = await completeLogin(req, res, user);
+    return out;
+  } catch (err) {
+    console.error('login 2fa error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+app.post('/api/login/2fa/email', async (req, res) => {
+  try {
+    const p = pending2fa.get(String((req.body && req.body.token) || ''));
+    if (!p || p.exp < Date.now() || p.method !== 'email') return res.status(401).json({ error: 'Please sign in again.', expired: true });
+    if (Date.now() - p.lastSend < 30000) return res.status(429).json({ error: 'A code was just sent. Please wait half a minute before asking for another.' });
+    const rows = await sql`SELECT * FROM users WHERE id = ${p.userId} AND deleted_at IS NULL`;
+    if (!rows.length) return res.status(401).json({ error: 'Please sign in again.', expired: true });
+    await sendLoginEmailCode(p, rows[0]);
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('2fa email resend error:', err.message);
+    return res.status(503).json({ error: 'Could not send the email right now. Use a recovery code, or try again in a minute.' });
+  }
+});
+
+// Own-account setup. Only Admin / Principal accounts can turn this on.
+function twofaGate(req, res) {
+  if (!req.authUser || req.authUser.id === 'vendor-support') { res.status(403).json({ error: 'Not available for this session.' }); return false; }
+  if (!TWOFA_ROLES.includes(req.authUser.role)) { res.status(403).json({ error: 'Two-step sign-in is for Admin and Principal accounts.' }); return false; }
+  return true;
+}
+async function twofaPasswordOk(userId, password) {
+  const rows = await sql`SELECT password FROM users WHERE id = ${userId} AND deleted_at IS NULL`;
+  return rows.length && await bcrypt.compare(String(password || ''), rows[0].password || '');
+}
+app.get('/api/account/2fa', async (req, res) => {
+  try {
+    if (!req.authUser || req.authUser.id === 'vendor-support') return res.status(200).json({ allowed: false });
+    if (!TWOFA_ROLES.includes(req.authUser.role)) return res.status(200).json({ allowed: false });
+    const rows = await sql`SELECT twofa_method, twofa_email, twofa_recovery FROM users WHERE id = ${req.authUser.id}`;
+    const u = rows[0] || {}; let left = 0; try { left = JSON.parse(u.twofa_recovery || '[]').length; } catch (_) {}
+    return res.status(200).json({ allowed: true, enabled: !!u.twofa_method, method: u.twofa_method || '', emailAvailable: smtpConfigured(), emailMasked: u.twofa_method === 'email' ? maskEmail(u.twofa_email) : '', recoveryLeft: left });
+  } catch (err) { console.error('2fa status error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/account/2fa/start', async (req, res) => {
+  try {
+    if (!twofaGate(req, res)) return;
+    const { method, password, email } = req.body || {};
+    if (!await twofaPasswordOk(req.authUser.id, password)) return res.status(400).json({ error: 'Your password is not right.' });
+    if (method === 'app') {
+      const secret = newTotpSecret();
+      enroll2fa.set(req.authUser.id, { method: 'app', secret, exp: Date.now() + 15 * 60 * 1000, tries: 0 });
+      const rows = await sql`SELECT username FROM users WHERE id = ${req.authUser.id}`;
+      return res.status(200).json({ secret, otpauth: otpauthUrl(secret, (rows[0] && rows[0].username) || 'user', TWOFA_ISSUER()) });
+    }
+    if (method === 'email') {
+      if (!smtpConfigured()) return res.status(400).json({ error: 'Email sending is not set up for this school yet. Use the authenticator app, or ask your vendor to set up email.' });
+      if (!looksLikeEmail(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
+      const code = newEmailCode();
+      try { await sendMail({ to: String(email).trim(), subject: 'Confirm two-step sign-in', text: `Your confirmation code is ${code}\n\nIt works for 15 minutes.` }); }
+      catch (e) { console.error('2fa enroll email failed:', e.message); return res.status(503).json({ error: 'Could not send the email. Check the address and try again.' }); }
+      enroll2fa.set(req.authUser.id, { method: 'email', email: String(email).trim(), emailHash: hashCode(code), exp: Date.now() + 15 * 60 * 1000, tries: 0 });
+      return res.status(200).json({ sent: true, emailMasked: maskEmail(email) });
+    }
+    return res.status(400).json({ error: 'Choose the authenticator app or email.' });
+  } catch (err) { console.error('2fa start error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/account/2fa/confirm', async (req, res) => {
+  try {
+    if (!twofaGate(req, res)) return;
+    const e = enroll2fa.get(req.authUser.id);
+    if (!e || e.exp < Date.now()) return res.status(400).json({ error: 'The setup timed out. Please start again.' });
+    const code = String((req.body && req.body.code) || '').replace(/\s+/g, '');
+    let ok = false;
+    if (e.method === 'app') ok = checkTotp(e.secret, code) !== null;
+    else ok = hashCode(code) === e.emailHash;
+    if (!ok) { e.tries++; if (e.tries >= 8) enroll2fa.delete(req.authUser.id); return res.status(400).json({ error: 'That code is not right. Try the newest code.' }); }
+    const codes = newRecoveryCodes(8);
+    await sql`UPDATE users SET twofa_method = ${e.method}, totp_secret = ${e.method === 'app' ? e.secret : null}, twofa_email = ${e.method === 'email' ? e.email : null}, twofa_recovery = ${JSON.stringify(codes.map(hashCode))}, twofa_last_step = ${e.method === 'app' ? Math.floor(Date.now() / 30000) : null} WHERE id = ${req.authUser.id}`;
+    enroll2fa.delete(req.authUser.id);
+    await sql`INSERT INTO audit_log (actor_name, actor_role, method, resource, record_id) VALUES (${req.authUser.name}, ${req.authUser.role}, 'NOTE', ${'twofa_enabled_' + e.method}, ${req.authUser.id})`.catch(() => {});
+    return res.status(200).json({ ok: true, method: e.method, recoveryCodes: codes });
+  } catch (err) { console.error('2fa confirm error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/account/2fa/disable', async (req, res) => {
+  try {
+    if (!twofaGate(req, res)) return;
+    const { password, code } = req.body || {};
+    if (!await twofaPasswordOk(req.authUser.id, password)) return res.status(400).json({ error: 'Your password is not right.' });
+    const rows = await sql`SELECT * FROM users WHERE id = ${req.authUser.id}`;
+    const user = rows[0];
+    if (user && user.twofa_method) {
+      const p = { method: user.twofa_method, emailHash: null, emailExp: 0 };
+      if (user.twofa_method === 'email') {
+        // email accounts prove themselves with a recovery code here (an emailed code would need a second round trip)
+        if (!/[A-Za-z-]/.test(String(code || ''))) return res.status(400).json({ error: 'Enter one of your recovery codes (like A1B2C-3D4E5) to turn this off.' });
+      }
+      const r = await check2faCode(user, p, code);
+      if (!r.ok) return res.status(400).json({ error: 'That code is not right.' });
+    }
+    await sql`UPDATE users SET twofa_method = NULL, totp_secret = NULL, twofa_email = NULL, twofa_recovery = NULL, twofa_last_step = NULL WHERE id = ${req.authUser.id}`;
+    await sql`INSERT INTO audit_log (actor_name, actor_role, method, resource, record_id) VALUES (${req.authUser.name}, ${req.authUser.role}, 'NOTE', 'twofa_disabled', ${req.authUser.id})`.catch(() => {});
+    return res.status(200).json({ ok: true });
+  } catch (err) { console.error('2fa disable error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+// Admin: who has it on, and a reset for a colleague who lost their phone and recovery codes.
+app.get('/api/account/2fa/overview', async (req, res) => {
+  try {
+    if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Admin access required.' });
+    const rows = await sql`SELECT id, name, username, role, twofa_method FROM users WHERE role IN ('Admin', 'Principal') AND deleted_at IS NULL ORDER BY role, name`;
+    return res.status(200).json({ emailAvailable: smtpConfigured(), users: rows.map(r => ({ id: r.id, name: r.name, username: r.username, role: r.role, method: r.twofa_method || '' })) });
+  } catch (err) { console.error('2fa overview error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/account/2fa/reset', async (req, res) => {
+  try {
+    if (!req.authUser || req.authUser.role !== 'Admin' || req.authUser.id === 'vendor-support') return res.status(403).json({ error: 'Admin access required.' });
+    const id = String((req.body && req.body.userId) || '');
+    const rows = await sql`SELECT id, name, role FROM users WHERE id = ${id} AND deleted_at IS NULL`;
+    if (!rows.length || !TWOFA_ROLES.includes(rows[0].role)) return res.status(404).json({ error: 'Account not found.' });
+    await sql`UPDATE users SET twofa_method = NULL, totp_secret = NULL, twofa_email = NULL, twofa_recovery = NULL, twofa_last_step = NULL WHERE id = ${id}`;
+    await sql`INSERT INTO audit_log (actor_name, actor_role, method, resource, record_id) VALUES (${req.authUser.name}, ${req.authUser.role}, 'NOTE', 'twofa_reset', ${id})`.catch(() => {});
+    return res.status(200).json({ ok: true });
+  } catch (err) { console.error('2fa reset error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 
 app.post('/api/logout', async (req, res) => {

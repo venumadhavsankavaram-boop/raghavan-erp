@@ -703,6 +703,78 @@ const CUSTOM_ROLES_KEY = "custom-roles";
       errEl.style.display = 'block';
       return false;
     }
+    if(u.twofaRequired){
+      loginLoaderStop();
+      if(submitBtn) submitBtn.disabled = false;
+      document.getElementById('loginError').style.display = 'none';
+      showTwofaStep(u, submitBtn);
+      return false;
+    }
+    return await completeSignIn(u, submitBtn);
+  }
+
+  /* ---- second step of sign-in (only for accounts that turned two-step sign-in on) ---- */
+  function showTwofaStep(t, submitBtn){
+    const form = document.getElementById('loginForm');
+    let box = document.getElementById('twofaStep');
+    if(box) box.remove();
+    box = document.createElement('form');
+    box.id = 'twofaStep';
+    const isEmail = t.method === 'email';
+    box.innerHTML = `
+      <p class="login-sub" style="margin:0 0 14px;">${isEmail
+        ? 'We emailed a 6-digit code to <b>' + (t.emailMasked || 'your email') + '</b>. Enter it below.'
+        : 'Open your authenticator app and enter the 6-digit code shown for this school.'}</p>
+      <div class="f-field" style="margin-bottom:8px; text-align:left;">
+        <label>Sign-in code</label>
+        <input type="text" id="twofaCode" class="input" style="width:100%; letter-spacing:4px; font-size:1.2rem; text-align:center;" inputmode="numeric" autocomplete="one-time-code" maxlength="14" placeholder="123456">
+      </div>
+      <div id="twofaError" style="display:none; color:var(--magenta); font-size:0.82rem; margin-bottom:10px; text-align:left;"></div>
+      <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; margin-top:6px;">Verify &amp; sign in</button>
+      <div style="display:flex; justify-content:space-between; gap:8px; margin-top:12px; flex-wrap:wrap;">
+        ${isEmail ? '<button type="button" class="settings-link" id="twofaResend">Send the code again</button>' : '<span></span>'}
+        <button type="button" class="settings-link" id="twofaBack">← Back</button>
+      </div>
+      <p style="font-size:.78rem; opacity:.7; margin:12px 0 0; text-align:left;">Lost your phone? Type one of your saved recovery codes (like A1B2C-3D4E5) instead.</p>`;
+    form.style.display = 'none';
+    form.parentNode.insertBefore(box, form.nextSibling);
+    const err = box.querySelector('#twofaError');
+    const showErr = m => { err.textContent = m; err.style.display = 'block'; };
+    const back = () => { box.remove(); form.style.display = ''; document.getElementById('loginPassword').value = ''; };
+    box.querySelector('#twofaBack').onclick = back;
+    if(t.twofaEmailFailed) showErr(t.error || 'Could not send the code by email.');
+    const rs = box.querySelector('#twofaResend');
+    if(rs) rs.onclick = async () => {
+      try{
+        const r = await fetch('/api/login/2fa/email', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token: t.token }) });
+        const d = await r.json().catch(() => ({}));
+        if(r.ok){ err.style.display = 'none'; showToast('A new code was sent.'); } else showErr(d.error || 'Could not send the code.');
+      }catch(e){ showErr('Could not reach the school server. Try again.'); }
+    };
+    box.onsubmit = async (ev) => {
+      ev.preventDefault();
+      const code = box.querySelector('#twofaCode').value.trim();
+      if(!code){ showErr('Enter the code.'); return; }
+      const btn = box.querySelector('button[type=submit]'); btn.disabled = true;
+      loginLoaderStart('Checking your code…', 20);
+      let u2 = null, d = {};
+      try{
+        const r = await fetch('/api/login/2fa', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token: t.token, code }) });
+        d = await r.json().catch(() => ({}));
+        if(r.ok) u2 = d;
+      }catch(e){ d = { error: 'Could not reach the school server — your signal may be weak. Please tap Verify again.' }; }
+      if(!u2){
+        loginLoaderStop(); btn.disabled = false;
+        if(d.expired){ back(); const le = document.getElementById('loginError'); le.textContent = d.error || 'Please sign in again.'; le.style.display = 'block'; return; }
+        showErr(d.error || 'That code is not right.'); return;
+      }
+      try{ await completeSignIn(u2, submitBtn); box.remove(); form.style.display = ''; }
+      catch(e){ loginLoaderStop(); btn.disabled = false; showErr('Signed in, but loading failed. Please try again.'); }
+    };
+    setTimeout(() => { const c = box.querySelector('#twofaCode'); if(c) c.focus(); }, 50);
+  }
+
+  async function completeSignIn(u, submitBtn){
     document.getElementById('loginError').style.display = 'none';
     // Keep this app's in-memory copy of the record in sync with what the
     // server just verified, so anything elsewhere that reads from `users`

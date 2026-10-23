@@ -331,7 +331,9 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
           <label class="acct-show"><input type="checkbox" onchange="['myCpCurrent','myCpNew','myCpConfirm'].forEach(i=>document.getElementById(i).type=this.checked?'text':'password')"> Show passwords</label>
           <button type="button" class="sf-btn sf-btn--soft sf-btn--lg" onclick="changePasswordFromMyAccount()">Update password</button>
         </section>
+        ${(u.role === 'Admin' || u.role === 'Principal') && u.id !== 'vendor-support' ? '<section class="acct-card" id="twofaCard"><h3>🛡️ Two-step sign-in</h3><p class="acct-hint">Loading…</p></section>' : ''}
       </div>`;
+    if(document.getElementById('twofaCard')) loadTwofaCard();
   }
   function previewMyAccountPhoto(e){
     readImageFileWithSizeLimit(e, dataUrl => {
@@ -377,6 +379,114 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     ['myCpCurrent','myCpNew','myCpConfirm'].forEach(id => { document.getElementById(id).value = ''; });
     showToast('Password updated.', 'burst');
   }
+
+
+  /* ---- Two-step sign-in card (My Account, Admin & Principal) ---- */
+  let twofaState = null;
+  async function twofaApi(path, body){
+    try{
+      const r = await fetch('/api/account/2fa' + path, body === undefined ? {} : { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const d = await r.json().catch(() => ({}));
+      return { ok: r.ok, data: d };
+    }catch(e){ return { ok:false, data:{ error:'Could not reach the server. Try again.' } }; }
+  }
+  async function loadTwofaCard(view){
+    const box = document.getElementById('twofaCard'); if(!box) return;
+    if(view){ renderTwofaCard(view); return; }
+    const r = await twofaApi('');
+    twofaState = r.ok ? r.data : null;
+    renderTwofaCard();
+  }
+  function renderTwofaCard(view){
+    const box = document.getElementById('twofaCard'); if(!box) return;
+    const st = twofaState;
+    if(!st || !st.allowed){ box.style.display = 'none'; return; }
+    const h = '<h3>🛡️ Two-step sign-in</h3>';
+    if(view && view.codes){
+      box.innerHTML = h + `<p class="acct-hint"><b>Two-step sign-in is ON.</b> Save these recovery codes now — each works once if you lose your phone. They will not be shown again.</p>
+        <pre id="twofaCodes" style="background:rgba(0,0,0,.05);padding:12px;border-radius:10px;font-size:1rem;letter-spacing:1px;user-select:all;">${view.codes.join('\n')}</pre>
+        <button type="button" class="sf-btn sf-btn--soft" onclick="navigator.clipboard&&navigator.clipboard.writeText(document.getElementById('twofaCodes').textContent).then(()=>showToast('Copied.'))">Copy codes</button>
+        <button type="button" class="sf-btn sf-btn--primary" onclick="loadTwofaCard()">I have saved them</button>`;
+      return;
+    }
+    if(view && view.step === 'app'){
+      box.innerHTML = h + `<ol class="acct-hint" style="padding-left:18px;line-height:1.7;">
+        <li>Install an authenticator app on your phone (Google Authenticator, Microsoft Authenticator or Authy).</li>
+        <li>In the app tap <b>+</b>, then scan this picture — or choose "enter a setup key" and type the key below.</li></ol>
+        <div id="twofaQr" style="background:#fff;display:inline-block;padding:10px;border-radius:10px;min-height:40px;"></div>
+        <p class="acct-hint" style="word-break:break-all;">Setup key: <b style="user-select:all">${view.secret}</b></p>
+        <div class="f-field"><label for="twofaConfirmCode">3. Type the 6-digit code the app shows</label><input type="text" class="input" id="twofaConfirmCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="123456"></div>
+        <button type="button" class="sf-btn sf-btn--primary" onclick="confirmTwofa()">Turn ON</button>
+        <button type="button" class="sf-btn sf-btn--soft" onclick="loadTwofaCard()">Cancel</button>`;
+      try{
+        const draw = () => { const el = document.getElementById('twofaQr'); if(el && window.QRCode){ el.innerHTML = ''; new QRCode(el, { text: view.otpauth, width: 170, height: 170 }); } };
+        if(window.QRCode) draw(); else { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'; sc.onload = draw; sc.onerror = () => { const el = document.getElementById('twofaQr'); if(el) el.textContent = '(picture could not load — use the setup key)'; }; document.head.appendChild(sc); }
+      }catch(e){}
+      return;
+    }
+    if(view && view.step === 'email'){
+      box.innerHTML = h + `<p class="acct-hint">We sent a code to <b>${escapeHtml(view.masked)}</b>. Type it below.</p>
+        <div class="f-field"><input type="text" class="input" id="twofaConfirmCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="123456"></div>
+        <button type="button" class="sf-btn sf-btn--primary" onclick="confirmTwofa()">Turn ON</button>
+        <button type="button" class="sf-btn sf-btn--soft" onclick="loadTwofaCard()">Cancel</button>`;
+      return;
+    }
+    if(view && view.step === 'choose'){
+      box.innerHTML = h + `<p class="acct-hint">Choose how you want to confirm each sign-in. Enter your password to continue.</p>
+        <div class="f-field"><label for="twofaPw">Your password</label><input type="password" class="input" id="twofaPw" autocomplete="current-password"></div>
+        <button type="button" class="sf-btn sf-btn--primary" onclick="startTwofa('app')">📱 Authenticator app</button>
+        ${st.emailAvailable ? `<div class="f-field" style="margin-top:12px;"><label for="twofaEmail">Or by email — your email address</label><input type="email" class="input" id="twofaEmail" placeholder="you@example.com"></div><button type="button" class="sf-btn sf-btn--soft" onclick="startTwofa('email')">✉️ Email me a code each time</button>`
+          : `<p class="acct-hint" style="margin-top:12px;">✉️ Code by email will appear here once your school's email sending is set up.</p>`}
+        <button type="button" class="sf-btn sf-btn--soft" style="margin-top:10px;" onclick="loadTwofaCard()">Cancel</button>`;
+      return;
+    }
+    if(view && view.step === 'off'){
+      box.innerHTML = h + `<p class="acct-hint">To turn it off, enter your password and ${st.method === 'email' ? 'one of your recovery codes' : 'the current 6-digit code from your app (or a recovery code)'}.</p>
+        <div class="f-field"><label for="twofaPw">Your password</label><input type="password" class="input" id="twofaPw" autocomplete="current-password"></div>
+        <div class="f-field"><label for="twofaOffCode">Code</label><input type="text" class="input" id="twofaOffCode" autocomplete="one-time-code" maxlength="14"></div>
+        <button type="button" class="sf-btn sf-btn--danger" onclick="disableTwofa()">Turn OFF</button>
+        <button type="button" class="sf-btn sf-btn--soft" onclick="loadTwofaCard()">Keep it ON</button>`;
+      return;
+    }
+    box.innerHTML = h + `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;">
+        <label class="twofa-switch" style="display:inline-flex;align-items:center;gap:10px;cursor:pointer;font-weight:600;">
+          <input type="checkbox" ${st.enabled ? 'checked' : ''} onchange="this.checked=${st.enabled ? 'true' : 'false'}; toggleTwofa(${st.enabled ? 'false' : 'true'})" style="width:20px;height:20px;">
+          <span>${st.enabled ? 'ON' : 'OFF'}</span></label>
+        <span class="pill">${st.enabled ? (st.method === 'email' ? 'Code by email' : 'Authenticator app') : 'Not protected'}</span></div>
+      <p class="acct-hint">${st.enabled
+        ? 'Each time you sign in you will also enter a 6-digit code. Recovery codes left: <b>' + st.recoveryLeft + '</b>.' + (st.recoveryLeft <= 2 ? ' <b style="color:var(--magenta)">Running low — turn it off and on again to get new codes.</b>' : '')
+        : 'Adds a second check when you sign in, so a stolen password alone cannot open this account. Recommended for Admin and Principal.'}</p>`;
+  }
+  function toggleTwofa(turnOn){ renderTwofaCard({ step: turnOn ? 'choose' : 'off' }); }
+  async function startTwofa(method){
+    const password = (document.getElementById('twofaPw') || {}).value || '';
+    if(!password){ showToast('Enter your password.'); return; }
+    const email = method === 'email' ? ((document.getElementById('twofaEmail') || {}).value || '').trim() : '';
+    const r = await twofaApi('/start', { method, password, email });
+    if(!r.ok){ showToast(r.data.error || 'Could not start.'); return; }
+    renderTwofaCard(method === 'app' ? { step:'app', secret: r.data.secret, otpauth: r.data.otpauth } : { step:'email', masked: r.data.emailMasked });
+  }
+  async function confirmTwofa(){
+    const code = ((document.getElementById('twofaConfirmCode') || {}).value || '').trim();
+    if(!code){ showToast('Enter the code.'); return; }
+    const r = await twofaApi('/confirm', { code });
+    if(!r.ok){ showToast(r.data.error || 'That code is not right.'); return; }
+    twofaState = { ...twofaState, enabled:true, method:r.data.method, recoveryLeft: r.data.recoveryCodes.length };
+    if(currentUser) currentUser.twofaEnabled = true;
+    renderTwofaCard({ codes: r.data.recoveryCodes });
+    showToast('Two-step sign-in is ON.', 'burst');
+  }
+  async function disableTwofa(){
+    const password = (document.getElementById('twofaPw') || {}).value || '';
+    const code = ((document.getElementById('twofaOffCode') || {}).value || '').trim();
+    if(!password || !code){ showToast('Enter your password and a code.'); return; }
+    const r = await twofaApi('/disable', { password, code });
+    if(!r.ok){ showToast(r.data.error || 'Could not turn it off.'); return; }
+    if(currentUser) currentUser.twofaEnabled = false;
+    showToast('Two-step sign-in is OFF.');
+    loadTwofaCard();
+  }
+  Object.assign(window, { loadTwofaCard, toggleTwofa, startTwofa, confirmTwofa, disableTwofa });
 
   function initInventoryView(){
     inventoryTab = getInventoryTabAccess(currentUser.role, 'inventory_items') ? 'items'
@@ -1170,6 +1280,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     setTimeout(loadServerProblems, 0);
     setTimeout(loadOnlinePayments, 0);
     setTimeout(loadFeeReminderSettings, 0);
+    setTimeout(loadTwofaOverview, 0);
     body.innerHTML = `
       <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:20px; max-width:640px;">Tools visible to the Admin role only — not Principal, not any other role, regardless of what's granted in Roles &amp; Permissions.</p>
 
@@ -1203,6 +1314,12 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
         <h4>🔔 Fee reminders</h4>
         <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 12px;">Parents get an app alert (and WhatsApp, if your school has it) when a fee installment is coming due or has become overdue — following your Fee Schedule (Yearly / Terms / Monthly). One message per student per day, sent once per installment.</p>
         <div id="feeRemBox" style="font-size:0.82rem;">Loading…</div>
+      </div>
+
+      <div class="profile-card" style="max-width:720px; margin-bottom:24px;">
+        <h4>🛡️ Two-step sign-in</h4>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 12px;">Admin and Principal accounts can add a second check at sign-in (an authenticator-app code, or a code by email). Each person turns their own on or off in <b>My Account</b>. If someone loses their phone and recovery codes, press <b>Reset</b> — they can then sign in with just their password and set it up again.</p>
+        <div id="twofaOverviewBox" style="font-size:0.82rem;">Loading…</div>
       </div>
 
       <div class="profile-card" style="max-width:720px; margin-bottom:24px;">
@@ -1343,6 +1460,29 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       out.innerHTML = '<div style="margin-bottom:6px;"><b>' + d.total + '</b> parent(s) would be messaged today (not sent now — this is only a preview): ' + d.soon + ' due soon, ' + d.overdue + ' newly overdue, ' + d.repeat + ' repeat.</div>' +
         '<div style="max-height:220px; overflow:auto; border:1px solid var(--border); border-radius:10px; padding:6px 10px;">' + d.sample.map(x => '<div style="padding:3px 0;">' + escapeHtml(x.message) + '</div>').join('') + (d.total > d.sample.length ? '<div style="color:var(--ink-soft);">…and ' + (d.total - d.sample.length) + ' more</div>' : '') + '</div>';
     }catch(e){ out.textContent = 'Could not check (' + e.message + ').'; }
+  }
+  async function loadTwofaOverview(){
+    const el = document.getElementById('twofaOverviewBox'); if(!el) return;
+    try{
+      const res = await fetch('/api/account/2fa/overview'); await throwIfNotOk(res);
+      const d = await res.json();
+      const name = { app:'Authenticator app', email:'Code by email' };
+      el.innerHTML = '<table style="width:100%; font-size:0.8rem;"><tbody>' + (d.users || []).map(u =>
+        '<tr><td style="padding:5px 0;"><b>' + escapeHtml(u.name || u.username) + '</b> <span style="color:var(--ink-soft);">(' + escapeHtml(u.role) + ')</span></td>' +
+        '<td style="color:' + (u.method ? '#0a8f6a' : '#b7791f') + ';"><b>' + (u.method ? 'ON · ' + name[u.method] : 'OFF') + '</b></td>' +
+        '<td style="text-align:right;">' + (u.method ? '<button class="btn btn-sm" type="button" onclick="resetTwofaFor(\'' + escapeHtml(u.id) + '\', \'' + escapeHtml((u.name || u.username || '').replace(/'/g, '')) + '\')">Reset</button>' : '') + '</td></tr>').join('') +
+        '</tbody></table>' + (d.emailAvailable ? '' : '<p style="margin:8px 0 0; color:var(--ink-soft);">Code by email is not available yet — the school\'s email sending is not set up. The authenticator app works now.</p>');
+    }catch(e){ el.textContent = 'Could not load (' + e.message + ').'; }
+  }
+  async function resetTwofaFor(id, name){
+    if(!confirm('Turn off two-step sign-in for ' + name + '? They will be able to sign in with just their password until they set it up again.')) return;
+    try{
+      const r = await fetch('/api/account/2fa/reset', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: id }) });
+      const d = await r.json().catch(() => ({}));
+      if(!r.ok){ showToast(d.error || 'Could not reset.'); return; }
+      showToast('Reset done for ' + name + '.');
+      loadTwofaOverview();
+    }catch(e){ showToast('Could not reach the server.'); }
   }
   async function loadOnlinePayments(){
     const el = document.getElementById('onlinePaymentsBox'); if(!el) return;
