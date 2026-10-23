@@ -33,6 +33,18 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+app.disable('x-powered-by');
+// Browser safety headers on every response. Deliberately modest so nothing in the app breaks:
+// no other site may put the ERP inside a frame (clickjacking), files are never "guessed" as another type,
+// and forms/base tags can only point back at this site. HSTS is added only when the request came over HTTPS.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'");
+  if (req.secure || req.headers['x-forwarded-proto'] === 'https') res.setHeader('Strict-Transport-Security', 'max-age=15552000');
+  next();
+});
 // Default body-size limit (100kb) is far too small the moment any record
 // carries a photo or document as a base64 data URL (website gallery photos,
 // student/staff photos, ID card photos, admit-card signatures, admin
@@ -55,6 +67,21 @@ const app = express();
 // stuff giant payloads into the database.
 app.use('/api/payments/webhook', express.raw({ type: '*/*', limit: '200kb' }));
 app.use('/api/admission-inquiries', express.json({ limit: '20kb' }));
+// The website's enquiry form is open to the whole internet, so it is throttled: a few per visitor per hour and a
+// school-wide ceiling per hour, so a script cannot fill the database with junk.
+const inquiryHits = new Map(); let inquiryGlobal = { n: 0, since: Date.now() };
+app.use('/api/admission-inquiries', (req, res, next) => {
+  if (req.method !== 'POST') return next();
+  const now = Date.now();
+  if (now - inquiryGlobal.since > 3600000) inquiryGlobal = { n: 0, since: now };
+  const fwd = req.headers['x-forwarded-for']; const ip = (fwd ? String(fwd).split(',').pop().trim() : '') || req.socket.remoteAddress || 'x';
+  const rec = inquiryHits.get(ip) || { n: 0, since: now };
+  if (now - rec.since > 3600000) { rec.n = 0; rec.since = now; }
+  rec.n++; inquiryHits.set(ip, rec); inquiryGlobal.n++;
+  if (inquiryHits.size > 5000) inquiryHits.clear();
+  if (rec.n > 15 || inquiryGlobal.n > 300) return res.status(429).json({ error: 'Too many enquiries just now. Please try again in a little while, or call the school office.' });
+  next();
+});
 app.use(express.json({ limit: '25mb' }));
 
 // ---------- Problem alerts: tell the Admin when the server fails ----------
@@ -1115,6 +1142,11 @@ async function destroySession(req, res) {
 // few read-only resources from its own separate domain (see
 // WEBSITE_CORS_RULES above — this list is deliberately the same set), plus
 // logging in and out are themselves how a session is created or cleared.
+function vendorKeyOk(key) {
+  const want = process.env.VENDOR_API_KEY; if (!want || !key) return false;
+  const a = Buffer.from(String(key)), b = Buffer.from(String(want));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 const PUBLIC_API_ROUTES = [
   { path: '/api/login', methods: ['POST'] },
   { path: '/api/login/2fa', methods: ['POST'] },
@@ -2269,8 +2301,10 @@ async function handleUsers(req, res) {
     if (!body.id) return res.status(400).json({ error: 'Missing id.' });
     if (req.method === 'POST') {
       if (!body.password) return res.status(400).json({ error: 'Password is required for a new user.' });
+      { const problem = passwordProblem(body.password, body.role); if (problem) return res.status(400).json({ error: problem }); }
       body.password = await bcrypt.hash(String(body.password), 10);
     } else if (body.password) {
+      { const problem = passwordProblem(body.password, body.role); if (problem) return res.status(400).json({ error: problem }); }
       body.password = await bcrypt.hash(String(body.password), 10);
     } else {
       const existing = await sql`SELECT password FROM users WHERE id = ${body.id}`;
@@ -4405,6 +4439,19 @@ app.post('/api/biometric/punches', async (req, res) => {
 // instance, no load balancer spreading requests across processes — without
 // adding a dependency or a database table just to store short-lived
 // counters that only ever need to survive a few minutes.
+
+// Password rules. Staff with real power (Admin / Principal) need 8+ characters; everyone else 6+.
+// Obvious choices are refused. Existing passwords are not touched — this applies when one is set or changed.
+const COMMON_PASSWORDS = new Set(['password', 'password1', 'passw0rd', 'qwerty', 'qwerty123', 'abc123', 'abcd1234', 'admin', 'admin123', 'admin@123', 'welcome', 'welcome1', 'school', 'school123', 'letmein', 'iloveyou', 'india123', '123456', '1234567', '12345678', '123456789', '1234567890', '111111', '000000', '12341234']);
+function passwordProblem(pw, role) {
+  const p = String(pw || '');
+  const min = (role === 'Admin' || role === 'Principal') ? 8 : 6;
+  if (p.length < min) return `Password must be at least ${min} characters.`;
+  if (p.length > 100) return 'Password is too long.';
+  if (/^(.)\1+$/.test(p)) return 'Choose a password that is not one repeated character.';
+  if (COMMON_PASSWORDS.has(p.toLowerCase())) return 'That password is too easy to guess. Choose a different one.';
+  return '';
+}
 const LOGIN_MAX_ATTEMPTS = 5;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const loginAttempts = new Map(); // key -> { count, firstAttempt, blockedUntil }
@@ -4444,6 +4491,26 @@ function recordLoginFailure(key) {
 function recordLoginSuccess(key) {
   loginAttempts.delete(key);
 }
+// A second, IP-independent counter per username. The per-IP key above can be dodged by sending a made-up
+// X-Forwarded-For value on every attempt, which would allow unlimited password guessing against one account.
+// This one counts failures for the username itself (many more allowed, so a real person is not locked out
+// by an attacker's few tries) and slows guessing to a crawl.
+const USER_FAIL_MAX = 25;
+const USER_FAIL_BLOCK_MS = 10 * 60 * 1000;
+const userFailures = new Map(); // username -> { count, firstAttempt, blockedUntil }
+function userBlockSeconds(username) {
+  const r = userFailures.get(String(username || '').toLowerCase());
+  if (r && r.blockedUntil && Date.now() < r.blockedUntil) return Math.ceil((r.blockedUntil - Date.now()) / 1000);
+  return null;
+}
+function userFailure(username) {
+  const k = String(username || '').toLowerCase(); const now = Date.now();
+  let r = userFailures.get(k);
+  if (!r || now - r.firstAttempt > LOGIN_WINDOW_MS) r = { count: 0, firstAttempt: now, blockedUntil: null };
+  r.count++; if (r.count >= USER_FAIL_MAX) r.blockedUntil = now + USER_FAIL_BLOCK_MS;
+  userFailures.set(k, r);
+}
+setInterval(() => { const n = Date.now(); for (const [k, r] of userFailures) if (n - r.firstAttempt > LOGIN_WINDOW_MS && (!r.blockedUntil || n > r.blockedUntil)) userFailures.delete(k); }, 5 * 60 * 1000).unref();
 
 // Sweep stale entries periodically so this Map doesn't grow unbounded over
 // the life of the process. unref() so this timer never keeps the process
@@ -4537,16 +4604,16 @@ app.post('/api/login', async (req, res) => {
     const { username, password, audience } = req.body || {};
     if (!username || !password) return res.status(400).json({ error: 'Username and password are required.' });
     const rateKey = loginRateKey(req, username);
-    const blockedForSeconds = checkLoginRateLimit(rateKey);
+    const blockedForSeconds = checkLoginRateLimit(rateKey) || userBlockSeconds(username);
     if (blockedForSeconds) {
       const mins = Math.ceil(blockedForSeconds / 60);
       return res.status(429).json({ error: `Too many failed attempts. Try again in ${mins} minute${mins === 1 ? '' : 's'}.` });
     }
     const rows = await sql`SELECT * FROM users WHERE LOWER(username) = LOWER(${String(username)}) AND deleted_at IS NULL`;
-    if (!rows.length) { recordLoginFailure(rateKey); return res.status(401).json({ error: 'Invalid username or password.' }); }
+    if (!rows.length) { recordLoginFailure(rateKey); userFailure(username); return res.status(401).json({ error: 'Invalid username or password.' }); }
     const user = rows[0];
     const ok = await bcrypt.compare(String(password), user.password || '');
-    if (!ok) { recordLoginFailure(rateKey); return res.status(401).json({ error: 'Invalid username or password.' }); }
+    if (!ok) { recordLoginFailure(rateKey); userFailure(username); return res.status(401).json({ error: 'Invalid username or password.' }); }
     // Checked only after the password is already confirmed correct, so this
     // never gives anyone a way to learn an account's role without already
     // knowing its password — at that point they could just switch tabs
@@ -4659,6 +4726,7 @@ app.post('/api/login/2fa', async (req, res) => {
     const r = await check2faCode(user, p, code);
     if (!r.ok) {
       recordLoginFailure(p.rateKey);
+      userFailure(user.username);
       p.tries++;
       if (p.tries >= 5) { pending2fa.delete(token); return res.status(401).json({ error: 'Too many wrong codes. Please sign in again.', expired: true }); }
       return res.status(401).json({ error: 'That code is not right. Check the code and try again.' });
@@ -4838,13 +4906,17 @@ app.post('/api/account/password', async (req, res) => {
     if (!req.authUser || req.authUser.id === 'vendor-support') return res.status(403).json({ error: 'Not available for this session.' });
     const current = String((req.body && req.body.current) || '');
     const next = String((req.body && req.body.next) || '');
-    if (next.length < 4) return res.status(400).json({ error: 'New password must be at least 4 characters.' });
+    const problem = passwordProblem(next, req.authUser.role);
+    if (problem) return res.status(400).json({ error: problem });
     const rows = await sql`SELECT password FROM users WHERE id = ${req.authUser.id} AND deleted_at IS NULL`;
     if (!rows.length) return res.status(401).json({ error: 'Account no longer exists.' });
     const ok = await bcrypt.compare(current, rows[0].password || '');
     if (!ok) return res.status(400).json({ error: 'Current password is incorrect.' });
     const hash = await bcrypt.hash(next, 10);
     await sql`UPDATE users SET password = ${hash} WHERE id = ${req.authUser.id}`;
+    // Anyone else signed in with the old password (another device, a stolen session) is signed out; this device stays in.
+    const mine = parseCookies(req).sid ? hashSessionToken(parseCookies(req).sid) : '';
+    await sql`DELETE FROM sessions WHERE user_id = ${req.authUser.id} AND id <> ${mine}`.catch(() => {});
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('account password error:', err);
@@ -4889,7 +4961,7 @@ app.get('/api/vendor-support-login', (req, res) => {
 app.get('/api/vendor/admission-inquiries', async (req, res) => {
   try {
     const key = req.headers['x-vendor-api-key'];
-    if (!process.env.VENDOR_API_KEY || !key || key !== process.env.VENDOR_API_KEY) {
+    if (!vendorKeyOk(key)) {
       return res.status(401).json({ error: 'Invalid or missing vendor API key.' });
     }
     const rows = await sql`SELECT * FROM admission_inquiries FORCE INDEX (idx_admission_inquiries_created_at) ORDER BY created_at DESC LIMIT 500`;
@@ -4950,7 +5022,7 @@ const WIPE_TABLES = [
 app.post('/api/vendor/wipe-data', async (req, res) => {
   try {
     const key = req.headers['x-vendor-api-key'];
-    if (!process.env.VENDOR_API_KEY || !key || key !== process.env.VENDOR_API_KEY) {
+    if (!vendorKeyOk(key)) {
       return res.status(401).json({ error: 'Invalid or missing vendor API key.' });
     }
     const { confirmSchoolName, vendorAdminName } = req.body || {};
@@ -5023,7 +5095,7 @@ app.post('/api/vendor/wipe-data', async (req, res) => {
 app.get('/api/vendor/backup-snapshot', async (req, res) => {
   try {
     const key = req.headers['x-vendor-api-key'];
-    if (!process.env.VENDOR_API_KEY || !key || key !== process.env.VENDOR_API_KEY) {
+    if (!vendorKeyOk(key)) {
       return res.status(401).json({ error: 'Invalid or missing vendor API key.' });
     }
     const infoRows = await sql`SELECT data FROM school_info WHERE id = 1`;

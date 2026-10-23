@@ -524,8 +524,8 @@ const CUSTOM_ROLES_KEY = "custom-roles";
       errEl.style.display = 'block';
       return false;
     }
-    if(!pw1 || pw1.length < 4){
-      errEl.textContent = 'New password must be at least 4 characters.';
+    if(!pw1 || pw1.length < 6){
+      errEl.textContent = 'New password must be at least 6 characters.';
       errEl.style.display = 'block';
       return false;
     }

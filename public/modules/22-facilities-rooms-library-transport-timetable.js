@@ -324,7 +324,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
         </section>
         <section class="acct-card">
           <h3>🔑 Change password</h3>
-          <p class="acct-hint">Choose something only you know. At least 4 characters.</p>
+          <p class="acct-hint">Choose something only you know and that is hard to guess: at least 8 characters for Admin and Principal, 6 for everyone else.</p>
           <div class="f-field"><label for="myCpCurrent">Current password</label><input type="password" class="input" id="myCpCurrent" autocomplete="current-password"></div>
           <div class="f-field"><label for="myCpNew">New password</label><input type="password" class="input" id="myCpNew" autocomplete="new-password"></div>
           <div class="f-field"><label for="myCpConfirm">Confirm new password</label><input type="password" class="input" id="myCpConfirm" autocomplete="new-password"></div>
@@ -369,7 +369,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     const next = document.getElementById('myCpNew').value;
     const confirm2 = document.getElementById('myCpConfirm').value;
     if(!current){ showToast('Enter your current password.'); return; }
-    if(!next || next.length < 4){ showToast('New password must be at least 4 characters.'); return; }
+    { const pp = passwordProblemClient(next, currentUser && currentUser.role); if(pp){ showToast(pp); return; } }
     if(next !== confirm2){ showToast('New password and confirmation do not match.'); return; }
     try{
       const res = await fetch('/api/account/password', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ current, next }) });
@@ -1630,7 +1630,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     const confirm2 = document.getElementById('cpConfirm').value;
     const u = users.find(x => x.username === currentUser.username);
     if(!u || !(await verifyLogin(u.username, current))){ showToast('Current password is incorrect.'); return; }
-    if(!next || next.length < 4){ showToast('New password must be at least 4 characters.'); return; }
+    { const pp = passwordProblemClient(next, currentUser && currentUser.role); if(pp){ showToast(pp); return; } }
     if(next !== confirm2){ showToast('New password and confirmation do not match.'); return; }
     u.password = next;
     await storageSet(USERS_KEY, users);
@@ -2045,10 +2045,21 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
   // username (derived from the name as it's typed) and password so the admin
   // can just hit Save, but either field can still be hand-edited or re-rolled.
   let userModalUsernameTouched = false;
+  /* Same password rules as the server (server.js passwordProblem): 8+ characters for Admin / Principal, 6+ for everyone
+     else, and no obvious passwords. The server is what really enforces it; this just explains it before saving. */
+  function passwordProblemClient(pw, role){
+    const p = String(pw || '');
+    const min = (role === 'Admin' || role === 'Principal') ? 8 : 6;
+    if(p.length < min) return 'Password must be at least ' + min + ' characters.';
+    if(/^(.)\1+$/.test(p)) return 'Choose a password that is not one repeated character.';
+    if(['password','password1','passw0rd','qwerty','qwerty123','abc123','abcd1234','admin','admin123','admin@123','welcome','welcome1','school','school123','letmein','iloveyou','india123','123456','1234567','12345678','123456789','1234567890','111111','000000','12341234'].includes(p.toLowerCase())) return 'That password is too easy to guess. Choose a different one.';
+    return '';
+  }
   function generateLoginPassword(){
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
     let pw = '';
-    for(let i=0;i<8;i++) pw += chars[Math.floor(Math.random()*chars.length)];
+    const rnd = new Uint32Array(10); (window.crypto || window.msCrypto).getRandomValues(rnd);   // not Math.random: passwords must be unguessable
+    for(let i=0;i<10;i++) pw += chars[rnd[i] % chars.length];
     return pw;
   }
   function slugifyForUsername(name){
@@ -2163,6 +2174,8 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       showToast('Set a password for this new user.');
       return false;
     }
+    { const pw0 = document.getElementById('uPassword').value;
+      if(pw0){ const pp = passwordProblemClient(pw0, document.getElementById('uRole').value); if(pp){ showToast(pp); return false; } } }
     const data = {
       name: document.getElementById('uName').value.trim(),
       username: uname,
