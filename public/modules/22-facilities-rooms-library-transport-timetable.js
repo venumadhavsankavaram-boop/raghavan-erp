@@ -1168,6 +1168,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
   function renderAdminToolsTab(body){
     setTimeout(refreshBackupStatusLine, 0);
     setTimeout(loadServerProblems, 0);
+    setTimeout(loadOnlinePayments, 0);
     body.innerHTML = `
       <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:20px; max-width:640px;">Tools visible to the Admin role only — not Principal, not any other role, regardless of what's granted in Roles &amp; Permissions.</p>
 
@@ -1195,6 +1196,14 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
         <button class="btn btn-sm" type="button" onclick="loadServerProblems()">Refresh</button>
         <button class="btn btn-sm" type="button" onclick="clearServerProblems()" style="margin-left:6px;">Clear list</button>
         <div id="serverProblems" style="margin-top:12px; font-size:0.8rem;">Loading…</div>
+      </div>
+
+      <div class="profile-card" style="max-width:720px; margin-bottom:24px;">
+        <h4>💳 Online payments</h4>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 12px;">Fees paid by parents through Razorpay. A payment that was made but not yet recorded (for example the parent closed the page) is found automatically every few minutes — or press <b>Check now</b>.</p>
+        <button class="btn btn-sm" type="button" onclick="loadOnlinePayments()">Refresh</button>
+        <button class="btn btn-sm" type="button" onclick="checkOnlinePaymentsNow()" style="margin-left:6px;">Check now</button>
+        <div id="onlinePaymentsBox" style="margin-top:12px; font-size:0.8rem;">Loading…</div>
       </div>
 
       <div class="profile-card" style="max-width:560px; margin-bottom:24px; border-top:4px solid #C0264B;">
@@ -1289,6 +1298,31 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       el.innerHTML = info.text;
       el.style.background = info.tone === 'good' ? 'rgba(0,150,120,.10)' : info.tone === 'warn' ? 'rgba(230,160,0,.14)' : 'rgba(192,38,75,.10)';
     }catch(e){ el.textContent = 'Could not check the last backup.'; }
+  }
+  async function loadOnlinePayments(){
+    const el = document.getElementById('onlinePaymentsBox'); if(!el) return;
+    try{
+      const res = await fetch('/api/payments/online-orders'); await throwIfNotOk(res);
+      const d = await res.json();
+      if(!d.enabled){ el.innerHTML = '<span style="color:var(--ink-soft);">Online payment is not switched on for this school (no Razorpay account connected).</span>'; return; }
+      const list = d.orders || [];
+      if(!list.length){ el.innerHTML = '<span style="color:var(--ink-soft);">No online payments yet.</span>'; return; }
+      const open = list.filter(o => o.status === 'created').length;
+      const tone = { paid:'#0a8f6a', created:'#b7791f', failed:'#C0264B' };
+      const word = { paid:'Paid', created:'Not completed', failed:'Failed' };
+      el.innerHTML = (open ? '<div style="margin-bottom:8px; color:#b7791f;"><b>' + open + '</b> started but not completed (the parent may have cancelled — these are checked automatically).</div>' : '') +
+        '<div style="max-height:300px; overflow:auto; border:1px solid var(--border); border-radius:10px;"><table style="width:100%; font-size:0.76rem;"><thead><tr><th style="text-align:left; padding:6px 10px;">When</th><th style="text-align:left;">Student</th><th style="text-align:right;">Amount</th><th style="text-align:left; padding-left:10px;">Receipt</th><th style="text-align:left;">Status</th></tr></thead><tbody>' +
+        list.map(o => '<tr><td style="padding:5px 10px; white-space:nowrap;">' + escapeHtml(new Date(o.created_at).toLocaleString('en-IN', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })) + '</td><td>' + escapeHtml(((o.first_name||'') + ' ' + (o.last_name||'')).trim() || '—') + '</td><td style="text-align:right;">' + fmtMoney(Number(o.amount)||0) + '</td><td style="padding-left:10px;">' + escapeHtml(o.receipt_no || '—') + '</td><td style="color:' + (tone[o.status]||'inherit') + ';"><b>' + (word[o.status]||escapeHtml(o.status)) + '</b></td></tr>').join('') +
+        '</tbody></table></div>';
+    }catch(e){ el.textContent = 'Could not load (' + e.message + ').'; }
+  }
+  async function checkOnlinePaymentsNow(){
+    try{
+      const res = await fetch('/api/payments/check-now', { method:'POST' }); await throwIfNotOk(res);
+      const d = await res.json();
+      showToast(d.recovered ? d.recovered + ' payment(s) found and recorded.' : 'Checked — nothing missing.');
+      loadOnlinePayments();
+    }catch(e){ showToast('Could not check (' + e.message + ').'); }
   }
   async function loadServerProblems(){
     const el = document.getElementById('serverProblems'); if(!el) return;

@@ -804,9 +804,10 @@ let myProfileTab = 'notifications';
     if(typeof Razorpay === 'undefined'){ showToast('Payment window failed to load — check your internet connection and try again.'); return; }
     let order;
     try{
+      // The server fixes the student, fee line and amount when it opens the order — nothing here can change them later.
       const res = await fetch('/api/payments/create-order', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ amount }),
+        body: JSON.stringify({ amount, type, key, label }),
       });
       order = await res.json();
       if(!res.ok) throw new Error(order.error || 'Could not start the payment.');
@@ -831,32 +832,27 @@ let myProfileTab = 'notifications';
               razorpay_order_id: response.razorpay_order_id,
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_signature: response.razorpay_signature,
-              studentId: s.id, studentName: `${s.firstName} ${s.lastName}`,
-              amount, category: type==='extra' ? 'extra' : key, classAtPayment: s.className,
-              extraFeeName: type==='extra' ? label : undefined,
-              extraFeeId: type==='extra' ? key : undefined,
             }),
           });
           const result = await verifyRes.json();
           if(!verifyRes.ok) throw new Error(result.error || 'Could not confirm the payment.');
-          if(type === 'extra'){
-            const fee = studentExtraFees.find(x => x.id === key);
-            if(fee){
-              fee.paidAmount = (Number(fee.paidAmount)||0) + amount;
-              if(fee.paidAmount >= fee.amount) fee.paid = true;
-              await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
+          // The server has already recorded the payment and updated any extra-fee balance; just show it here.
+          if(!payments.some(x => x.id === result.paymentId)){
+            payments.push({
+              id: result.paymentId, receiptNo: result.receiptNo, studentId: s.id, studentName: `${s.firstName} ${s.lastName}`,
+              category: type==='extra' ? 'extra' : key, mode:'Online', amount, discount:0, instalment:'',
+              date: new Date().toISOString().slice(0,10), note:'Paid online via Razorpay', classAtPayment: s.className,
+              extraFeeName: type==='extra' ? label : undefined, extraFeeId: type==='extra' ? key : undefined,
+            });
+            if(type === 'extra'){
+              const fee = studentExtraFees.find(x => x.id === key);
+              if(fee){ fee.paidAmount = (Number(fee.paidAmount)||0) + amount; if(fee.paidAmount >= fee.amount) fee.paid = true; }
             }
           }
-          payments.push({
-            id: result.paymentId, receiptNo: result.receiptNo, studentId: s.id, studentName: `${s.firstName} ${s.lastName}`,
-            category: type==='extra' ? 'extra' : key, mode:'Online', amount, discount:0, instalment:'',
-            date: new Date().toISOString().slice(0,10), note:'Paid online via Razorpay', classAtPayment: s.className,
-            extraFeeName: type==='extra' ? label : undefined, extraFeeId: type==='extra' ? key : undefined,
-          });
           showToast('Payment successful — receipt ' + result.receiptNo);
           renderMyProfileBody();
         }catch(err){
-          showToast(err.message || `Payment succeeded but couldn't be confirmed — contact the office with payment ID ${response.razorpay_payment_id}.`);
+          showToast((err.message || "Payment received, but we couldn't confirm it yet.") + ` Your payment ID is ${response.razorpay_payment_id}. It is normally recorded automatically within a few minutes.`);
         }
       },
       modal: { ondismiss: function(){ showToast('Payment cancelled.'); } },

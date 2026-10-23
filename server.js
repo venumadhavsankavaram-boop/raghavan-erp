@@ -52,6 +52,7 @@ const app = express();
 // applies normally to every other route. This keeps a stray or malicious
 // caller from using the one unauthenticated write endpoint in the app to
 // stuff giant payloads into the database.
+app.use('/api/payments/webhook', express.raw({ type: '*/*', limit: '200kb' }));
 app.use('/api/admission-inquiries', express.json({ limit: '20kb' }));
 app.use(express.json({ limit: '25mb' }));
 
@@ -1132,6 +1133,8 @@ const PUBLIC_API_ROUTES = [
   // person) — authenticated by its own BIOMETRIC_API_KEY header check
   // inside the route, same pattern as /api/vendor/admission-inquiries above.
   { path: '/api/biometric/punches', methods: ['POST'] },
+  // Razorpay calls this itself; it is trusted only after its own signature check inside the route.
+  { path: '/api/payments/webhook', methods: ['POST'] },
 ];
 function isPublicApiRoute(req) {
   return PUBLIC_API_ROUTES.some(r => r.path === req.path && r.methods.includes(req.method));
@@ -1524,19 +1527,8 @@ app.post('/api/voucher-gaps/note', async (req, res) => {
 // print the same number. Now the browser asks here, and every number is handed out once,
 // in order, from a counter shared by everyone. The counter starts above the highest number
 // already on record for that prefix, and only moves forward.
-app.post('/api/receipt-numbers', async (req, res) => {
-  try {
-    if (!req.authUser || PARENT_LOGIN_ROLES.includes(req.authUser.role)) {
-      return res.status(403).json({ error: 'Not allowed.' });
-    }
-    const b = req.body || {};
-    const prefix = String(b.prefix || '');
-    if (!/^[A-Za-z0-9-]{2,20}$/.test(prefix)) return res.status(400).json({ error: 'Invalid receipt prefix.' });
-    const count = Math.max(1, Math.min(parseInt(b.count, 10) || 1, 20));
-    const start = Math.max(1, parseInt(b.start, 10) || 1);
-    const rawKey = b.draftKey;
-    const draftKey = typeof rawKey === 'string' && /^[A-Za-z0-9_-]{8,40}$/.test(rawKey) ? rawKey : null;
-    const by = req.authUser.name || '', role = req.authUser.role || '';
+// Issues `count` school receipt numbers for `prefix` (shared by the Collect screens and the online-payment flow).
+async function issueReceiptNumbers({ prefix, count, start, draftKey, by, role }) {
     const SERIES = 'fee_receipt';
     const out = await withKeyLock('docno:' + SERIES + ':' + prefix, async () => {
       await ensureRegisterTables();
@@ -1612,6 +1604,23 @@ app.post('/api/receipt-numbers', async (req, res) => {
           ['fee_receipt', prefix, out[i], numbers[i], by, role]);
       }
     } catch (logErr) { console.error('doc_number_log write failed (numbers still issued):', logErr.message); }
+    return numbers;
+}
+app.post('/api/receipt-numbers', async (req, res) => {
+  try {
+    if (!req.authUser || PARENT_LOGIN_ROLES.includes(req.authUser.role)) {
+      return res.status(403).json({ error: 'Not allowed.' });
+    }
+    const b = req.body || {};
+    const prefix = String(b.prefix || '');
+    if (!/^[A-Za-z0-9-]{2,20}$/.test(prefix)) return res.status(400).json({ error: 'Invalid receipt prefix.' });
+    const count = Math.max(1, Math.min(parseInt(b.count, 10) || 1, 20));
+    const start = Math.max(1, parseInt(b.start, 10) || 1);
+    const rawKey = b.draftKey;
+    const draftKey = typeof rawKey === 'string' && /^[A-Za-z0-9_-]{8,40}$/.test(rawKey) ? rawKey : null;
+    const by = req.authUser.name || '', role = req.authUser.role || '';
+    const SERIES = 'fee_receipt';
+    const numbers = await issueReceiptNumbers({ prefix, count, start, draftKey, by, role });
     return res.status(200).json({ numbers });
   } catch (err) {
     console.error('receipt-numbers error:', err);
@@ -3279,70 +3288,247 @@ function razorpayConfigured() {
   if (DEMO_MODE) return false;
   return !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);
 }
+// ---- Online payments: how it is kept safe ----
+//  * The amount, student and fee line are fixed on the SERVER when the order is opened (never taken from the
+//    browser later), and a parent/student login can only open an order for its own linked student.
+//  * After the payment, Razorpay itself is asked: was this payment captured, for this order, for exactly this
+//    amount? The browser's say-so (even with a valid signature) is not enough on its own.
+//  * Recording is once-only per order, so a repeated confirmation, a double click, the webhook and the
+//    background check can all arrive and still produce exactly ONE receipt.
+//  * The receipt gets the school's own number from the normal receipt series.
+//  * A payment whose confirmation never reached us (page closed, network lost) is found by a background check
+//    every few minutes, and by Razorpay's webhook when the school has set one up.
+const RAZORPAY_API = process.env.RAZORPAY_API_BASE || 'https://api.razorpay.com';
+const SCHOOL_TZ = process.env.SCHOOL_TZ || 'Asia/Kolkata';
+const ONLINE_PAY_MAX = 1000000; // ₹10 lakh in one payment is far beyond any school fee; blocks typos and abuse
+let _onlinePayTable = null;
+function ensureOnlinePaymentsTable() {
+  if (!_onlinePayTable) {
+    _onlinePayTable = (async () => {
+      await sql`CREATE TABLE IF NOT EXISTS online_payments (
+        order_id VARCHAR(64) PRIMARY KEY, student_id VARCHAR(191), user_id VARCHAR(191), user_name TEXT,
+        amount DECIMAL(14,2) NOT NULL, category VARCHAR(64), extra_fee_id VARCHAR(191), extra_fee_name TEXT, label TEXT,
+        class_at_payment TEXT, status VARCHAR(16) NOT NULL DEFAULT 'created', razorpay_payment_id VARCHAR(64),
+        receipt_no VARCHAR(64), payment_row_id VARCHAR(191), extra_applied TINYINT NOT NULL DEFAULT 0, note TEXT,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, paid_at DATETIME NULL
+      )`;
+      await createIndexIfMissing('idx_online_payments_status', 'online_payments', 'status');
+    })().catch(e => { _onlinePayTable = null; throw e; });
+  }
+  return _onlinePayTable;
+}
+async function rzApi(method, apiPath, body) {
+  const auth = Buffer.from(`${process.env.RAZORPAY_KEY_ID}:${process.env.RAZORPAY_KEY_SECRET}`).toString('base64');
+  const r = await fetch(RAZORPAY_API + apiPath, {
+    method, headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${auth}` },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let data = null; try { data = await r.json(); } catch (_) { /* not JSON */ }
+  return { ok: r.ok, status: r.status, data };
+}
+function safeEqualHex(a, b) {
+  const x = Buffer.from(String(a || ''), 'utf8'), y = Buffer.from(String(b || ''), 'utf8');
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+async function receiptPrefixServer() {
+  let code = 'REHS';
+  try {
+    const r = await sql`SELECT data FROM school_info WHERE id = 1`;
+    let d = r.length ? r[0].data : null; if (typeof d === 'string') d = JSON.parse(d);
+    if (d && d.receiptCode) code = String(d.receiptCode);
+  } catch (_) { /* keep default */ }
+  code = code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  if (code.length < 2) code = 'REHS';
+  return code + '-' + String(new Date().getFullYear()).slice(2) + '-';
+}
+async function receiptStartServer() {
+  try {
+    const r = await sql`SELECT value FROM kv_store WHERE \`key\` = 'receipt-settings'`;
+    let v = r.length ? r[0].value : null; if (typeof v === 'string') v = JSON.parse(v);
+    return Math.max(1, parseInt(v && v.startNumber, 10) || 1);
+  } catch (_) { return 1; }
+}
+const todayInSchoolTz = () => new Date().toLocaleDateString('en-CA', { timeZone: SCHOOL_TZ });
+
 app.post('/api/payments/create-order', async (req, res) => {
   try {
     if (!razorpayConfigured()) {
       return res.status(501).json({ error: 'Online payments are not set up yet. Ask your Admin to add a Razorpay account.' });
     }
-    const amount = Number(req.body?.amount);
-    if (!amount || amount <= 0) return res.status(400).json({ error: 'Invalid amount.' });
-    const auth = Buffer.from(`${process.env.RAZORPAY_KEY_ID}:${process.env.RAZORPAY_KEY_SECRET}`).toString('base64');
-    const rzRes = await fetch('https://api.razorpay.com/v1/orders', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${auth}` },
-      body: JSON.stringify({
-        amount: Math.round(amount * 100), // Razorpay wants paise, not rupees
-        currency: 'INR',
-        receipt: 'fee_' + Date.now(),
-      }),
-    });
-    const order = await rzRes.json();
-    if (!rzRes.ok) {
-      console.error('razorpay create-order failed:', order);
-      return res.status(502).json({ error: order?.error?.description || 'Could not start the payment.' });
+    if (!req.authUser || !PARENT_LOGIN_ROLES.includes(req.authUser.role)) {
+      return res.status(403).json({ error: 'Online payment is for Student / Parent logins. Staff record payments at the office.' });
     }
+    const student = await getLinkedStudent(req.authUser.id);
+    if (!student) return res.status(400).json({ error: 'No student is linked to this login.' });
+    const b = req.body || {};
+    const amount = Math.round(Number(b.amount) * 100) / 100;
+    if (!amount || amount <= 0 || amount > ONLINE_PAY_MAX) return res.status(400).json({ error: 'Invalid amount.' });
+    const type = b.type === 'extra' ? 'extra' : 'fee';
+    const key = String(b.key || '');
+    let category = 'fee', extraId = null, extraName = null;
+    if (type === 'extra') {
+      const rows = await sql`SELECT * FROM student_extra_fees WHERE id = ${key} AND student_id = ${student.id}`;
+      if (!rows.length) return res.status(400).json({ error: 'That fee was not found for this student.' });
+      const owed = (Number(rows[0].amount) || 0) - (Number(rows[0].paid_amount) || 0);
+      if (amount > owed + 0.005) return res.status(400).json({ error: 'That is more than is due for this fee. Refresh the page and try again.' });
+      category = 'extra'; extraId = rows[0].id; extraName = rows[0].name;
+    } else {
+      if (!/^[A-Za-z0-9_-]{1,40}$/.test(key)) return res.status(400).json({ error: 'Invalid fee type.' });
+      category = key;
+    }
+    await ensureOnlinePaymentsTable();
+    // Several unfinished orders for the same line are harmless, but stop a flood from one login.
+    const open = await sql`SELECT COUNT(*) AS c FROM online_payments WHERE user_id = ${req.authUser.id} AND status = 'created' AND created_at > (NOW() - INTERVAL 1 HOUR)`;
+    if (Number(open[0] && open[0].c) >= 20) return res.status(429).json({ error: 'Too many unfinished payments. Please wait a few minutes.' });
+    const rz = await rzApi('POST', '/v1/orders', {
+      amount: Math.round(amount * 100), currency: 'INR', receipt: 'fee_' + Date.now(),
+      notes: { student_id: String(student.id), category, ...(extraId ? { extra_fee_id: String(extraId) } : {}) },
+    });
+    if (!rz.ok || !rz.data || !rz.data.id) {
+      console.error('razorpay create-order failed:', rz.data);
+      return res.status(502).json({ error: (rz.data && rz.data.error && rz.data.error.description) || 'Could not start the payment.' });
+    }
+    const order = rz.data;
+    await sql`INSERT INTO online_payments (order_id, student_id, user_id, user_name, amount, category, extra_fee_id, extra_fee_name, label, class_at_payment, status)
+      VALUES (${order.id}, ${student.id}, ${req.authUser.id}, ${req.authUser.name || ''}, ${amount}, ${category}, ${extraId}, ${extraName}, ${String(b.label || '').slice(0, 200)}, ${student.class_name || ''}, 'created')`;
     return res.status(200).json({ orderId: order.id, amount: order.amount, currency: order.currency, keyId: process.env.RAZORPAY_KEY_ID });
   } catch (err) {
     console.error('razorpay create-order error:', err);
     return res.status(500).json({ error: 'Could not start the payment. Please try again.' });
   }
 });
+
+// Confirms with Razorpay and records the payment — exactly once per order. Safe to call any number of times.
+async function finalizeOnlinePayment(orderId, paymentId) {
+  await ensureOnlinePaymentsTable();
+  const result = await withKeyLock('onlinepay:' + orderId, async () => {
+    const rows = await sql`SELECT * FROM online_payments WHERE order_id = ${orderId}`;
+    if (!rows.length) return { code: 404, error: 'Unknown payment order.' };
+    const row = rows[0];
+    if (row.status === 'paid') return { ok: true, already: true, row };
+    const pr = await rzApi('GET', '/v1/payments/' + encodeURIComponent(paymentId));
+    if (!pr.ok || !pr.data) return { code: 502, error: 'Could not confirm the payment with Razorpay yet.' };
+    const p = pr.data;
+    if (p.order_id !== orderId) return { code: 400, error: 'This payment belongs to a different order.' };
+    if (Math.round(Number(row.amount) * 100) !== Number(p.amount) || (p.currency && p.currency !== 'INR')) {
+      console.error('online payment amount mismatch', orderId, p.amount, row.amount);
+      return { code: 400, error: 'The paid amount does not match the order. The office has been alerted.' };
+    }
+    let status = p.status;
+    if (status === 'authorized') {
+      const cap = await rzApi('POST', '/v1/payments/' + encodeURIComponent(paymentId) + '/capture', { amount: Number(p.amount), currency: 'INR' });
+      status = cap.ok && cap.data ? cap.data.status : status;
+    }
+    if (status !== 'captured') {
+      if (status === 'failed') await sql`UPDATE online_payments SET status = 'failed', razorpay_payment_id = ${paymentId} WHERE order_id = ${orderId}`;
+      return { code: 402, error: 'The payment was not completed.' };
+    }
+    const prefix = await receiptPrefixServer();
+    const [receiptNo] = await issueReceiptNumbers({ prefix, count: 1, start: await receiptStartServer(), draftKey: ('ol_' + orderId).slice(0, 40), by: row.user_name || 'Online payment', role: 'Parent' });
+    const payRowId = 'pay_online_' + orderId;
+    const exists = await sql`SELECT id FROM payments WHERE id = ${payRowId}`;
+    if (!exists.length) {
+      await sql`
+        INSERT INTO payments (id, receipt_no, student_id, student_name, category, mode, amount, discount, instalment, date, note, class_at_payment, extra_fee_name, extra_fee_id)
+        VALUES (${payRowId}, ${receiptNo}, ${row.student_id}, ${await studentFullName(row.student_id)}, ${row.category || 'fee'}, 'Online',
+          ${row.amount}, 0, '', ${todayInSchoolTz()}, ${'Paid online via Razorpay — ' + paymentId},
+          ${row.class_at_payment || ''}, ${row.extra_fee_name || null}, ${row.extra_fee_id || null})`;
+    }
+    if (row.extra_fee_id && !Number(row.extra_applied)) {
+      await sql`UPDATE online_payments SET extra_applied = 1 WHERE order_id = ${orderId}`;
+      // `paid` is set BEFORE `paid_amount` on purpose: MySQL applies the assignments left to right.
+      await sql`UPDATE student_extra_fees SET paid = (COALESCE(paid_amount, 0) + ${row.amount} >= amount AND amount > 0),
+        paid_amount = COALESCE(paid_amount, 0) + ${row.amount} WHERE id = ${row.extra_fee_id}`;
+    }
+    await sql`UPDATE online_payments SET status = 'paid', razorpay_payment_id = ${paymentId}, receipt_no = ${receiptNo}, payment_row_id = ${payRowId}, paid_at = NOW() WHERE order_id = ${orderId}`;
+    const fresh = await sql`SELECT * FROM online_payments WHERE order_id = ${orderId}`;
+    return { ok: true, row: fresh[0], justRecorded: true };
+  });
+  if (result.justRecorded) {
+    notifyFeePayment({ studentId: result.row.student_id, amount: result.row.amount, category: result.row.category, mode: 'Online', receiptNo: result.row.receipt_no })
+      .catch(err => console.error('fee payment notification failed:', err));
+  }
+  return result;
+}
+async function studentFullName(studentId) {
+  const r = await sql`SELECT first_name, last_name FROM students WHERE id = ${studentId}`;
+  return r.length ? `${r[0].first_name || ''} ${r[0].last_name || ''}`.trim() : '';
+}
 app.post('/api/payments/verify', async (req, res) => {
   try {
-    if (!razorpayConfigured()) {
-      return res.status(501).json({ error: 'Online payments are not set up yet.' });
+    if (!razorpayConfigured()) return res.status(501).json({ error: 'Online payments are not set up yet.' });
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) return res.status(400).json({ error: 'Missing payment details.' });
+    await ensureOnlinePaymentsTable();
+    const rows = await sql`SELECT * FROM online_payments WHERE order_id = ${String(razorpay_order_id)}`;
+    if (!rows.length) return res.status(404).json({ error: 'Unknown payment order.' });
+    if (!req.authUser || (PARENT_LOGIN_ROLES.includes(req.authUser.role) && rows[0].user_id !== req.authUser.id)) {
+      return res.status(403).json({ error: 'This payment was started by a different login.' });
     }
-    const {
-      razorpay_order_id, razorpay_payment_id, razorpay_signature,
-      studentId, studentName, amount, category, classAtPayment, extraFeeName, extraFeeId,
-    } = req.body || {};
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !studentId || !amount) {
-      return res.status(400).json({ error: 'Missing payment details.' });
-    }
-    const expected = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-      .digest('hex');
-    if (expected !== razorpay_signature) {
+    const expected = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET).update(`${razorpay_order_id}|${razorpay_payment_id}`).digest('hex');
+    if (!safeEqualHex(expected, razorpay_signature)) {
       return res.status(400).json({ error: 'Payment verification failed — this does not look like a genuine Razorpay confirmation.' });
     }
-    // Signature checks out against our own secret, so Razorpay itself vouches this
-    // payment happened — safe to record it as a real payment now.
-    const id = 'pay_' + Date.now() + '_' + razorpay_payment_id;
-    await sql`
-      INSERT INTO payments (id, receipt_no, student_id, student_name, category, mode, amount, discount, instalment, date, note, class_at_payment, extra_fee_name, extra_fee_id)
-      VALUES (
-        ${id}, ${razorpay_payment_id}, ${studentId}, ${studentName || ''}, ${category || 'fee'}, 'Online',
-        ${amount}, 0, '', ${new Date().toISOString().slice(0, 10)}, ${'Paid online via Razorpay — ' + razorpay_payment_id},
-        ${classAtPayment || ''}, ${extraFeeName || null}, ${extraFeeId || null}
-      )
-    `;
-    notifyFeePayment({ studentId, amount, category: category || 'fee', mode: 'Online', receiptNo: razorpay_payment_id })
-      .catch(err => console.error('fee payment notification failed:', err));
-    return res.status(200).json({ ok: true, paymentId: id, receiptNo: razorpay_payment_id });
+    const r = await finalizeOnlinePayment(String(razorpay_order_id), String(razorpay_payment_id));
+    if (!r.ok) return res.status(r.code || 500).json({ error: r.error });
+    return res.status(200).json({ ok: true, paymentId: r.row.payment_row_id, receiptNo: r.row.receipt_no, amount: Number(r.row.amount), already: !!r.already });
   } catch (err) {
     console.error('razorpay verify error:', err);
-    return res.status(500).json({ error: 'Payment succeeded but we could not record it — please contact the school office with your payment ID.' });
+    return res.status(500).json({ error: 'Payment succeeded but we could not record it yet — it will appear automatically within a few minutes. If not, contact the school office with your payment ID.' });
   }
+});
+// Razorpay webhook (optional extra safety net): set RAZORPAY_WEBHOOK_SECRET and add
+// https://<your-site>/api/payments/webhook in Razorpay Dashboard > Webhooks (events: payment.captured, order.paid).
+app.post('/api/payments/webhook', async (req, res) => {
+  try {
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    if (!secret || !razorpayConfigured()) return res.status(501).json({ error: 'Webhook not set up.' });
+    const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.from(typeof req.body === 'string' ? req.body : JSON.stringify(req.body || {}));
+    const expected = crypto.createHmac('sha256', secret).update(raw).digest('hex');
+    if (!safeEqualHex(expected, req.get('x-razorpay-signature'))) return res.status(400).json({ error: 'Bad signature.' });
+    const ev = JSON.parse(raw.toString('utf8'));
+    const pay = ev && ev.payload && ev.payload.payment && ev.payload.payment.entity;
+    if (pay && pay.id && pay.order_id && (ev.event === 'payment.captured' || ev.event === 'order.paid' || ev.event === 'payment.authorized')) {
+      await finalizeOnlinePayment(String(pay.order_id), String(pay.id)).catch(e => console.error('webhook finalize failed:', e.message));
+    }
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('razorpay webhook error:', err);
+    return res.status(200).json({ ok: true }); // never make Razorpay retry for our own bug; the background check will catch it
+  }
+});
+// Background check: orders still "created" after a couple of minutes — if Razorpay says one was paid, record it.
+async function sweepOnlinePayments() {
+  if (!razorpayConfigured()) return { checked: 0, recovered: 0 };
+  await ensureOnlinePaymentsTable();
+  const open = await sql`SELECT order_id FROM online_payments WHERE status = 'created' AND created_at < (NOW() - INTERVAL 2 MINUTE) AND created_at > (NOW() - INTERVAL 3 DAY) ORDER BY created_at LIMIT 50`;
+  let recovered = 0;
+  for (const o of open) {
+    try {
+      const r = await rzApi('GET', '/v1/orders/' + encodeURIComponent(o.order_id) + '/payments');
+      const items = (r.ok && r.data && Array.isArray(r.data.items)) ? r.data.items : [];
+      const good = items.find(i => i.status === 'captured' || i.status === 'authorized');
+      if (good) { const f = await finalizeOnlinePayment(o.order_id, good.id); if (f.ok && f.justRecorded) recovered++; }
+    } catch (e) { console.error('online payment sweep failed for', o.order_id, e.message); }
+  }
+  return { checked: open.length, recovered };
+}
+setInterval(() => { sweepOnlinePayments().catch(e => console.error('sweepOnlinePayments:', e.message)); }, 5 * 60 * 1000);
+// Office view: recent online payments, including any that were started but not completed.
+app.get('/api/payments/online-orders', async (req, res) => {
+  try {
+    if (!req.authUser || !['Admin', 'Principal', 'Accountant'].includes(req.authUser.role)) return res.status(403).json({ error: 'Not allowed.' });
+    await ensureOnlinePaymentsTable();
+    const rows = await sql`SELECT o.order_id, o.status, o.amount, o.label, o.receipt_no, o.razorpay_payment_id, o.created_at, o.paid_at, s.first_name, s.last_name, s.admission_no
+      FROM online_payments o LEFT JOIN students s ON s.id = o.student_id ORDER BY o.created_at DESC LIMIT 100`;
+    return res.status(200).json({ enabled: razorpayConfigured(), orders: rows });
+  } catch (err) { console.error('online-orders error:', err); return res.status(500).json({ error: 'Could not load online payments.' }); }
+});
+app.post('/api/payments/check-now', async (req, res) => {
+  try {
+    if (!req.authUser || !['Admin', 'Principal', 'Accountant'].includes(req.authUser.role)) return res.status(403).json({ error: 'Not allowed.' });
+    return res.status(200).json(await sweepOnlinePayments());
+  } catch (err) { console.error('check-now error:', err); return res.status(500).json({ error: 'Could not check with Razorpay.' }); }
 });
 
 // Whether this school has online fee payment turned on at all — the deploy-
