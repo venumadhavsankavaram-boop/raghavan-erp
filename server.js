@@ -4788,6 +4788,16 @@ app.post('/api/account/2fa/reset', async (req, res) => {
   } catch (err) { console.error('2fa reset error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 
+// Names of the people who can sign off a fee discount (Admin / Principal). The users list itself is Admin-only,
+// so an Office Assistant needs this narrow read to fill the "Select approver" box. Names and ids only.
+app.get('/api/approvers', async (req, res) => {
+  try {
+    if (!req.authUser) return res.status(401).json({ error: 'Please sign in.' });
+    const rows = await sql`SELECT id, name, role FROM users WHERE role IN ('Admin', 'Principal') AND deleted_at IS NULL ORDER BY role, name`;
+    return res.status(200).json({ approvers: rows.map(r => ({ id: r.id, name: r.name, role: r.role })) });
+  } catch (err) { console.error('approvers error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+
 app.post('/api/logout', async (req, res) => {
   try {
     await destroySession(req, res);

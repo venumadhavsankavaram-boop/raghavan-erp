@@ -449,6 +449,30 @@ let refundPaymentId = null;
     renderDiscountsTab(document.getElementById('feeBody'));
   }
 
+
+  /* People who can sign off a discount (Admin / Principal). The generic users list is Admin-only, so an
+     Office Assistant's browser has none of them — this reads just their names from /api/approvers. */
+  let discApproverCache = [];
+  function discApproverCandidates(){
+    const map = new Map();
+    (typeof users !== 'undefined' ? users : []).forEach(u => { if((u.role === 'Admin' || u.role === 'Principal') && u.id !== 'vendor-support') map.set(u.id, { id:u.id, name:u.name, role:u.role }); });
+    discApproverCache.forEach(u => { if(!map.has(u.id)) map.set(u.id, u); });
+    return [...map.values()].filter(u => !currentUser || u.id !== currentUser.id);
+  }
+  function discApproverOptionsHtml(){
+    return discApproverCandidates().map(u => `<option value="${escapeHtml(u.id)}">${escapeHtml(u.name || '')} (${escapeHtml(u.role)})</option>`).join('');
+  }
+  async function refreshDiscApprovers(){
+    try{
+      const res = await fetch('/api/approvers'); if(!res.ok) return;
+      const d = await res.json(); discApproverCache = Array.isArray(d.approvers) ? d.approvers : [];
+    }catch(e){ return; }
+    const sel = document.getElementById('discCreateApprover'); if(!sel) return;
+    const keep = sel.value;
+    sel.innerHTML = '<option value="" disabled' + (keep ? '' : ' selected') + '>Select an approver</option>' + discApproverOptionsHtml();
+    if(keep) sel.value = keep;
+  }
+
   function renderDiscCreateForm(body){
     body.innerHTML = `
       <div style="display:flex; align-items:center; gap:14px; margin-bottom:20px;">
@@ -506,7 +530,7 @@ let refundPaymentId = null;
           <label>Select Approver <span class="required-star">*</span></label>
           <select id="discCreateApprover" required>
             <option value="" disabled selected>Select an approver</option>
-            ${users.filter(u => (u.role==='Admin' || u.role==='Principal') && u.id!==currentUser.id).map(u => `<option value="${u.id}">${u.name} (${u.role})</option>`).join('')}
+            ${discApproverOptionsHtml()}
           </select>
         </div>
       </div>
@@ -522,6 +546,7 @@ let refundPaymentId = null;
     `;
     renderDiscSelectedStudentsBox();
     renderDiscStudentFeePanels();
+    refreshDiscApprovers();
   }
 
   function onDiscTypeChange(){
@@ -720,7 +745,8 @@ let refundPaymentId = null;
     if(!isAdminSelfApprove){
       const approverSel = document.getElementById('discCreateApprover');
       if(!approverSel.value){ showToast('Select an approver.'); return; }
-      approver = users.find(u => u.id === approverSel.value);
+      approver = discApproverCandidates().find(u => u.id === approverSel.value);
+      if(!approver){ showToast('Select an approver.'); return; }
     }
     const type = document.getElementById('discCreateType').value;
     let note = document.getElementById('discCreateNote').value.trim();

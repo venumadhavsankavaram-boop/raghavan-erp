@@ -340,7 +340,7 @@ renderDiscCreateForm = function(body){
     <section class="cc-step" style="margin-top:16px;">
       <div class="form-grid"><div class="f-field full"><label>Select approver <span class="required-star">*</span></label>
         <select id="discCreateApprover" required><option value="" disabled selected>Select an approver</option>
-          ${users.filter(u => (u.role === 'Admin' || u.role === 'Principal') && u.id !== currentUser.id).map(u => `<option value="${u.id}">${u.name} (${u.role})</option>`).join('')}</select></div></div>
+          ${discApproverOptionsHtml()}</select></div></div>
       <p style="font-size:0.78rem; color:var(--ink-soft); margin:10px 0 0;">This request needs the selected approver's sign-off before it reduces the fee.</p>
     </section>`}
 
@@ -353,4 +353,5 @@ renderDiscCreateForm = function(body){
     </div>`;
   renderDiscSelectedStudentsBox();
   renderDiscStudentFeePanels();
+  refreshDiscApprovers();
 };
