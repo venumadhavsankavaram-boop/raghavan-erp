@@ -1350,6 +1350,11 @@ app.post('/api/next-doc-number', async (req, res) => {
     const draftKey = src && typeof rawKey === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(rawKey) ? rawKey : null;
     const by = (req.authUser && req.authUser.name) || '', role = (req.authUser && req.authUser.role) || '';
     const fmt = n => `${prefix}/${period}/${String(n).padStart(6, '0')}`;
+    // Look only (journal vouchers): shows the number the next voucher will get, without using it up.
+    if (req.body && req.body.peek === true && !src) {
+      const c = await sql.query('SELECT next_seq FROM doc_counters WHERE series = $1 AND period = $2', [series, period]);
+      return res.status(200).json({ docNumber: fmt(c.length ? Math.max(1, Number(c[0].next_seq) || 1) : 1), peek: true });
+    }
     const result = await withKeyLock('docno:' + series, async () => {
       let seq = 0, reused = false;
       let saved = null;
