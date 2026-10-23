@@ -47,7 +47,7 @@ function legacyLateFee(outstanding, rule, now){
 
 console.log('Dates');
 test('fmtISODate formats real dates and dashes the rest', () => {
-  assert.equal(E.fmtISODate('2026-06-30'), '30 Jun 2026');
+  assert.equal(E.fmtISODate('2026-06-30'), '30/06/2026');
   assert.equal(E.fmtISODate('2026-02-31'), '—');
   assert.equal(E.fmtISODate(''), '—');
   assert.equal(E.fmtISODate(undefined), '—');

@@ -119,10 +119,17 @@ try {
     const useCols = Object.keys(rows[0]).filter(k => tcols[k]);
     const dropped = Object.keys(rows[0]).filter(k => !tcols[k]);
     if (dropped.length) console.log('  ⚠ ' + n + ': columns not in this database were ignored: ' + dropped.join(', '));
-    for (let i = 0; i < rows.length; i += BATCH) {
-      const chunk = rows.slice(i, i + BATCH).map(r => useCols.map(k => conv(r[k], tcols[k])));
-      await db.query('INSERT INTO `' + n + '` (' + useCols.map(k => '`' + k + '`').join(',') + ') VALUES ?', [chunk]);
+    // Batches are limited by size as well as count, so big rows (photos, documents) never exceed the server's packet limit.
+    const MAX_BYTES = 1024 * 1024;
+    const flush = async chunk => { if (chunk.length) await db.query('INSERT INTO `' + n + '` (' + useCols.map(k => '`' + k + '`').join(',') + ') VALUES ?', [chunk]); };
+    let chunk = [], bytes = 0;
+    for (const r of rows) {
+      const vals = useCols.map(k => conv(r[k], tcols[k]));
+      const size = vals.reduce((t, v) => t + (v === null ? 4 : typeof v === 'string' ? v.length + 3 : Buffer.isBuffer(v) ? v.length * 2 : 24), 0);
+      if (chunk.length && (chunk.length >= BATCH || bytes + size > MAX_BYTES)) { await flush(chunk); chunk = []; bytes = 0; }
+      chunk.push(vals); bytes += size;
     }
+    await flush(chunk);
     restored[n] = rows.length;
     process.stdout.write('  restored ' + n.padEnd(34) + String(rows.length).padStart(8) + ' rows\n');
   }

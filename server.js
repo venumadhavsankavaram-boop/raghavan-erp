@@ -1010,6 +1010,7 @@ async function seedDefaultAdminIfEmpty() {
 async function initDb() {
   console.log('Connecting to database and ensuring schema...');
   await ensureSchema();
+  try { await ensureDraftKeyTable(); } catch (e) { console.error('doc_draft_keys not created at startup (will retry on first use):', e.message); }
   console.log('Schema ready.');
   await migrateAccountingFromKv();
   await migrateHomeworkFromKv();

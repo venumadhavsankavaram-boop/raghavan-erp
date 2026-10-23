@@ -51,7 +51,7 @@ function isValidISODate(s){
 // '2026-06-30' -> '30 Jun 2026'; anything that is not a real date -> an em dash.
 function fmtISODate(iso){
   if(!isValidISODate(iso)) return '—';
-  return +iso.slice(8, 10) + ' ' + MONTH_SHORT[+iso.slice(5, 7) - 1] + ' ' + iso.slice(0, 4);
+  return iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4);
 }
 
 // Splits `total` by `shares` (any positive weights). Whole-rupee totals give
