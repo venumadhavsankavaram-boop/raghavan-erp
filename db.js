@@ -64,7 +64,7 @@ export const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 30,
   maxIdle: 10,
-  idleTimeout: 60000,
+  idleTimeout: 20000,
   // Without this, mysql2 has no upper bound on how long it will wait for
   // the initial TCP/TLS handshake — a wrong host, a DNS name that doesn't
   // resolve from the hosting platform's network, or a network/firewall path
@@ -80,6 +80,20 @@ export const pool = mysql.createPool({
 pool.on('error', (err) => {
   console.error('MySQL pool error:', err);
 });
+
+// The database server closes a connection that has sat idle too long ("The client was
+// disconnected by the server because of inactivity"). The next request that happens to be handed
+// that dead connection used to fail once. That failure happens before the query is sent, so it is
+// safe to run it again on a fresh connection. Only this specific case is retried, never a query
+// that may already have run.
+function isIdleDisconnect(err) {
+  return !!err && (err.code === 'ER_CLIENT_INTERACTION_TIMEOUT' || /disconnected by the server because of inactivity/i.test(String(err.message || '')));
+}
+async function withIdleRetry(fn) {
+  try { return await fn(); }
+  catch (err) { if (isIdleDisconnect(err)) return await fn(); throw err; }
+}
+function queryRetry(text, params) { return withIdleRetry(() => pool.query(text, params)); }
 
 // Postgres cast syntax (`::jsonb`, `::int`, ...) has no MySQL equivalent and
 // isn't needed there — a JSON column accepts a plain JSON string on write,
@@ -121,7 +135,7 @@ export async function sql(strings, ...values) {
   for (let i = 0; i < values.length; i++) {
     text += '?' + stripPgCasts(strings[i + 1]);
   }
-  const [rows] = await pool.query(text, coerceParams(values));
+  const [rows] = await queryRetry(text, coerceParams(values));
   return Array.isArray(rows) ? rows : [];
 }
 
@@ -136,7 +150,7 @@ sql.query = async function (text, params = []) {
     newParams.push(params[Number(n) - 1]);
     return '?';
   });
-  const [rows] = await pool.query(converted, coerceParams(newParams));
+  const [rows] = await queryRetry(converted, coerceParams(newParams));
   return Array.isArray(rows) ? rows : [];
 };
 
@@ -155,7 +169,7 @@ sql.query = async function (text, params = []) {
 // Doing the insert/update and the read on one checked-out connection (rather
 // than through the pool, which could hand the next query to a different
 // connection) is what keeps this correct.
-export async function nextDocSeq(series, period) {
+async function nextDocSeqOnce(series, period) {
   const conn = await pool.getConnection();
   try {
     await conn.query(
@@ -169,12 +183,13 @@ export async function nextDocSeq(series, period) {
     conn.release();
   }
 }
+export function nextDocSeq(series, period) { return withIdleRetry(() => nextDocSeqOnce(series, period)); }
 
 // Reserves `count` consecutive numbers from a doc_counters series in one atomic step
 // and returns the first one (the caller formats first .. first+count-1). `minNext`
 // only ever RAISES the counter (first-time seed, or a raised "next receipt starts at"
 // setting) — it never moves it backwards, so a number is never handed out twice.
-export async function reserveDocSeqRange(series, period, count, minNext) {
+async function reserveDocSeqRangeOnce(series, period, count, minNext) {
   const conn = await pool.getConnection();
   try {
     await conn.query(
@@ -192,6 +207,7 @@ export async function reserveDocSeqRange(series, period, count, minNext) {
     conn.release();
   }
 }
+export function reserveDocSeqRange(series, period, count, minNext) { return withIdleRetry(() => reserveDocSeqRangeOnce(series, period, count, minNext)); }
 
 // Inserts a notification_events row unless one already exists for this
 // (student_id, kind, ref_key) — replaces:
@@ -201,7 +217,7 @@ export async function reserveDocSeqRange(series, period, count, minNext) {
 // INSERT IGNORE (0 if the unique constraint silently skipped the row, 1 if it
 // actually inserted) gives the same answer without needing RETURNING.
 export async function insertNotificationEventIfNew(studentId, kind, refKey) {
-  const [result] = await pool.query(
+  const [result] = await queryRetry(
     'INSERT IGNORE INTO notification_events (student_id, kind, ref_key) VALUES (?, ?, ?)',
     [studentId, kind, refKey]
   );
@@ -216,7 +232,7 @@ export async function insertNotificationEventIfNew(studentId, kind, refKey) {
 // ensureSchema() stays just as safe to run on every boot.
 export async function addColumnIfMissing(table, columnDef) {
   try {
-    await pool.query(`ALTER TABLE ${table} ADD COLUMN ${columnDef}`);
+    await queryRetry(`ALTER TABLE ${table} ADD COLUMN ${columnDef}`);
   } catch (err) {
     if (err.code !== 'ER_DUP_FIELDNAME') throw err;
   }
@@ -224,7 +240,7 @@ export async function addColumnIfMissing(table, columnDef) {
 
 export async function createIndexIfMissing(indexName, table, columnsExpr) {
   try {
-    await pool.query(`CREATE INDEX ${indexName} ON ${table} (${columnsExpr})`);
+    await queryRetry(`CREATE INDEX ${indexName} ON ${table} (${columnsExpr})`);
   } catch (err) {
     if (err.code === 'ER_DUP_KEYNAME') return;
     // Older live databases hold some columns as TEXT/BLOB, which MySQL cannot
@@ -232,7 +248,7 @@ export async function createIndexIfMissing(indexName, table, columnsExpr) {
     // only, so one legacy column type can never abort the whole start-up.
     if (err.code === 'ER_BLOB_KEY_WITHOUT_LENGTH') {
       const cols = String(columnsExpr).split(',').map(c => c.trim()).filter(Boolean);
-      const [rows] = await pool.query(
+      const [rows] = await queryRetry(
         `SELECT COLUMN_NAME AS name, DATA_TYPE AS dt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
         [table]
       );
@@ -240,7 +256,7 @@ export async function createIndexIfMissing(indexName, table, columnsExpr) {
       (rows || []).forEach(r => { types[String(r.name).toLowerCase()] = String(r.dt).toLowerCase(); });
       const expr = cols.map(c => /text|blob/.test(types[c.toLowerCase()] || '') ? `${c}(191)` : c).join(', ');
       try {
-        await pool.query(`CREATE INDEX ${indexName} ON ${table} (${expr})`);
+        await queryRetry(`CREATE INDEX ${indexName} ON ${table} (${expr})`);
       } catch (err2) {
         if (err2.code !== 'ER_DUP_KEYNAME') throw err2;
       }
