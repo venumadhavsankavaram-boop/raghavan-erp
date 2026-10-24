@@ -1247,6 +1247,63 @@ function kvChangeSummary(before, after) {
   return 'setting updated';
 }
 
+
+// ---------- Tamper-proof attendance & marks ----------
+// Once attendance (students or staff) is marked, or a mark is entered, only an Admin or Principal may change or
+// delete that entry. Enforced HERE on the server, so a teacher cannot get round it with the browser
+// tools, an old tab or a crafted request. Teachers can still ADD entries for slots not yet marked.
+// Marks get a short correction window (default 24h after the entry was first made, school-adjustable
+// in kv 'record-lock-policy' as {marksGraceHours: n}); attendance has none. Every Admin correction is
+// written to the audit trail with before -> after.
+// Roles that may correct a locked entry (every correction is audited).
+const LOCK_OVERRIDE_ROLES = ['Admin', 'Principal'];
+const LOCKED_RESOURCES = new Set(['attendance', 'staff-attendance', 'exam-results']);
+async function recordLockGraceHours() {
+  try {
+    const r = await sql`SELECT value FROM kv_store WHERE \`key\` = 'record-lock-policy'`;
+    let v = r.length ? r[0].value : null; if (typeof v === 'string') { try { v = JSON.parse(v); } catch (_) { v = null; } }
+    const n = v && Number(v.marksGraceHours);
+    if (Number.isFinite(n) && n >= 0) return n;
+  } catch (_) {}
+  return 24;
+}
+async function findLockedRow(resource, id, body) {
+  const b = body || {};
+  const sess = b.session || null;
+  let rows = [];
+  if (resource === 'attendance') {
+    rows = id ? await sql`SELECT id, status AS val, TIMESTAMPDIFF(MINUTE, created_at, NOW()) AS age FROM attendance_records WHERE id = ${id}` : [];
+    if (!rows.length && b.studentId && b.date) rows = await sql`SELECT id, status AS val, TIMESTAMPDIFF(MINUTE, created_at, NOW()) AS age FROM attendance_records WHERE student_id = ${b.studentId} AND date = ${b.date} AND session <=> ${sess} LIMIT 1`;
+  } else if (resource === 'staff-attendance') {
+    rows = id ? await sql`SELECT id, status AS val, TIMESTAMPDIFF(MINUTE, created_at, NOW()) AS age FROM staff_attendance_records WHERE id = ${id}` : [];
+    if (!rows.length && b.staffId && b.date) rows = await sql`SELECT id, status AS val, TIMESTAMPDIFF(MINUTE, created_at, NOW()) AS age FROM staff_attendance_records WHERE staff_id = ${b.staffId} AND date = ${b.date} AND session <=> ${sess} LIMIT 1`;
+  } else {
+    rows = id ? await sql`SELECT id, marks AS val, TIMESTAMPDIFF(MINUTE, created_at, NOW()) AS age FROM exam_results WHERE id = ${id}` : [];
+    if (!rows.length && b.examId && b.studentId && b.subject) rows = await sql`SELECT id, marks AS val, TIMESTAMPDIFF(MINUTE, created_at, NOW()) AS age FROM exam_results WHERE exam_id = ${b.examId} AND student_id = ${b.studentId} AND subject = ${b.subject} LIMIT 1`;
+  }
+  return rows.length ? rows[0] : null;
+}
+// Returns true when the request was refused (response already sent).
+async function enforceRecordLock(req, res, resource) {
+  if (!LOCKED_RESOURCES.has(resource) || !req.authUser) return false;
+  if (!['POST', 'PUT', 'DELETE'].includes(req.method)) return false;
+  const id = req.method === 'DELETE' ? (req.query && req.query.id) : (req.body && req.body.id);
+  const existing = await findLockedRow(resource, id, req.method === 'DELETE' ? null : req.body);
+  if (!existing) return false; // a brand-new entry in an empty slot is always allowed
+  const isAdmin = LOCK_OVERRIDE_ROLES.includes(req.authUser.role);
+  const graceMin = resource === 'exam-results' ? Math.round((await recordLockGraceHours()) * 60) : 0;
+  if (!isAdmin && Number(existing.age) >= graceMin) {
+    const what = resource === 'exam-results' ? 'This mark is locked' : 'This attendance is already marked and locked';
+    res.status(403).json({ error: what + '. Only an Admin or Principal can correct it.', code: 'RECORD_LOCKED' });
+    return true;
+  }
+  if (isAdmin && Number(existing.age) >= graceMin) {
+    const to = req.method === 'DELETE' ? 'deleted' : String((req.body || {}).status ?? (req.body || {}).marks ?? '');
+    auditNote(req.authUser.name, req.authUser.role, 'CORRECTION', resource, existing.id, 'locked entry ' + (req.method === 'DELETE' ? 'deleted' : 'corrected') + ': ' + String(existing.val) + ' -> ' + to, null);
+  }
+  return false;
+}
+
 async function handleKv(req, res, key) {
   if (!key) return res.status(400).json({ error: 'Missing key.' });
   if (ADMIN_ONLY_KV_KEYS.includes(key) && (!req.authUser || req.authUser.role !== 'Admin')) {
@@ -6280,6 +6337,7 @@ app.all('/api/:resource', async (req, res) => {
     // school policy is that attendance isn't taken on a holiday, so refuse a
     // write here too rather than trusting every caller of this generic
     // resource endpoint to have applied that rule client-side first.
+    if (await enforceRecordLock(req, res, resource)) return;
     if (resource === 'attendance' && (req.method === 'POST' || req.method === 'PUT')) {
       const dateStr = req.body && req.body.date;
       if (dateStr) {

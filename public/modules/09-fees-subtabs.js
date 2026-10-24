@@ -82,6 +82,14 @@ const ATTENDANCE_KEY = "attendance-records";
   // homeroom day-to-day don't get this toggle: the two sessions usually do
   // need to be recorded separately (half-day arrivals/departures etc).
   let attApplyBothSessions = false;
+  /* Tamper-proof register: once a student's / staff member's slot is marked, only Admin or Principal can change it
+     (the server enforces the same rule — this just stops the buttons from offering it). */
+  function attIsLocked(studentId){
+    return !!currentUser && !['Admin','Principal'].includes(currentUser.role) && attendanceRecords.some(r => r.studentId === studentId && r.date === attMarkDate && (!r.session || r.session === attMarkSession));
+  }
+  function staffAttIsLocked(staffId){
+    return !!currentUser && !['Admin','Principal'].includes(currentUser.role) && staffAttendanceRecords.some(r => r.staffId === staffId && r.date === staffAttMarkDate && (!r.session || r.session === staffAttMarkSession));
+  }
   function canUseBothSessionsShortcut(){
     return currentUser.role === 'Admin' || currentUser.role === 'Office Assistant';
   }
@@ -253,10 +261,19 @@ const ATTENDANCE_KEY = "attendance-records";
       </div>
     `;
   }
+  /* Work pattern: 'Both' (default) | 'Morning' | 'Afternoon'. A one-session member is shown only in
+     their own session; on single-session dates there is just the Morning register, so everyone shows there. */
+  function staffWorkPattern(st){ return st && (st.workSession === 'Morning' || st.workSession === 'Afternoon') ? st.workSession : 'Both'; }
+  function staffWorksSession(st, date, session){
+    const wp = staffWorkPattern(st);
+    return wp === 'Both' || attIsSingleSession(date) || wp === session;
+  }
   function filteredStaffForAttendance(){
     const deptF = document.getElementById('stAtDeptFilter').value;
     const q = (document.getElementById('stAtSearch').value||'').trim().toLowerCase();
     let list = staffList.filter(st => staffIsActive(st));
+    // Part-time staff who work one session only never appear in the other session's register.
+    list = list.filter(st => staffWorksSession(st, staffAttMarkDate, staffAttMarkSession));
     if(deptF) list = list.filter(st => st.department === deptF);
     if(q) list = list.filter(st => (st.firstName+' '+st.lastName).toLowerCase().includes(q));
     return list.sort((a,b) => (a.firstName||'').localeCompare(b.firstName||''));
@@ -292,7 +309,7 @@ const ATTENDANCE_KEY = "attendance-records";
             <td>${st.department||'—'}</td>
             <td>
               <div class="att-status-row">
-                ${['Present','Absent','Late','Leave'].map(s => `<button type="button" class="att-status-btn ${staffPendingMarks[st.id]===s?'active':''}" data-status="${s}" onclick="setStaffAttStatus('${st.id}','${s}')">${s}</button>`).join('')}
+                ${['Present','Absent','Late','Leave'].map(s => `<button type="button" class="att-status-btn ${staffPendingMarks[st.id]===s?'active':''}" data-status="${s}" ${staffAttIsLocked(st.id)?'disabled':''} onclick="setStaffAttStatus('${st.id}','${s}')">${s}</button>`).join('')}${staffAttIsLocked(st.id)?' <span title="Marked and locked — only Admin or Principal can change it">🔒</span>':''}
               </div>
             </td>
           </tr>`).join('')}
@@ -304,22 +321,25 @@ const ATTENDANCE_KEY = "attendance-records";
   }
   function changeStaffAttDate(val){ staffAttMarkDate = val; staffPendingMarks = {}; renderStaffAttendanceContent(); }
   function changeStaffAttSession(val){ staffAttMarkSession = val; staffPendingMarks = {}; renderStaffAttendanceContent(); }
-  function setStaffAttStatus(staffId, status){ staffPendingMarks[staffId] = status; renderStaffAttendanceContent(); }
+  function setStaffAttStatus(staffId, status){ if(staffAttIsLocked(staffId)) return; staffPendingMarks[staffId] = status; renderStaffAttendanceContent(); }
   function markAllStaffStatus(status){
-    filteredStaffForAttendance().forEach(st => { staffPendingMarks[st.id] = status; });
+    filteredStaffForAttendance().forEach(st => { if(!staffAttIsLocked(st.id)) staffPendingMarks[st.id] = status; });
     renderStaffAttendanceContent();
   }
   async function saveStaffAttendance(){
     if(attIsSingleSession(staffAttMarkDate)) staffAttMarkSession = 'Morning';
     await ensureDataLoaded('staffAttendanceRecords', loadStaffAttendance);
+    let staffLockedSkipped = 0;
     Object.keys(staffPendingMarks).forEach(staffId => {
       const status = staffPendingMarks[staffId];
+      if(staffAttIsLocked(staffId)){ staffLockedSkipped++; return; }
       let rec = staffAttendanceRecords.find(r => r.staffId===staffId && r.date===staffAttMarkDate && r.session===staffAttMarkSession);
       if(rec){ rec.status = status; }
       else { staffAttendanceRecords.push({ id:'statt_'+staffId+'_'+staffAttMarkDate+'_'+staffAttMarkSession, staffId, date:staffAttMarkDate, session:staffAttMarkSession, status }); }
     });
-    await storageSet(STAFF_ATTENDANCE_KEY, staffAttendanceRecords);
-    showToast('Staff attendance saved for ' + staffAttMarkDate + ' (' + staffAttMarkSession + ').');
+    const stOk = await storageSet(STAFF_ATTENDANCE_KEY, staffAttendanceRecords);
+    if(stOk === false){ await loadStaffAttendance(); staffPendingMarks = {}; renderStaffAttendanceContent(); return; }
+    showToast('Staff attendance saved for ' + staffAttMarkDate + ' (' + staffAttMarkSession + ').' + (staffLockedSkipped ? ' ' + staffLockedSkipped + ' already-marked entries are locked (only Admin or Principal can change them).' : ''));
   }
   /* Staff attendance is counted in DAYS (not sessions). Per staff + date:
      - a legacy sessionless row is one full day; if a date has legacy rows, session rows
@@ -340,7 +360,7 @@ const ATTENDANCE_KEY = "attendance-records";
       const rows = byDate[d];
       const legacy = rows.filter(r => !r.session);
       if(legacy.length){ out.push({ date:d, status:legacy[legacy.length-1].status, frac:1 }); return; }
-      const exp = attIsSingleSession(d) ? 1 : 2;
+      const exp = (attIsSingleSession(d) || ((((typeof staffList !== 'undefined' ? staffList : []).find(s => s.id === staffId)) || {}).workSession === 'Morning' || (((typeof staffList !== 'undefined' ? staffList : []).find(s => s.id === staffId)) || {}).workSession === 'Afternoon')) ? 1 : 2;
       const bySess = {};
       rows.forEach(r => { bySess[r.session] = r; });
       Object.keys(bySess).forEach(k => out.push({ date:d, status:bySess[k].status, frac:Math.min(1, 1/exp) }));
@@ -520,16 +540,19 @@ const ATTENDANCE_KEY = "attendance-records";
     // and Afternoon records in one save, instead of requiring the whole
     // roster to be re-marked twice just to record "present all day."
     const sessionsToSave = (attApplyBothSessions && canUseBothSessionsShortcut() && !attIsSingleSession(attMarkDate)) ? ATT_SESSIONS : [attIsSingleSession(attMarkDate) ? 'Morning' : attMarkSession];
+    let lockedSkipped = 0;
     Object.keys(pendingMarks).forEach(studentId => {
       const status = pendingMarks[studentId];
+      if(attIsLocked(studentId)){ lockedSkipped++; return; }
       sessionsToSave.forEach(session => {
         let rec = attendanceRecords.find(r => r.studentId===studentId && r.date===attMarkDate && r.session===session);
         if(rec){ rec.status = status; }
         else { attendanceRecords.push({ id:'att_'+studentId+'_'+attMarkDate+'_'+session, studentId, date:attMarkDate, session, status }); }
       });
     });
-    await storageSet(ATTENDANCE_KEY, attendanceRecords);
-    showToast('Attendance saved for ' + attMarkDate + ' (' + sessionsToSave.join(' & ') + ').');
+    const attOk = await storageSet(ATTENDANCE_KEY, attendanceRecords);
+    if(attOk === false){ await loadAttendanceRecordsData(); pendingMarks = {}; renderAttendanceBody(); return; }
+    showToast('Attendance saved for ' + attMarkDate + ' (' + sessionsToSave.join(' & ') + ').' + (lockedSkipped ? ' ' + lockedSkipped + ' already-marked entries are locked (only Admin or Principal can change them).' : ''));
   }
 
   /* --- Stats --- */

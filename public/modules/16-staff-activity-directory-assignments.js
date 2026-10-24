@@ -422,6 +422,7 @@ let saSelectedTeacherId = '';
     const desigSel = document.getElementById('stfDesignation');
     deptSel.innerHTML = '<option value="" disabled selected>Select department</option>' + staffDepartments.map(d => `<option>${d}</option>`).join('');
     desigSel.innerHTML = '<option value="" disabled selected>Select designation</option>' + staffDesignations.map(d => `<option>${d}</option>`).join('');
+    { const ws = document.getElementById('stfWorkSession'); if(ws) ws.value = 'Both'; }
     const ctSel = document.getElementById('stfClassTeacherOf');
     ctSel.innerHTML = '<option value="">Not a Class Teacher</option>' +
       CLASS_LEVELS.flatMap(c => SECTIONS.map(sec => `<option value="${c}|${sec}">${c} — Section ${sec}</option>`)).join('');
@@ -558,6 +559,7 @@ let saSelectedTeacherId = '';
         document.getElementById('stfBankAccountName').value = st.bankAccountName || '';
         document.getElementById('stfBankAccountNumber').value = st.bankAccountNumber || '';
         document.getElementById('stfBankIfsc').value = st.bankIfsc || '';
+        document.getElementById('stfWorkSession').value = st.workSession || 'Both';
         document.getElementById('stfClassTeacherOf').value = st.classTeacherClass ? (st.classTeacherClass+'|'+st.classTeacherSection) : '';
         document.getElementById('stfPhone').value = st.phone || '';
         document.getElementById('stfEmail').value = st.email || '';
@@ -677,6 +679,7 @@ let saSelectedTeacherId = '';
       bankName: g('stfBankName').trim(), bankAccountName: g('stfBankAccountName').trim(),
       bankAccountNumber: g('stfBankAccountNumber').trim(), bankIfsc: g('stfBankIfsc').trim().toUpperCase(),
       classTeacherClass: ctClass, classTeacherSection: ctSection,
+      workSession: (['Morning','Afternoon'].includes(g('stfWorkSession')) ? g('stfWorkSession') : 'Both'),
       phone: g('stfPhone').trim(), email: g('stfEmail').trim(), address: g('stfAddress').trim(),
       emergencyName: g('stfEmergencyName').trim(), emergencyPhone: g('stfEmergencyPhone').trim(),
       photo: staffPhotoData, signature: staffSignatureData, jobTypes,

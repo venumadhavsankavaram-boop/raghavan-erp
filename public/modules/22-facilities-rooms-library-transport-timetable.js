@@ -1394,7 +1394,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
   }
   let auditBeforeId = null;
   const AUDIT_WORDS = {
-    POST:['Added','#0a8f6a'], PUT:['Changed','#b7791f'], DELETE:['Deleted','#C0264B'], RESTORE:['Restored','#0a8f6a'], SETTING:['Saved settings / list','#b7791f'],
+    POST:['Added','#0a8f6a'], PUT:['Changed','#b7791f'], DELETE:['Deleted','#C0264B'], RESTORE:['Restored','#0a8f6a'], SETTING:['Saved settings / list','#b7791f'], CORRECTION:['Admin correction of a locked entry','#C0264B'],
     LOGIN:['Signed in','#0a8f6a'], LOGIN_FAILED:['Failed sign-in','#C0264B'], LOGIN_BLOCKED:['Sign-in blocked (too many tries)','#C0264B'], LOGOUT:['Signed out','#6b7280'],
     TWOFA_FAILED:['Wrong two-step code','#C0264B'], PASSWORD_CHANGED:['Changed own password','#b7791f'], BACKUP_DOWNLOAD:['Downloaded full backup','#b7791f'], AUDIT_EXPORT:['Downloaded audit trail','#6b7280'],
   };

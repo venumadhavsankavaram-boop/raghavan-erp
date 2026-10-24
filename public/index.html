@@ -1279,6 +1279,7 @@
   /* donut: centre label, hover focus, legend bars */
   .donut-box{position:relative; width:200px; height:200px;}
   .donut-box svg{display:block; overflow:visible;}
+  .at-st:disabled,.att-status-btn:disabled{opacity:.55;cursor:not-allowed;}
   @media (max-width:640px){ .cat-donut-wrap, .overview-ring{margin:0 auto;} .cat-donut-panel, .overview-panel{justify-content:center;} }
   .donut-arc{cursor:pointer; transition:opacity .18s ease, stroke-width .18s ease;}
   .cat-donut-panel.has-focus .donut-arc{opacity:.28;}
@@ -4459,6 +4460,7 @@
             <div class="f-field" id="stfBiometricIdField" style="display:none;"><label>Biometric ID <span style="font-weight:400; color:var(--ink-soft);">— this staff member's user ID on the biometric device</span></label><input type="text" id="stfBiometricId" placeholder="e.g. the device enrollment number"></div>
             <div class="f-field full"><label>Basic Salary (₹) <span style="font-weight:400; color:var(--ink-soft);">— per month; used for EPF/ESI &amp; payroll calculations</span></label><input type="number" min="0" id="stfSalary" placeholder="Optional"></div>
             <div class="f-field full"><label>Class Teacher Of <span style="font-weight:400; color:var(--ink-soft);">— optional, homeroom class &amp; section</span></label><select id="stfClassTeacherOf"><option value="">Not a Class Teacher</option></select></div>
+            <div class="f-field full"><label>Work pattern <span style="font-weight:400; color:var(--ink-soft);">— for part-time staff who work only one session; the other session is then hidden from their attendance and counts as a full day</span></label><select id="stfWorkSession"><option value="Both">Full day (Morning + Afternoon)</option><option value="Morning">Morning session only</option><option value="Afternoon">Afternoon session only</option></select></div>
           </div>
           <label class="admission-toggle" style="justify-content:flex-start; margin:16px 0 4px;">
             <input type="checkbox" id="stfIsSubjectTeacher" onchange="toggleStfSubjectTeacherBox()"> Subject Teacher — teaches specific subjects

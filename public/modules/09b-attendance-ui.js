@@ -25,7 +25,7 @@ function atTally(list){
 
 function atStatusButtons(studentId){
   return AT_STATUSES.map(st => `<button type="button" class="at-st at-st--${st.key.toLowerCase()} ${pendingMarks[studentId] === st.key ? 'active' : ''}"
-      data-status="${st.key}" aria-pressed="${pendingMarks[studentId] === st.key}" title="${st.key}" onclick="setAttStatus('${studentId}','${st.key}')">
+      data-status="${st.key}" aria-pressed="${pendingMarks[studentId] === st.key}" ${attIsLocked(studentId)?'disabled':''} title="${attIsLocked(studentId)?'Marked and locked — only Admin or Principal can change it':st.key}" onclick="setAttStatus('${studentId}','${st.key}')">
       <span aria-hidden="true">${st.icon}</span><em>${st.key}</em></button>`).join('');
 }
 
@@ -85,7 +85,7 @@ function renderAttRoster(body){
           <div class="at-row" data-id="${s.id}">
             <span class="at-roll">${escapeHtml(s.rollNo || '—')}</span>
             ${sfAvatar(s)}
-            <span class="at-name"><b>${escapeHtml(s.firstName)} ${escapeHtml(s.lastName)}</b><small>${escapeHtml(s.admissionNo || '')}</small></span>
+            <span class="at-name"><b>${escapeHtml(s.firstName)} ${escapeHtml(s.lastName)}</b><small>${escapeHtml(s.admissionNo || '')}${attIsLocked(s.id) ? ' · 🔒 locked' : ''}</small></span>
             <div class="at-btns" role="group" aria-label="Status for ${escapeHtml(s.firstName)}">${atStatusButtons(s.id)}</div>
           </div>`).join('')}
         ${list.length === 0 ? `<div class="empty-state"><b>No students here</b></div>` : ''}
@@ -100,6 +100,7 @@ function renderAttRoster(body){
 
 // Marking one student only touches that row and the counters.
 function setAttStatus(studentId, status){
+  if(attIsLocked(studentId)) return;
   pendingMarks[studentId] = status;
   const row = document.querySelector(`.at-row[data-id="${studentId}"]`);
   if(row){
@@ -115,8 +116,9 @@ function setAttStatus(studentId, status){
 }
 
 function markAllStatus(status){
-  atRosterList().forEach(s => { pendingMarks[s.id] = status; });
+  atRosterList().forEach(s => { if(!attIsLocked(s.id)) pendingMarks[s.id] = status; });
   document.querySelectorAll('.at-row').forEach(row => {
+    if(attIsLocked(row.dataset.id)) return;
     row.querySelectorAll('.at-st').forEach(b => {
       const on = b.dataset.status === status;
       b.classList.toggle('active', on);
