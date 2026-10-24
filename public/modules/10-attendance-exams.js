@@ -994,6 +994,7 @@ const ROOMS_KEY = "exam-rooms";
       <div class="breadcrumb" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
         <span><a onclick="backToMarksGrid()">All Classes</a> &nbsp;/&nbsp; ${examCurrentClass} — Section ${examCurrentSection} &nbsp;/&nbsp; ${exam.name}</span>
         ${canEnterMarks ? `<span id="marksAutoSaveStatus" style="font-size:0.78rem; color:var(--ink-soft);"></span>` : ''}
+        ${canEnterMarks && !corrIsApprover() ? `<button class="btn btn-ghost btn-sm" onclick="openMarksCorrectionPicker()" title="A mark was entered wrongly and is now locked">Request mark correction</button>` : ''}
       </div>
       ${upcomingSubjects.length ? `<div style="font-size:0.8rem; padding:9px 12px; border-radius:10px; background:rgba(46,111,158,0.1); margin:6px 0 10px;">🗓 <b>Upcoming papers</b> — marks entry opens on the paper's date: ${upcomingSubjects.map(s => `${escapeHtml(s.name)} <span style="color:var(--ink-soft);">(${marksPrettyDate(s.date)})</span>`).join(' · ')}</div>` : ''}
       ${canEnterMarks ? `<p style="font-size:0.76rem; color:var(--ink-soft); margin:2px 0 10px;">Marks are saved automatically as you type — "Save Marks" is just there to double-check everything looks right.</p>

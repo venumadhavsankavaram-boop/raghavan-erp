@@ -128,7 +128,7 @@ const ATTENDANCE_KEY = "attendance-records";
 
   function switchAttTab(tab){
     attTab = tab;
-    ['mark','reports','holidays','settings','low'].forEach(t => {
+    ['mark','reports','holidays','settings','low','corrections'].forEach(t => {
       document.getElementById('attab-'+t).classList.toggle('active', t===tab);
     });
     document.getElementById('atSearchRow').style.display = (tab==='reports' || tab==='low') ? 'flex' : 'none';
@@ -148,6 +148,7 @@ const ATTENDANCE_KEY = "attendance-records";
     if(attTab === 'holidays') return renderHolidaysTab(body);
     if(attTab === 'settings') return renderAttSettingsTab(body);
     if(attTab === 'low') return renderLowAttendanceTab(body);
+    if(attTab === 'corrections') return renderCorrectionsTab(body);
   }
 
   /* --- Staff Attendance --- */
@@ -309,7 +310,7 @@ const ATTENDANCE_KEY = "attendance-records";
             <td>${st.department||'—'}</td>
             <td>
               <div class="att-status-row">
-                ${['Present','Absent','Late','Leave'].map(s => `<button type="button" class="att-status-btn ${staffPendingMarks[st.id]===s?'active':''}" data-status="${s}" ${staffAttIsLocked(st.id)?'disabled':''} onclick="setStaffAttStatus('${st.id}','${s}')">${s}</button>`).join('')}${staffAttIsLocked(st.id)?' <span title="Marked and locked — only Admin or Principal can change it">🔒</span>':''}
+                ${['Present','Absent','Late','Leave'].map(s => `<button type="button" class="att-status-btn ${staffPendingMarks[st.id]===s?'active':''}" data-status="${s}" ${staffAttIsLocked(st.id)?'disabled':''} onclick="setStaffAttStatus('${st.id}','${s}')">${s}</button>`).join('')}${staffAttIsLocked(st.id)?` <span title="Marked and locked — only Admin or Principal can change it">🔒</span> <a onclick="requestStaffAttCorrection('${st.id}')" style="cursor:pointer;font-size:.74rem;text-decoration:underline;">Request correction</a>`:''}
               </div>
             </td>
           </tr>`).join('')}

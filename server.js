@@ -6010,6 +6010,98 @@ const csvCell = v => {
   if (/^[=+\-@]/.test(t)) t = "'" + t;                       // a cell starting with = + - @ would run as a formula in Excel
   return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
 };
+// ---------- Correction requests ----------
+// A teacher who finds a wrong (locked) attendance entry or mark asks for a correction with a reason;
+// an Admin or Principal approves (the server applies it and writes the audit entry) or rejects it.
+var _corrTableReady = null;
+function ensureCorrectionTable() {
+  if (!_corrTableReady) {
+    _corrTableReady = sql`CREATE TABLE IF NOT EXISTS correction_requests (
+      id VARCHAR(64) PRIMARY KEY, kind VARCHAR(20) NOT NULL, key_json TEXT, label TEXT, old_value TEXT, new_value TEXT, reason TEXT,
+      status VARCHAR(12) NOT NULL DEFAULT 'Pending', requested_by TEXT, requested_by_id VARCHAR(191), requested_role VARCHAR(60),
+      decided_by TEXT, decided_note TEXT, decided_at DATETIME NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_corr_status (status), INDEX idx_corr_by (requested_by_id)
+    )`.catch(err => { _corrTableReady = null; throw err; });
+  }
+  return _corrTableReady;
+}
+const CORR_KINDS = { attendance: 'attendance', 'staff-attendance': 'staff-attendance', marks: 'exam-results' };
+const CORR_STATUSES = ['Present', 'Absent', 'Late', 'Leave'];
+const corrShape = r => ({ id: r.id, kind: r.kind, key: (() => { try { return JSON.parse(r.key_json || '{}'); } catch (_) { return {}; } })(), label: r.label, oldValue: r.old_value, newValue: r.new_value, reason: r.reason, status: r.status, requestedBy: r.requested_by, requestedRole: r.requested_role, decidedBy: r.decided_by, decidedNote: r.decided_note, decidedAt: r.decided_at, createdAt: r.created_at });
+app.all('/api/correction-requests', async (req, res) => {
+  try {
+    const u = req.authUser;
+    if (!u) return res.status(401).json({ error: 'Not logged in.' });
+    if (PARENT_LOGIN_ROLES.includes(u.role)) return res.status(403).json({ error: 'You do not have permission to access this.' });
+    await ensureCorrectionTable();
+    const approver = LOCK_OVERRIDE_ROLES.includes(u.role);
+    if (req.method === 'GET') {
+      const rows = approver
+        ? await sql`SELECT * FROM correction_requests ORDER BY (status = 'Pending') DESC, created_at DESC LIMIT 300`
+        : await sql`SELECT * FROM correction_requests WHERE requested_by_id = ${String(u.id)} ORDER BY created_at DESC LIMIT 100`;
+      return res.status(200).json(rows.map(corrShape));
+    }
+    if (req.method === 'POST') {
+      const b = req.body || {}, resource = CORR_KINDS[b.kind];
+      if (!resource) return res.status(400).json({ error: 'Unknown kind of correction.' });
+      if (!(await checkModuleAccess(req, res, b.kind === 'marks' ? ['exams', 'result'] : ['attendance']))) return;
+      const reason = String(b.reason || '').trim();
+      if (reason.length < 5) return res.status(400).json({ error: 'Please write a short reason (at least 5 characters).' });
+      const key = b.kind === 'attendance' ? { studentId: b.studentId, date: b.date, session: b.session || null }
+        : b.kind === 'staff-attendance' ? { staffId: b.staffId, date: b.date, session: b.session || null }
+        : { examId: b.examId, studentId: b.studentId, subject: b.subject };
+      let newValue = String(b.newValue ?? '').trim();
+      if (b.kind === 'marks') { const n = Number(newValue); if (newValue === '' || !Number.isFinite(n) || n < 0) return res.status(400).json({ error: 'Enter the correct marks as a number.' }); newValue = String(n); }
+      else if (!CORR_STATUSES.includes(newValue)) return res.status(400).json({ error: 'Pick the correct status.' });
+      const existing = await findLockedRow(resource, null, key);
+      if (!existing) return res.status(400).json({ error: 'There is no saved entry to correct here — just enter it normally.' });
+      if (String(existing.val) === newValue || (b.kind === 'marks' && Number(existing.val) === Number(newValue))) return res.status(400).json({ error: 'That is already the saved value.' });
+      const dup = await sql`SELECT id FROM correction_requests WHERE kind = ${b.kind} AND key_json = ${JSON.stringify(key)} AND status = 'Pending' LIMIT 1`;
+      if (dup.length) return res.status(409).json({ error: 'A correction for this entry is already waiting for approval.' });
+      const id = 'corr_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      await sql`INSERT INTO correction_requests (id, kind, key_json, label, old_value, new_value, reason, requested_by, requested_by_id, requested_role)
+        VALUES (${id}, ${b.kind}, ${JSON.stringify(key)}, ${String(b.label || '').slice(0, 300)}, ${String(existing.val ?? '')}, ${newValue}, ${reason.slice(0, 600)}, ${u.name}, ${String(u.id)}, ${u.role})`;
+      auditNote(u.name, u.role, 'NOTE', 'correction-requests', id, 'correction requested: ' + (b.label || b.kind) + ' ' + existing.val + ' -> ' + newValue + ' (' + reason.slice(0, 120) + ')', null);
+      return res.status(201).json({ ok: true, id });
+    }
+    if (req.method === 'PUT') {
+      if (!approver) return res.status(403).json({ error: 'Only an Admin or Principal can approve or reject corrections.' });
+      const id = req.query.id, action = req.query.action, note = String((req.body || {}).note || '').slice(0, 300);
+      const rows = await sql`SELECT * FROM correction_requests WHERE id = ${id}`;
+      if (!rows.length) return res.status(404).json({ error: 'Request not found.' });
+      const r = rows[0];
+      if (r.status !== 'Pending') return res.status(409).json({ error: 'This request was already ' + r.status.toLowerCase() + '.' });
+      if (action === 'reject') {
+        await sql`UPDATE correction_requests SET status = 'Rejected', decided_by = ${u.name}, decided_note = ${note}, decided_at = now() WHERE id = ${id}`;
+        auditNote(u.name, u.role, 'NOTE', 'correction-requests', id, 'correction rejected: ' + (r.label || r.kind) + (note ? ' (' + note + ')' : ''), null);
+        return res.status(200).json({ ok: true });
+      }
+      if (action !== 'approve') return res.status(400).json({ error: 'Unknown action.' });
+      const key = JSON.parse(r.key_json || '{}'), resource = CORR_KINDS[r.kind];
+      const existing = await findLockedRow(resource, null, key);
+      if (!existing) return res.status(409).json({ error: 'The original entry no longer exists.' });
+      if (r.kind === 'attendance') await sql`UPDATE attendance_records SET status = ${r.new_value} WHERE id = ${existing.id}`;
+      else if (r.kind === 'staff-attendance') await sql`UPDATE staff_attendance_records SET status = ${r.new_value} WHERE id = ${existing.id}`;
+      else {
+        const total = Number(r.new_value);
+        const cur = (await sql`SELECT internal_marks FROM exam_results WHERE id = ${existing.id}`)[0] || {};
+        const internal = cur.internal_marks == null ? null : Number(cur.internal_marks);
+        // keep the written/internal split consistent with the corrected total
+        const written = internal == null ? null : (total - internal >= 0 ? total - internal : null);
+        const keepSplit = internal != null && written != null;
+        await sql`UPDATE exam_results SET marks = ${total}, absent = false, written_marks = ${keepSplit ? written : null}, internal_marks = ${keepSplit ? internal : null} WHERE id = ${existing.id}`;
+      }
+      await sql`UPDATE correction_requests SET status = 'Approved', decided_by = ${u.name}, decided_note = ${note}, decided_at = now() WHERE id = ${id}`;
+      auditNote(u.name, u.role, 'CORRECTION', r.kind === 'marks' ? 'exam-results' : r.kind, existing.id, 'approved correction requested by ' + r.requested_by + ': ' + r.old_value + ' -> ' + r.new_value + ' (' + String(r.reason).slice(0, 150) + ')', null);
+      return res.status(200).json({ ok: true });
+    }
+    return res.status(405).json({ error: 'Method not allowed.' });
+  } catch (err) {
+    console.error('correction-requests error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
 app.get('/api/audit-log', async (req, res) => {
   // Admin only — the log names every user and every record they changed.
   if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only an Admin can view the audit log.' });

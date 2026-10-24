@@ -39,6 +39,20 @@ if (r.s === 200 || r.s === 201) {
   assert.equal((await call('PUT', '/api/exam-results', mk(50), ad.ck)).s, 200); ok('Admin can still correct it');
   await call('PUT', '/api/kv/record-lock-policy', { marksGraceHours: 24 }, ad.ck);
 }
+
+// correction requests
+const A2 = 'zz_lock_att2_' + t, k2 = { kind: 'attendance', studentId: 'zz_lock_stu2', date, session: 'Morning' };
+await call('POST', '/api/attendance', { id: A2, studentId: 'zz_lock_stu2', date, session: 'Morning', status: 'Present' }, off.ck);
+r = await call('POST', '/api/correction-requests', { ...k2, newValue: 'Absent', reason: 'x' }, off.ck); assert.equal(r.s, 400); ok('a request needs a real reason');
+r = await call('POST', '/api/correction-requests', { ...k2, newValue: 'Absent', reason: 'Marked present by mistake', label: 'probe' }, off.ck); assert.equal(r.s, 201); const cid = r.d.id; ok('non-admin can ask for a correction');
+assert.equal((await call('POST', '/api/correction-requests', { ...k2, newValue: 'Late', reason: 'second ask' }, off.ck)).s, 409); ok('a second request for the same entry is refused while one is pending');
+r = await call('PUT', '/api/correction-requests?id=' + cid + '&action=approve', {}, off.ck); assert.equal(r.s, 403); ok('non-admin cannot approve');
+r = await call('GET', '/api/correction-requests', null, off.ck); assert.ok(r.d.length === 1 && r.d[0].status === 'Pending'); ok('requester sees only their own');
+assert.equal((await call('PUT', '/api/correction-requests?id=' + cid + '&action=approve', {}, ad.ck)).s, 200); ok('Admin approves');
+r = await call('GET', '/api/attendance', null, ad.ck); assert.equal(r.d.find(x => x.id === A2).status, 'Absent'); ok('the saved value changed');
+r = await call('GET', '/api/audit-log?q=' + A2 + '&limit=10', null, ad.ck); assert.ok(r.d.rows.some(x => x.method === 'CORRECTION' && /Present -> Absent/.test(x.detail))); ok('approval is audited with the reason');
+assert.equal((await call('PUT', '/api/correction-requests?id=' + cid + '&action=reject', {}, ad.ck)).s, 409); ok('a decided request cannot be decided again');
+await call('DELETE', '/api/attendance?id=' + A2, null, ad.ck);
 // cleanup
 await call('DELETE', '/api/roles?id=' + roleId, null, ad.ck);
 for (const [p, id] of [['attendance', A], ['staff-attendance', S], ['exam-results', M]]) await call('DELETE', '/api/' + p + '?id=' + id, null, ad.ck);
