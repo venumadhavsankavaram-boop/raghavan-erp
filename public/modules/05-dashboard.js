@@ -63,43 +63,50 @@ function ringSVG(pct, color, size, stroke, trackColor){
   // trend line with a value label over each point, hover tooltips via
   // native <title>, and an empty-state message if every value is zero.
   function trendChartSVG(points, color){
-    // padL/padR leave room for the centered value-label text at the first
-    // and last points (text-anchor="middle" means half the label's width
-    // sits to either side of its x — too little padding here clips it
-    // against the SVG's own edge).
-    const W = 680, H = 180, padL = 42, padR = 42, padT = 26, padB = 26;
+    const W = 680, H = 220, padL = 46, padR = 22, padT = 28, padB = 28;
     const plotW = W - padL - padR, plotH = H - padT - padB;
-    const max = Math.max(1, ...points.map(p => p.total));
+    const rawMax = Math.max(1, ...points.map(p => p.total));
+    const { max, step } = niceAxisMax(rawMax, 3);
     const n = points.length;
     const stepX = n > 1 ? plotW / (n - 1) : 0;
-    const coords = points.map((p, i) => ({
-      x: padL + stepX * i,
-      y: padT + plotH - (p.total / max) * plotH,
-      ...p,
-    }));
+    const yFor = v => padT + plotH - (v / max) * plotH;
+    const coords = points.map((p, i) => ({ x: padL + stepX * i, y: yFor(p.total), ...p }));
     const allZero = points.every(p => p.total === 0);
-    const linePath = coords.map((c,i) => (i===0 ? 'M' : 'L') + c.x.toFixed(1) + ',' + c.y.toFixed(1)).join(' ');
-    const areaPath = linePath
-      + ` L${coords[coords.length-1].x.toFixed(1)},${(padT+plotH).toFixed(1)}`
-      + ` L${coords[0].x.toFixed(1)},${(padT+plotH).toFixed(1)} Z`;
+    const linePath = smoothLinePath(coords);
+    const base = (padT + plotH).toFixed(1);
+    const areaPath = linePath + ` L${coords[n-1].x.toFixed(1)},${base} L${coords[0].x.toFixed(1)},${base} Z`;
     const gradId = 'trendGrad' + Math.round(Math.random()*1e6);
+    let peak = 0;
+    coords.forEach((c, i) => { if(c.total > coords[peak].total) peak = i; });
+    const grid = [];
+    for(let g = 0; g <= max + 0.001; g += step){
+      const y = yFor(g).toFixed(1);
+      grid.push(`<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--border)" stroke-width="1" ${g === 0 ? '' : 'stroke-dasharray="3 5"'}/>`);
+      grid.push(`<text class="trend-month-label" x="${padL-8}" y="${(+y+3).toFixed(1)}" text-anchor="end">${g === 0 ? '0' : chartMoneyShort(g)}</text>`);
+    }
     return `
-      <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" role="img" aria-label="Monthly fee collection trend">
+      <svg class="trend-svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Monthly fee collection trend">
         <defs>
           <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="${color}" stop-opacity="0.28"/>
-            <stop offset="100%" stop-color="${color}" stop-opacity="0.02"/>
+            <stop offset="0%" stop-color="${color}" stop-opacity="0.30"/>
+            <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
           </linearGradient>
         </defs>
-        ${allZero ? '' : `<path d="${areaPath}" fill="url(#${gradId})" stroke="none"/>`}
-        ${allZero ? '' : `<path d="${linePath}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`}
-        ${coords.map(c => `
-          <circle class="trend-dot" cx="${c.x.toFixed(1)}" cy="${allZero ? (padT+plotH) : c.y.toFixed(1)}" r="4" fill="${color}" stroke="var(--white)" stroke-width="2">
-            <title>${c.label}: ${fmtMoney(c.total)}</title>
-          </circle>
-          <text class="trend-value-label" x="${c.x.toFixed(1)}" y="${(allZero ? (padT+plotH) : c.y) - 12}" text-anchor="middle">${c.total > 0 ? fmtMoney(c.total) : ''}</text>
-          <text class="trend-month-label" x="${c.x.toFixed(1)}" y="${H - 6}" text-anchor="middle">${c.label}</text>
-        `).join('')}
+        ${grid.join('')}
+        ${allZero ? '' : `<path class="trend-area" d="${areaPath}" fill="url(#${gradId})" stroke="none"/>`}
+        ${allZero ? '' : `<path class="trend-line" pathLength="1" d="${linePath}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`}
+        ${coords.map((c, i) => {
+          const always = !allZero && c.total > 0 && (i === n - 1 || i === peak);
+          const cy = allZero ? (padT + plotH) : c.y;
+          return `
+          <g class="trend-pt${always ? ' show' : ''}">
+            <circle class="trend-hit" cx="${c.x.toFixed(1)}" cy="${cy.toFixed(1)}" r="16" fill="transparent"><title>${c.label}: ${fmtMoney(c.total)}</title></circle>
+            ${i === n - 1 && !allZero ? `<circle cx="${c.x.toFixed(1)}" cy="${cy.toFixed(1)}" r="9" fill="${color}" opacity="0.18"/>` : ''}
+            <circle class="trend-dot" cx="${c.x.toFixed(1)}" cy="${cy.toFixed(1)}" r="${i === n - 1 ? 5 : 4}" fill="${color}" stroke="var(--white)" stroke-width="2"></circle>
+            <text class="trend-value-label" x="${c.x.toFixed(1)}" y="${cy - 14}" text-anchor="middle">${c.total > 0 ? chartMoneyShort(c.total) : ''}</text>
+          </g>
+          <text class="trend-month-label${i === n - 1 ? ' now' : ''}" x="${c.x.toFixed(1)}" y="${H - 8}" text-anchor="middle">${c.label}</text>`;
+        }).join('')}
       </svg>
     `;
   }
@@ -151,33 +158,122 @@ function ringSVG(pct, color, size, stroke, trackColor){
   // own fixed color — see CAT_COLORS). A thin surface-colored gap separates
   // adjacent slices, and each slice carries a native <title> tooltip.
   function donutChartSVG(segments, size, stroke){
-    size = size || 176; stroke = stroke || 30;
+    size = size || 200; stroke = stroke || 26;
     const r = (size - stroke) / 2;
     const c = 2 * Math.PI * r;
     const total = segments.reduce((s,seg) => s + Math.max(0, seg.value), 0);
-    const gapPx = 3;
+    const centreDefault = `<b>${chartMoneyShort(total)}</b><span>collected</span>`;
     if(total <= 0){
-      return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-        <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--cream)" stroke-width="${stroke}"/>
-      </svg>`;
+      return `<div class="donut-box"><svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="No collections yet">
+        <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--soft-fill-2, var(--cream))" stroke-width="${stroke}"/>
+      </svg><div class="donut-centre"><b>₹0</b><span>collected</span></div></div>`;
     }
+    const gapPx = 5;
     let running = 0;
-    const arcs = segments.filter(seg => seg.value > 0).map(seg => {
+    const visible = segments.map((seg, i) => ({ ...seg, i })).filter(seg => seg.value > 0);
+    const arcs = visible.map(seg => {
       const segLen = (seg.value / total) * c;
-      const dash = Math.max(0, segLen - gapPx);
+      const dash = Math.max(1, segLen - gapPx);
       const dashOffset = -(running + gapPx/2);
       running += segLen;
-      return `<circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${seg.color}" stroke-width="${stroke}"
+      const pct = Math.round((seg.value / total) * 100);
+      return `<circle class="donut-arc" data-di="${seg.i}" data-name="${seg.label}" data-short="${chartMoneyShort(seg.value)}" data-pct="${pct}"
+        onmouseenter="donutFocus(${seg.i})" onmouseleave="donutBlur()"
+        cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${seg.color}" stroke-width="${stroke}"
         stroke-dasharray="${dash.toFixed(2)} ${(c-dash).toFixed(2)}" stroke-dashoffset="${dashOffset.toFixed(2)}" stroke-linecap="butt">
-        <title>${seg.label}: ${fmtMoney(seg.value)} (${Math.round((seg.value/total)*100)}%)</title>
+        <title>${seg.label}: ${fmtMoney(seg.value)} (${pct}%)</title>
       </circle>`;
     }).join('');
     return `
-      <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="transform:rotate(-90deg);" role="img" aria-label="Collected amount by category">
-        <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--cream)" stroke-width="${stroke}"/>
-        ${arcs}
-      </svg>
+      <div class="donut-box">
+        <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="transform:rotate(-90deg);" role="img" aria-label="Collected amount by category">
+          <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--soft-fill-2, var(--cream))" stroke-width="${stroke}"/>
+          ${arcs}
+        </svg>
+        <div class="donut-centre" data-default="${centreDefault.replace(/"/g, '&quot;')}">${centreDefault}</div>
+      </div>
     `;
+  }
+
+  // ---- Chart helpers (Oct 2026 refresh) --------------------------------
+  // Short rupee amounts for chart labels: ₹1.25 Cr, ₹4.8 L, ₹32K. The full
+  // figure is always available in the hover tooltip and the cards/tables.
+  function chartMoneyShort(n){
+    n = Number(n) || 0;
+    const a = Math.abs(n);
+    const t = (v, d) => String(parseFloat(v.toFixed(d)));
+    if(a >= 1e7) return '₹' + t(n / 1e7, 2) + ' Cr';
+    if(a >= 1e5) return '₹' + t(n / 1e5, 2) + ' L';
+    if(a >= 1e3) return '₹' + t(n / 1e3, 1) + 'K';
+    return '₹' + Math.round(n);
+  }
+
+  // Smooth line through the points without overshooting (monotone cubic),
+  // so a quiet month never makes the curve dip below its real value.
+  function smoothLinePath(pts){
+    const n = pts.length;
+    if(n === 0) return '';
+    if(n === 1) return 'M' + pts[0].x.toFixed(1) + ',' + pts[0].y.toFixed(1);
+    const dx = [], m = [], t = new Array(n);
+    for(let i = 0; i < n - 1; i++){
+      dx[i] = pts[i+1].x - pts[i].x;
+      m[i] = dx[i] ? (pts[i+1].y - pts[i].y) / dx[i] : 0;
+    }
+    t[0] = m[0]; t[n-1] = m[n-2];
+    for(let i = 1; i < n - 1; i++) t[i] = (m[i-1] * m[i] <= 0) ? 0 : (m[i-1] + m[i]) / 2;
+    for(let i = 0; i < n - 1; i++){
+      if(m[i] === 0){ t[i] = 0; t[i+1] = 0; continue; }
+      const a = t[i] / m[i], b = t[i+1] / m[i], s = a*a + b*b;
+      if(s > 9){ const k = 3 / Math.sqrt(s); t[i] = k * a * m[i]; t[i+1] = k * b * m[i]; }
+    }
+    let d = 'M' + pts[0].x.toFixed(1) + ',' + pts[0].y.toFixed(1);
+    for(let i = 0; i < n - 1; i++){
+      const h = dx[i] / 3;
+      d += ' C' + (pts[i].x + h).toFixed(1) + ',' + (pts[i].y + t[i] * h).toFixed(1)
+         + ' ' + (pts[i+1].x - h).toFixed(1) + ',' + (pts[i+1].y - t[i+1] * h).toFixed(1)
+         + ' ' + pts[i+1].x.toFixed(1) + ',' + pts[i+1].y.toFixed(1);
+    }
+    return d;
+  }
+
+  // Ring with a soft gradient and a rounded end, used for the collection %.
+  function ringGradSVG(pct, color, size, stroke){
+    size = size || 148; stroke = stroke || 14;
+    const r = (size - stroke) / 2, c = 2 * Math.PI * r;
+    const clamped = Math.max(0, Math.min(100, Number(pct) || 0));
+    const dash = (clamped / 100) * c;
+    const gid = 'ringGrad' + Math.round(Math.random() * 1e6);
+    return `
+      <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="transform:rotate(-90deg);" role="img" aria-label="${clamped}% collected">
+        <defs><linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="${color}"/><stop offset="100%" stop-color="${color}" stop-opacity="0.55"/>
+        </linearGradient></defs>
+        <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--soft-fill-2, var(--cream))" stroke-width="${stroke}"/>
+        ${clamped > 0 ? `<circle class="ring-arc" cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="url(#${gid})" stroke-width="${stroke}"
+          stroke-dasharray="${dash.toFixed(2)} ${c.toFixed(2)}" stroke-linecap="round" style="--ring-len:${dash.toFixed(2)}"/>` : ''}
+      </svg>`;
+  }
+
+  // Hover a slice or a legend row: that slice stays bright, the rest dim,
+  // and the middle of the donut shows that slice's name, amount and share.
+  function donutFocus(i){
+    const panel = document.querySelector('.cat-donut-panel');
+    if(!panel) return;
+    panel.classList.add('has-focus');
+    panel.querySelectorAll('[data-di]').forEach(el => el.classList.toggle('on', el.getAttribute('data-di') === String(i)));
+    const arc = panel.querySelector('.donut-arc[data-di="' + i + '"]');
+    const c = panel.querySelector('.donut-centre');
+    if(arc && c){
+      c.innerHTML = '<b>' + arc.getAttribute('data-short') + '</b><span>' + arc.getAttribute('data-name') + ' · ' + arc.getAttribute('data-pct') + '%</span>';
+    }
+  }
+  function donutBlur(){
+    const panel = document.querySelector('.cat-donut-panel');
+    if(!panel) return;
+    panel.classList.remove('has-focus');
+    panel.querySelectorAll('[data-di].on').forEach(el => el.classList.remove('on'));
+    const c = panel.querySelector('.donut-centre');
+    if(c) c.innerHTML = c.getAttribute('data-default') || '';
   }
 
   // Rounds an axis max up to a clean human step (1/2/2.5/5/10 ×10^n) so
@@ -242,45 +338,70 @@ function ringSVG(pct, color, size, stroke, trackColor){
   // plotting a false zero. Colors are pre-validated (see dataviz palette
   // check run earlier this session) for contrast on both card surfaces.
   function attendanceTrendSVG(points, colorStudents, colorStaff){
-    const W = 680, H = 200, padL = 38, padR = 20, padT = 16, padB = 26;
+    const W = 680, H = 230, padL = 42, padR = 22, padT = 18, padB = 28;
     const plotW = W - padL - padR, plotH = H - padT - padB;
-    const { max, step } = niceAxisMax(100, 4); // fixed 0–100% axis, clean 25% steps
+    const vals = [];
+    points.forEach(p => { if(p.students != null) vals.push(p.students); if(p.staff != null) vals.push(p.staff); });
+    const hasAny = vals.length > 0;
+    // Zoom the axis to where the data lives (a school at 88-97% would
+    // otherwise be a flat line near the top); never below 0, never above 100.
+    let lo = 0;
+    if(hasAny){
+      const mn = Math.min(...vals);
+      lo = mn >= 40 ? Math.max(0, Math.floor((mn - 5) / 10) * 10) : 0;
+    }
+    const range = 100 - lo;
+    const tickStep = range > 60 ? 25 : (range > 50 ? 20 : 10);
     const n = points.length;
     const stepX = n > 1 ? plotW / (n - 1) : 0;
-    const yFor = v => padT + plotH - (v / max) * plotH;
-    const hasAny = points.some(p => p.students != null || p.staff != null);
-    function seriesPath(key){
-      let d = '', open = false;
+    const yFor = v => padT + plotH - ((v - lo) / range) * plotH;
+    // Break the line wherever a month has no marked attendance (never a fake zero).
+    function segments(key){
+      const out = []; let cur = [];
       points.forEach((p, i) => {
-        const x = padL + stepX * i, v = p[key];
-        if(v == null){ open = false; return; }
-        d += (open ? 'L' : 'M') + x.toFixed(1) + ',' + yFor(v).toFixed(1) + ' ';
-        open = true;
+        if(p[key] == null){ if(cur.length) out.push(cur); cur = []; return; }
+        cur.push({ x: padL + stepX * i, y: yFor(p[key]) });
       });
-      return d.trim();
+      if(cur.length) out.push(cur);
+      return out;
     }
     const gridLines = [];
-    for(let g = 0; g <= max; g += step){
+    for(let g = lo; g <= 100; g += tickStep){
       const y = yFor(g);
-      gridLines.push(`<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="var(--border)" stroke-width="1"/>`);
+      gridLines.push(`<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="var(--border)" stroke-width="1" ${g === lo ? '' : 'stroke-dasharray="3 5"'}/>`);
       gridLines.push(`<text class="trend-month-label" x="${padL-8}" y="${(y+3).toFixed(1)}" text-anchor="end">${g}%</text>`);
     }
+    const gid = 'attGrad' + Math.round(Math.random()*1e6);
+    const base = (padT + plotH).toFixed(1);
+    const stuSegs = segments('students'), staffSegs = segments('staff');
+    const stuLine = stuSegs.map(s => smoothLinePath(s)).join(' ');
+    const stuArea = stuSegs.filter(s => s.length > 1).map(s => smoothLinePath(s) + ` L${s[s.length-1].x.toFixed(1)},${base} L${s[0].x.toFixed(1)},${base} Z`).join(' ');
+    const staffLine = staffSegs.map(s => smoothLinePath(s)).join(' ');
     function dots(key, color){
       return points.map((p,i) => {
         const v = p[key];
         if(v == null) return '';
-        const x = padL + stepX * i;
-        return `<circle class="trend-dot" cx="${x.toFixed(1)}" cy="${yFor(v).toFixed(1)}" r="4" fill="${color}" stroke="var(--white)" stroke-width="2"><title>${p.label} — ${key === 'students' ? 'Students' : 'Staff'}: ${v}%</title></circle>`;
+        const x = padL + stepX * i, y = yFor(v);
+        const last = i === n - 1 || points.slice(i + 1).every(q => q[key] == null);
+        return `<g class="trend-pt${last ? ' show' : ''}">
+          <circle class="trend-hit" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="14" fill="transparent"><title>${p.label} — ${key === 'students' ? 'Students' : 'Staff'}: ${v}%</title></circle>
+          <circle class="trend-dot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4" fill="${color}" stroke="var(--white)" stroke-width="2"></circle>
+          <text class="trend-value-label" x="${x.toFixed(1)}" y="${(y + (key === 'students' ? -12 : 18)).toFixed(1)}" text-anchor="middle">${v}%</text>
+        </g>`;
       }).join('');
     }
     return `
-      <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" role="img" aria-label="Monthly attendance trend, students and staff">
+      <svg class="trend-svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Monthly attendance trend, students and staff">
+        <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${colorStudents}" stop-opacity="0.24"/><stop offset="100%" stop-color="${colorStudents}" stop-opacity="0"/>
+        </linearGradient></defs>
         ${gridLines.join('')}
-        ${hasAny ? `<path d="${seriesPath('students')}" fill="none" stroke="${colorStudents}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
-        ${hasAny ? `<path d="${seriesPath('staff')}" fill="none" stroke="${colorStaff}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="1,5"/>` : ''}
+        ${hasAny && stuArea ? `<path class="trend-area" d="${stuArea}" fill="url(#${gid})" stroke="none"/>` : ''}
+        ${hasAny ? `<path class="trend-line" pathLength="1" d="${stuLine}" fill="none" stroke="${colorStudents}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
+        ${hasAny ? `<path d="${staffLine}" fill="none" stroke="${colorStaff}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="1 6"/>` : ''}
         ${dots('students', colorStudents)}
         ${dots('staff', colorStaff)}
-        ${points.map((p,i) => `<text class="trend-month-label" x="${(padL + stepX*i).toFixed(1)}" y="${H-6}" text-anchor="middle">${p.label}</text>`).join('')}
+        ${points.map((p,i) => `<text class="trend-month-label${i === n - 1 ? ' now' : ''}" x="${(padL + stepX*i).toFixed(1)}" y="${H-8}" text-anchor="middle">${p.label}</text>`).join('')}
       </svg>
     `;
   }
@@ -359,6 +480,10 @@ function ringSVG(pct, color, size, stroke, trackColor){
     const feeTrendPrev = feeTrend[feeTrend.length - 2] ? feeTrend[feeTrend.length - 2].total : 0;
     const feeTrendLast = feeTrend[feeTrend.length - 1] ? feeTrend[feeTrend.length - 1].total : 0;
     const feeTrendDeltaPct = feeTrendPrev > 0 ? Math.round(((feeTrendLast - feeTrendPrev) / feeTrendPrev) * 100) : null;
+
+    // Share of (collected + receivable + discount) for the stacked bar and legend.
+    const ovTotal = totals.collected + totals.receivable + totals.discount;
+    const ovPct = v => ovTotal > 0 ? Math.round((v / ovTotal) * 100) : 0;
 
     const attTrend = monthlyAttendanceTrend(6);
     const attHasData = attTrend.some(m => m.students != null || m.staff != null);
@@ -534,13 +659,16 @@ function ringSVG(pct, color, size, stroke, trackColor){
       </div>
       <div class="overview-panel">
         <div class="overview-ring">
-          ${ringSVG(totals.pct, 'var(--teal)', 132, 13)}
+          ${ringGradSVG(totals.pct, 'var(--teal)', 148, 15)}
           <div class="overview-ring-label"><b>${totals.pct}%</b><span>Collected</span></div>
         </div>
         <div class="overview-legend">
-          <div class="ov-row"><span class="ov-swatch" style="background:var(--teal);"></span>Collected<b>${fmtMoney(totals.collected)}</b></div>
-          <div class="ov-row"><span class="ov-swatch" style="background:var(--magenta);"></span>Receivable<b>${fmtMoney(totals.receivable)}</b></div>
-          <div class="ov-row"><span class="ov-swatch" style="background:var(--brand-navy);"></span>Discount Allowed<b>${fmtMoney(totals.discount)}</b></div>
+          <div class="stack-bar" role="img" aria-label="Collected ${ovPct(totals.collected)}%, receivable ${ovPct(totals.receivable)}%, discount ${ovPct(totals.discount)}% of the total">
+            <i style="width:${ovPct(totals.collected)}%; background:var(--teal);"></i><i style="width:${ovPct(totals.receivable)}%; background:var(--magenta);"></i><i style="width:${ovPct(totals.discount)}%; background:var(--brand-navy, var(--navy));"></i>
+          </div>
+          <div class="ov-row"><span class="ov-swatch" style="background:var(--teal);"></span>Collected<b>${fmtMoney(totals.collected)}<span class="ov-share">${ovPct(totals.collected)}%</span></b></div>
+          <div class="ov-row"><span class="ov-swatch" style="background:var(--magenta);"></span>Receivable<b>${fmtMoney(totals.receivable)}<span class="ov-share">${ovPct(totals.receivable)}%</span></b></div>
+          <div class="ov-row"><span class="ov-swatch" style="background:var(--brand-navy, var(--navy));"></span>Discount Allowed<b>${fmtMoney(totals.discount)}<span class="ov-share">${ovPct(totals.discount)}%</span></b></div>
           <div class="ov-row total"><span class="ov-swatch" style="background:var(--gold);"></span>Total Expected<b>${fmtMoney(totals.expected)}</b></div>
         </div>
       </div>
@@ -552,11 +680,14 @@ function ringSVG(pct, color, size, stroke, trackColor){
         <div class="cat-donut-wrap">${donutChartSVG(Object.keys(CATS).map(c => ({ label: CATS[c], value: catChartCollected(c), color: CAT_COLORS[c] })))}</div>
         <div class="cat-donut-legend">
           <div class="cat-donut-legend-title">Collected, by Category</div>
-          ${Object.keys(CATS).map(c => {
+          ${Object.keys(CATS).map((c, idx) => {
             const sharePct = chartTotalCollected > 0 ? Math.round((catChartCollected(c) / chartTotalCollected) * 100) : 0;
-            return `<div class="ov-row"><span class="ov-swatch" style="background:${CAT_COLORS[c]};"></span>${CATS[c]}<b>${fmtMoney(catChartCollected(c))}<span style="color:var(--ink-soft); font-weight:500; margin-left:6px;">${sharePct}%</span></b></div>`;
+            return `<div class="cd-item" data-di="${idx}" onmouseenter="donutFocus(${idx})" onmouseleave="donutBlur()">
+              <span class="ov-swatch" style="background:${CAT_COLORS[c]};"></span><span class="cd-name">${CATS[c]}</span><b>${fmtMoney(catChartCollected(c))}</b><span class="cd-pct">${sharePct}%</span>
+              <span class="cd-bar"><i style="width:${sharePct}%; background:${CAT_COLORS[c]};"></i></span>
+            </div>`;
           }).join('')}
-          <div style="font-size:0.72rem; color:var(--ink-soft); margin-top:8px;">Stock includes Inventory Sales collections</div>
+          <div style="font-size:0.72rem; color:var(--ink-soft); margin-top:2px;">Stock includes Inventory Sales collections</div>
         </div>
       </div>
       <div class="cat-grid">
@@ -597,6 +728,12 @@ function ringSVG(pct, color, size, stroke, trackColor){
         </div>
         <div class="demo-card">
           <h4>Gender &amp; Section Split</h4>
+          ${(genderCounts.Male + genderCounts.Female) > 0 ? (() => {
+            const gt = genderCounts.Male + genderCounts.Female;
+            const bp = Math.round((genderCounts.Male / gt) * 100), gp = 100 - bp;
+            return `<div class="gender-bar" role="img" aria-label="Boys ${bp}%, Girls ${gp}%"><i style="width:${bp}%; background:var(--gold);"></i><i style="width:${gp}%; background:var(--magenta);"></i></div>
+            <div class="gender-bar-legend"><span><i style="background:var(--gold);"></i>Boys ${bp}%</span><span><i style="background:var(--magenta);"></i>Girls ${gp}%</span></div>`;
+          })() : ''}
           <div class="split-row">
             <div class="split-box"><b>${genderCounts.Male}</b><span>Boys</span></div>
             <div class="split-box"><b>${genderCounts.Female}</b><span>Girls</span></div>
