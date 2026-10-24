@@ -224,8 +224,15 @@ async function renderCorrectionsTab(body){
 }
 async function decideCorrection(id, action){
   let note = '';
-  if(action === 'reject'){ note = prompt('Why is it rejected? (optional)') || ''; }
-  else if(!confirm('Approve this correction? The saved value will be changed and logged.')) return;
+  // The app's own dialogs (not the browser's confirm/prompt, which some browsers block silently).
+  if(action === 'reject'){
+    const n = await showPromptDialog('Why is this correction rejected? (optional)', { title:'Reject correction', okText:'Reject', placeholder:'e.g. Please check the register again' });
+    if(n === null) return;
+    note = n;
+  }else{
+    const ok = await showConfirmDialog('The saved value will be changed and the change is logged with the reason.', { title:'Approve this correction?', okText:'Approve', cancelText:'Cancel' });
+    if(!ok) return;
+  }
   try{
     const res = await fetch('/api/correction-requests?id=' + encodeURIComponent(id) + '&action=' + action, { method:'PUT', headers:{'Content-Type':'application/json', ...actorHeaders()}, body: JSON.stringify({ note }) });
     await throwIfNotOk(res);
