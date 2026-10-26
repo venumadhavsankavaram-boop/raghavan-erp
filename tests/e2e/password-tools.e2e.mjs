@@ -36,7 +36,14 @@ const back = await call('POST', '/api/account/stop-viewing-as', {}, va.ck); asse
 r = await call('GET', '/api/me', null, back.ck); assert.equal(r.d.role, 'Admin'); assert.ok(!r.d.impersonating); ok('Exit returns to the Admin account without signing in again');
 r = await call('GET', '/api/audit-log?q=IMPERSONATE&limit=20', null, back.ck); assert.ok(r.d.rows.some(x => x.method === 'IMPERSONATE_START') && r.d.rows.some(x => x.method === 'IMPERSONATE_END')); ok('start and end are audited');
 r = await call('POST', '/api/account/stop-viewing-as', {}, back.ck); assert.equal(r.s, 400); ok('Exit does nothing when not viewing as someone');
-let ad2 = back;
+// viewing as someone whose password was just reset must not trap the Admin in the forced-change screen
+r = await call('POST', '/api/admin/users/reset-password', { userId: 'u_demo_teacher' }, back.ck); assert.equal(r.s, 200);
+const va2 = await call('POST', '/api/admin/users/impersonate', { userId: 'u_demo_teacher' }, back.ck); assert.equal(va2.s, 200);
+r = await call('GET', '/api/me', null, va2.ck); assert.equal(r.d.mustChangePassword, false); assert.ok(r.d.impersonating); ok('viewing as a just-reset user does not show the forced-change screen');
+r = await call('GET', '/api/students', null, va2.ck); assert.equal(r.s, 200); ok('and the app data loads normally');
+const back2 = await call('POST', '/api/account/stop-viewing-as', {}, va2.ck); assert.equal(back2.s, 200);
+
+let ad2 = back2;
 
 // ---- reset requests ----
 const ipx = '9.9.9.' + (Date.now() % 200);

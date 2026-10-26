@@ -591,7 +591,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
       currentUser = u;
       moduleAccess = u.moduleAccess || { restricted: false, enabledKeys: [] };
       sessionStorage.setItem('rgv_current_user', u.id);
-      if(u.mustChangePassword){ await showForcedPasswordChange(); location.reload(); return; }
+      if(u.mustChangePassword && !u.impersonating){ await showForcedPasswordChange(); location.reload(); return; }
       loginLoaderStart('Restoring your session…', 0);
       loginLoaderStage('Loading students, fees and records…', 0, true);
       try{ await loadAllAppData(); } finally { loginLoaderStop(); }

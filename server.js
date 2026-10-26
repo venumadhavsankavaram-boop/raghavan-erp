@@ -5943,7 +5943,7 @@ app.get('/api/me', async (req, res) => {
     const shaped = simpleToAppShape(rows[0], SIMPLE_RESOURCES.users.fields);
     delete shaped.password;
     shaped.moduleAccess = getModuleAccess();
-    shaped.mustChangePassword = !!Number(rows[0].must_change_password || 0);
+    shaped.mustChangePassword = !req.authUser.impersonatedBy && !!Number(rows[0].must_change_password || 0);
     if (req.authUser.impersonatedBy) {
       const a = await sql`SELECT name FROM users WHERE id = ${req.authUser.impersonatedBy}`.catch(() => []);
       shaped.impersonating = { byId: req.authUser.impersonatedBy, byName: a.length ? a[0].name : 'Admin' };
