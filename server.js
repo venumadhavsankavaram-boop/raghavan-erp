@@ -295,6 +295,7 @@ async function ensureSchema() {
   await addColumnIfMissing('users', 'twofa_email VARCHAR(191)');
   await addColumnIfMissing('users', 'twofa_recovery TEXT');
   await addColumnIfMissing('users', 'twofa_last_step BIGINT');
+  await addColumnIfMissing('users', 'must_change_password TINYINT DEFAULT 0');
   // A user's own "My Account" profile photo (base64 data URL, capped at 2MB
   // client-side — see PHOTO_UPLOAD_MAX_BYTES in index.html, well under this
   // server's 25mb JSON body limit). This column didn't exist before, so the
@@ -736,6 +737,12 @@ async function ensureSchema() {
     last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at DATETIME NOT NULL
   )`;
+  await addColumnIfMissing('sessions', 'must_change TINYINT DEFAULT 0');
+  await addColumnIfMissing('sessions', 'impersonated_by VARCHAR(191)');
+  await sql`CREATE TABLE IF NOT EXISTS password_reset_requests (
+    id VARCHAR(64) PRIMARY KEY, user_id VARCHAR(191), username VARCHAR(191), status VARCHAR(16) DEFAULT 'pending',
+    ip VARCHAR(64), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, resolved_at DATETIME NULL
+  )`;
 
   // One row per browser/device a Parent or Student login has granted Web
   // Push permission on (a login can have several — phone + laptop, say).
@@ -1125,8 +1132,8 @@ async function createSession(req, res, user) {
   const token = crypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + SESSION_IDLE_MS);
   await sql`
-    INSERT INTO sessions (id, user_id, role, name, expires_at)
-    VALUES (${hashSessionToken(token)}, ${user.id}, ${user.role}, ${user.name}, ${expiresAt.toISOString()})
+    INSERT INTO sessions (id, user_id, role, name, expires_at, must_change)
+    VALUES (${hashSessionToken(token)}, ${user.id}, ${user.role}, ${user.name}, ${expiresAt.toISOString()}, ${user.must_change_password ? 1 : 0})
   `;
   const secureFlag = isHttpsRequest(req) ? '; Secure' : '';
   res.setHeader('Set-Cookie', `sid=${token}; HttpOnly${secureFlag}; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_ABSOLUTE_MAX_MS / 1000)}`);
@@ -1153,6 +1160,7 @@ const PUBLIC_API_ROUTES = [
   { path: '/api/login', methods: ['POST'] },
   { path: '/api/login/2fa', methods: ['POST'] },
   { path: '/api/login/2fa/email', methods: ['POST'] },
+  { path: '/api/password-reset-request', methods: ['POST'] },
   { path: '/api/demo-info', methods: ['GET'] },
   { path: '/api/logout', methods: ['POST'] },
   { path: '/api/vendor-support-login', methods: ['GET'] },
@@ -1204,7 +1212,15 @@ app.use(async (req, res, next) => {
     // fire-and-forget so a slow write here never delays the actual request.
     const newExpires = new Date(Math.min(now + SESSION_IDLE_MS, createdAt + SESSION_ABSOLUTE_MAX_MS));
     sql`UPDATE sessions SET expires_at = ${newExpires.toISOString()}, last_seen_at = now() WHERE id = ${idHash}`.catch(() => {});
-    req.authUser = { id: session.user_id, role: session.role, name: session.name };
+    req.authUser = { id: session.user_id, role: session.role, name: session.name, impersonatedBy: session.impersonated_by || null };
+    // After an Admin reset, the user must choose their own password before anything else works.
+    if (session.must_change && !['/api/me', '/api/logout', '/api/account/password'].includes(req.path)) {
+      return res.status(403).json({ error: 'Please set a new password first.', code: 'MUST_CHANGE_PASSWORD' });
+    }
+    // While an Admin is viewing as someone else, account/security changes are off limits.
+    if (session.impersonated_by && (req.path === '/api/account/password' || req.path.startsWith('/api/account/2fa') || req.path.startsWith('/api/admin/users/'))) {
+      return res.status(403).json({ error: 'Not available while viewing as another user. Exit that view first.' });
+    }
     next();
   } catch (err) {
     console.error('auth check error:', err);
@@ -4783,6 +4799,7 @@ async function completeLogin(req, res, user) {
   // instead of role-driven. See checkPlanModuleAccess above for enforcement.
   shaped.moduleAccess = getModuleAccess();
   shaped.twofaEnabled = !!user.twofa_method;
+  shaped.mustChangePassword = !!Number(user.must_change_password || 0);
   await createSession(req, res, user);
   auditNote(user.name, user.role, 'LOGIN', 'sign-in', user.id, user.twofa_method ? 'with two-step code' : null, clientIp(req));
   return res.status(200).json(shaped);
@@ -5017,8 +5034,10 @@ app.post('/api/account/password', async (req, res) => {
     if (!rows.length) return res.status(401).json({ error: 'Account no longer exists.' });
     const ok = await bcrypt.compare(current, rows[0].password || '');
     if (!ok) return res.status(400).json({ error: 'Current password is incorrect.' });
+    if (next === current) return res.status(400).json({ error: 'Choose a new password that is different from the current one.' });
     const hash = await bcrypt.hash(next, 10);
-    await sql`UPDATE users SET password = ${hash} WHERE id = ${req.authUser.id}`;
+    await sql`UPDATE users SET password = ${hash}, must_change_password = 0 WHERE id = ${req.authUser.id}`;
+    await sql`UPDATE sessions SET must_change = 0 WHERE user_id = ${req.authUser.id}`.catch(() => {});
     // Anyone else signed in with the old password (another device, a stolen session) is signed out; this device stays in.
     const mine = parseCookies(req).sid ? hashSessionToken(parseCookies(req).sid) : '';
     await sql`DELETE FROM sessions WHERE user_id = ${req.authUser.id} AND id <> ${mine}`.catch(() => {});
@@ -5026,6 +5045,137 @@ app.post('/api/account/password', async (req, res) => {
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('account password error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+
+// ---------- Admin password tools, "log in as", and reset requests ----------
+// Passwords are one-way hashes, so nobody (Admin included) can read one back. Instead the Admin can set a
+// temporary password (the user must replace it at next sign-in) or open the account to help directly.
+function requireRealAdmin(req, res, allowVendorSupport) {
+  if (!req.authUser || req.authUser.role !== 'Admin' || (req.authUser.id === 'vendor-support' && !allowVendorSupport) || req.authUser.impersonatedBy) {
+    res.status(403).json({ error: 'Only the Admin can do this.' });
+    return false;
+  }
+  return true;
+}
+function makeTempPassword() {
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz', digits = '23456789';
+  const pick = (set) => set[crypto.randomInt(set.length)];
+  let out = '';
+  for (let i = 0; i < 6; i++) out += pick(letters);
+  out += pick(digits) + pick(digits);
+  return out;
+}
+app.post('/api/admin/users/reset-password', async (req, res) => {
+  try {
+    // A Vendor Support session may also do this, so a school that has lost its only Admin password can be recovered.
+    if (!requireRealAdmin(req, res, true)) return;
+    const { userId, newPassword } = req.body || {};
+    const rows = await sql`SELECT * FROM users WHERE id = ${String(userId || '')} AND deleted_at IS NULL`;
+    if (!rows.length) return res.status(404).json({ error: 'User not found.' });
+    const target = rows[0];
+    if (target.id === req.authUser.id) return res.status(400).json({ error: 'Use My Account to change your own password.' });
+    const temp = String(newPassword || '').trim() || makeTempPassword();
+    const problem = passwordProblem(temp, target.role);
+    if (problem) return res.status(400).json({ error: problem });
+    const hash = await bcrypt.hash(temp, 10);
+    await sql`UPDATE users SET password = ${hash}, must_change_password = 1 WHERE id = ${target.id}`;
+    await sql`DELETE FROM sessions WHERE user_id = ${target.id}`.catch(() => {});
+    await sql`UPDATE password_reset_requests SET status = 'done', resolved_at = now() WHERE user_id = ${target.id} AND status = 'pending'`.catch(() => {});
+    auditNote(req.authUser.name, req.authUser.role, 'PASSWORD_RESET', 'users', target.id, `temporary password set for ${target.username} (${target.role}); user must change it at next sign-in`, clientIp(req));
+    return res.status(200).json({ ok: true, tempPassword: temp, username: target.username });
+  } catch (err) {
+    console.error('admin reset password error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+app.post('/api/admin/users/impersonate', async (req, res) => {
+  try {
+    if (!requireRealAdmin(req, res)) return;
+    const rows = await sql`SELECT * FROM users WHERE id = ${String((req.body && req.body.userId) || '')} AND deleted_at IS NULL`;
+    if (!rows.length) return res.status(404).json({ error: 'User not found.' });
+    const target = rows[0];
+    if (target.id === req.authUser.id) return res.status(400).json({ error: 'You are already signed in as this user.' });
+    if (target.role === 'Admin') return res.status(403).json({ error: 'You cannot open another Admin account.' });
+    // The user's own session is left alone; the Admin's cookie simply switches to a marked "viewing as" session.
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + SESSION_IDLE_MS);
+    const label = `${target.name} [via ${req.authUser.name}]`.slice(0, 190);
+    await sql`DELETE FROM sessions WHERE user_id = ${req.authUser.id}`;
+    await sql`INSERT INTO sessions (id, user_id, role, name, expires_at, must_change, impersonated_by)
+      VALUES (${hashSessionToken(token)}, ${target.id}, ${target.role}, ${label}, ${expiresAt.toISOString()}, 0, ${req.authUser.id})`;
+    const secureFlag = isHttpsRequest(req) ? '; Secure' : '';
+    res.setHeader('Set-Cookie', `sid=${token}; HttpOnly${secureFlag}; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_ABSOLUTE_MAX_MS / 1000)}`);
+    auditNote(req.authUser.name, req.authUser.role, 'IMPERSONATE_START', 'users', target.id, `opened the account of ${target.username} (${target.role})`, clientIp(req));
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('impersonate error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+app.post('/api/account/stop-viewing-as', async (req, res) => {
+  try {
+    if (!req.authUser || !req.authUser.impersonatedBy) return res.status(400).json({ error: 'You are not viewing as another user.' });
+    const rows = await sql`SELECT * FROM users WHERE id = ${req.authUser.impersonatedBy} AND deleted_at IS NULL`;
+    if (!rows.length) { await destroySession(req, res); return res.status(401).json({ error: 'Please sign in again.' }); }
+    const admin = rows[0];
+    await destroySession(req, res);
+    auditNote(admin.name, admin.role, 'IMPERSONATE_END', 'users', req.authUser.id, 'returned to own account', clientIp(req));
+    await createSession(req, res, admin);
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('stop viewing as error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+// Public: someone who forgot their password asks the office to reset it. The answer never reveals whether the
+// username exists, and requests are limited per address so it cannot be used to flood the Admin's list.
+const resetReqHits = new Map();
+app.post('/api/password-reset-request', async (req, res) => {
+  const generic = { ok: true, message: 'If this username exists, the school office has been notified. Please contact the office to receive a temporary password.' };
+  try {
+    const ip = clientIp(req) || 'unknown';
+    const now = Date.now();
+    const rec = resetReqHits.get(ip) || { n: 0, since: now };
+    if (now - rec.since > 3600000) { rec.n = 0; rec.since = now; }
+    rec.n++; resetReqHits.set(ip, rec);
+    if (rec.n > 5) return res.status(429).json({ error: 'Too many requests. Please contact the school office.' });
+    const username = String((req.body && req.body.username) || '').trim().slice(0, 100);
+    if (!username) return res.status(400).json({ error: 'Enter your username.' });
+    const rows = await sql`SELECT id, username FROM users WHERE LOWER(username) = LOWER(${username}) AND deleted_at IS NULL`;
+    if (rows.length) {
+      const u = rows[0];
+      const pend = await sql`SELECT id FROM password_reset_requests WHERE user_id = ${u.id} AND status = 'pending'`;
+      if (!pend.length) {
+        await sql`INSERT INTO password_reset_requests (id, user_id, username, ip) VALUES (${crypto.randomBytes(12).toString('hex')}, ${u.id}, ${u.username}, ${ip.slice(0, 64)})`;
+        auditNote(u.username, '', 'PASSWORD_RESET_REQUEST', 'users', u.id, 'asked the office to reset their password', ip);
+      }
+    }
+    return res.status(200).json(generic);
+  } catch (err) {
+    console.error('password reset request error:', err);
+    return res.status(200).json(generic);
+  }
+});
+app.get('/api/admin/users/reset-requests', async (req, res) => {
+  try {
+    if (!requireRealAdmin(req, res)) return;
+    const rows = await sql`SELECT r.id, r.user_id, r.username, r.created_at, u.name, u.role FROM password_reset_requests r
+      LEFT JOIN users u ON u.id = r.user_id WHERE r.status = 'pending' ORDER BY r.created_at DESC LIMIT 100`;
+    return res.status(200).json(rows.map(r => ({ id: r.id, userId: r.user_id, username: r.username, name: r.name || '', role: r.role || '', requestedAt: r.created_at })));
+  } catch (err) {
+    console.error('reset requests error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+app.post('/api/admin/users/dismiss-reset-request', async (req, res) => {
+  try {
+    if (!requireRealAdmin(req, res)) return;
+    await sql`UPDATE password_reset_requests SET status = 'dismissed', resolved_at = now() WHERE id = ${String((req.body && req.body.id) || '')}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });
@@ -5793,6 +5943,11 @@ app.get('/api/me', async (req, res) => {
     const shaped = simpleToAppShape(rows[0], SIMPLE_RESOURCES.users.fields);
     delete shaped.password;
     shaped.moduleAccess = getModuleAccess();
+    shaped.mustChangePassword = !!Number(rows[0].must_change_password || 0);
+    if (req.authUser.impersonatedBy) {
+      const a = await sql`SELECT name FROM users WHERE id = ${req.authUser.impersonatedBy}`.catch(() => []);
+      shaped.impersonating = { byId: req.authUser.impersonatedBy, byName: a.length ? a[0].name : 'Admin' };
+    }
     return res.status(200).json(shaped);
   } catch (err) {
     console.error('me error:', err);

@@ -3234,26 +3234,14 @@
     <button type="button" class="settings-link" style="margin-top:14px;" onclick="toggleForgotPassword(true)">Forgot password?</button>
 
     <form id="forgotForm" style="display:none;" onsubmit="return resetPasswordWithCode(event)">
-      <p class="login-sub" style="margin-bottom:16px;">Enter your username and recovery code to set a new password.</p>
+      <p class="login-sub" style="margin-bottom:16px;">Enter your username. The school office will be notified and will give you a temporary password.</p>
       <div class="f-field" style="margin-bottom:12px; text-align:left;">
         <label>Username</label>
-        <input type="text" id="fpUsername" class="input" style="width:100%;" placeholder="Your username">
-      </div>
-      <div class="f-field" style="margin-bottom:12px; text-align:left;">
-        <label>Recovery Code</label>
-        <input type="text" id="fpCode" class="input" style="width:100%; text-transform:uppercase;" placeholder="e.g. XK4P9QRT">
-      </div>
-      <div class="f-field" style="margin-bottom:12px; text-align:left;">
-        <label>New Password</label>
-        <input type="password" id="fpNewPassword" class="input" style="width:100%;" placeholder="At least 4 characters">
-      </div>
-      <div class="f-field" style="margin-bottom:8px; text-align:left;">
-        <label>Confirm New Password</label>
-        <input type="password" id="fpConfirmPassword" class="input" style="width:100%;">
+        <input type="text" id="fpUsername" class="input" style="width:100%;" placeholder="Your username" autocomplete="username">
       </div>
       <div id="forgotError" style="display:none; color:var(--magenta); font-size:0.82rem; margin-bottom:10px; text-align:left;"></div>
       <div id="forgotSuccess" style="display:none; color:#0f6a63; font-size:0.82rem; margin-bottom:10px; text-align:left;"></div>
-      <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">Reset Password</button>
+      <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">Ask the office to reset</button>
       <button type="button" class="settings-link" style="margin-top:12px;" onclick="toggleForgotPassword(false)">Back to Sign In</button>
     </form>
 

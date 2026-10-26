@@ -244,9 +244,10 @@ function salaryDisbursementData(monthStr){
           <td class="id-cell">${u.username}</td>
           <td><span class="role-pill">${u.role}</span></td>
           <td>${linked ? `${linked.firstName} ${linked.lastName} — ${linked.className}${linked.section?'-'+linked.section:''}` : '—'}</td>
-          <td style="font-family:'IBM Plex Mono',monospace; font-size:0.8rem;">${u.recoveryCode||'—'}</td>
           <td>
             <button class="btn-edit-text" onclick="editUser('${u.id}')">Fix Login</button>
+            &nbsp;·&nbsp;<button class="btn-edit-text" onclick="adminResetPassword('${u.id}')">Reset password</button>
+            &nbsp;·&nbsp;<button class="btn-edit-text" onclick="adminViewAs('${u.id}')">View as</button>
             &nbsp;·&nbsp;<button class="btn-danger-text" onclick="deleteUser('${u.id}')">Delete</button>
           </td>
         </tr>
@@ -262,9 +263,11 @@ function salaryDisbursementData(monthStr){
     `).join('');
     body.innerHTML = `
       <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:680px;">
-        Search by student name, admission number, or username. Click <b>Fix Login</b> on any row to see or change
-        that login's password, or to hand out its recovery code so they can reset it themselves from the login screen.
+        Search by student name, admission number, or username. Use <b>Reset password</b> to give someone a temporary password
+        (they must choose their own when they sign in), <b>View as</b> to open their account and help them, or <b>Fix Login</b> to edit the login.
+        Passwords are stored scrambled, so they cannot be read back.
       </p>
+      <div class="urx-resetreqs"></div>
       <div style="display:flex; gap:10px; align-items:center; margin-bottom:20px; flex-wrap:wrap;">
         <input class="input" id="splSearch" placeholder="Search by student name, admission no., or username..." style="max-width:340px;" value="${q}" oninput="onStudentParentLoginSearch()">
         <button class="btn btn-primary" onclick="openUserModal(undefined, undefined, undefined, 'studentparent')">+ Add Login</button>
@@ -281,11 +284,12 @@ function salaryDisbursementData(monthStr){
       ` : ''}
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Linked Student</th><th>Recovery Code</th><th></th></tr></thead>
-          <tbody>${loginRows.length ? loginRows : `<tr><td colspan="6"><div class="empty-state"><b>No matching logins</b></div></td></tr>`}</tbody>
+          <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Linked Student</th><th></th></tr></thead>
+          <tbody>${loginRows.length ? loginRows : `<tr><td colspan="5"><div class="empty-state"><b>No matching logins</b></div></td></tr>`}</tbody>
         </table>
       </div>
     `;
+    urxLoadResetRequests();
   }
   function initRolesPermissionsPage(){
     const body = document.getElementById('rolesPermissionsBody');

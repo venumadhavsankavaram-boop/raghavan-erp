@@ -67,7 +67,7 @@ function urxUserRows(){
         ? `<span class="urx-link"><b>${escapeHtml(((st.firstName || '') + ' ' + (st.lastName || '')).trim() || 'Staff')}</b>${st.designation ? `<small>${escapeHtml(st.designation)}</small>` : ''}</span>`
         : '<span class="urx-mute">Not linked</span>'}</td>
       <td class="urx-act sf-actions">
-        <button type="button" class="sf-btn sf-btn--link" onclick="editUser('${urxJs(u.id)}')">Edit</button>${u.id !== 'u_admin' ? `<button type="button" class="sf-btn sf-btn--danger" onclick="deleteUser('${urxJs(u.id)}')">Delete</button>` : ''}
+        <button type="button" class="sf-btn sf-btn--link" onclick="editUser('${urxJs(u.id)}')">Edit</button>${(!me && u.role !== 'Admin') ? `<button type="button" class="sf-btn sf-btn--link" onclick="adminViewAs('${urxJs(u.id)}')">View as</button>` : ''}${!me ? `<button type="button" class="sf-btn sf-btn--link" onclick="adminResetPassword('${urxJs(u.id)}')">Reset password</button>` : ''}${u.id !== 'u_admin' ? `<button type="button" class="sf-btn sf-btn--danger" onclick="deleteUser('${urxJs(u.id)}')">Delete</button>` : ''}
       </td>
     </tr>`;
   }).join('');
@@ -104,6 +104,7 @@ function renderUsersTab(body){
       ${sfKpi('Linked to staff profile', `${linked} / ${staffUsers.length}`, linked === staffUsers.length ? 'good' : 'warn', 'needed for class and subject scope')}
     </section>
     <p class="urx-note">Create a login for each staff member. The role decides which sections of the ERP they can open; change what a role can do under <b>Roles &amp; Permissions</b>. Looking for a student or parent login? Use <a class="urx-a" onclick="switchView('studentparentlogins')">Student/Parent Logins</a>${studentParentCount ? ` (${urxPlural(studentParentCount, 'login')} there right now)` : ''}.</p>
+    <div class="urx-resetreqs"></div>
     <div class="iv-toolbar urx-toolbar">
       <input class="input iv-search urx-search" id="urxUSearch" type="search" placeholder="Search name, username or role" aria-label="Search users" value="${escapeHtml(urxU.q)}" oninput="urxUOnFilter()">
       <select class="input urx-sel" id="urxURole" aria-label="Filter by role" onchange="urxUOnFilter()">
@@ -124,6 +125,7 @@ function renderUsersTab(body){
       </div>
     </section>`;
   urxUsersRepaint();
+  urxLoadResetRequests();
 }
 
 /* ======================= Roles list ======================= */
@@ -342,3 +344,95 @@ function permCollapseAll(collapse){
   st.textContent = '.perm-sub-collapsed{display:none !important;} .perm-sub-toggle{border:1px solid var(--border);background:var(--cream,#faf6ee);color:var(--navy,#222);border-radius:8px;width:24px;height:24px;line-height:1;margin-right:8px;cursor:pointer;font-size:.85rem;vertical-align:middle;} .perm-sub-toggle:hover{background:var(--white,#fff);} .perm-toolbar-btn{white-space:nowrap;}';
   document.head.appendChild(st);
 })();
+
+
+/* ======================= Admin password tools, "View as", forced change ======================= */
+async function pwApi(path, body){
+  try{
+    const r = await fetch(path, body === undefined ? {} : { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const d = await r.json().catch(() => ({}));
+    return { ok: r.ok, status: r.status, data: d };
+  }catch(e){ return { ok:false, status:0, data:{ error:'Could not reach the server. Try again.' } }; }
+}
+async function adminResetPassword(id){
+  const u = users.find(x => x.id === id); if(!u) return;
+  const typed = await showPromptDialog(`Set a temporary password for ${u.name} (@${u.username}). Leave it blank to generate one. They must choose their own password when they next sign in, and they are signed out everywhere now.`, { title:'Reset password', okText:'Reset', placeholder:'Leave blank to auto-generate' });
+  if(typed === null) return;
+  const r = await pwApi('/api/admin/users/reset-password', { userId: id, newPassword: typed });
+  if(!r.ok){ showToast(r.data.error || 'Could not reset the password.'); return; }
+  urxLoadResetRequests();
+  const copy = await showConfirmDialog(`Temporary password for @${r.data.username}:\n\n${r.data.tempPassword}\n\nGive it to them in person or by phone. It will not be shown again.`, { title:'Password reset', okText:'Copy', cancelText:'Close' });
+  if(copy){ try{ await navigator.clipboard.writeText(r.data.tempPassword); showToast('Copied.'); }catch(e){} }
+}
+async function adminViewAs(id){
+  const u = users.find(x => x.id === id); if(!u) return;
+  const ok = await showConfirmDialog(`Open the account of ${u.name} (${u.role})? You will see exactly what they see. The visit is recorded in the audit log, and a bar at the top lets you return to your own account.`, { title:'View as user', okText:'Open account' });
+  if(!ok) return;
+  const r = await pwApi('/api/admin/users/impersonate', { userId: id });
+  if(!r.ok){ showToast(r.data.error || 'Could not open the account.'); return; }
+  location.reload();
+}
+async function stopViewingAs(){
+  const r = await pwApi('/api/account/stop-viewing-as', {});
+  if(!r.ok){ showToast(r.data.error || 'Could not return to your account.'); return; }
+  location.reload();
+}
+function showViewingAsBar(by){
+  if(document.getElementById('viewingAsBar')) return;
+  const bar = document.createElement('div');
+  bar.id = 'viewingAsBar';
+  bar.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99998;background:#7a1f3d;color:#fff;padding:8px 14px;display:flex;gap:12px;align-items:center;justify-content:center;font-size:.85rem;font-weight:600;';
+  bar.innerHTML = '<span></span><button type="button" style="background:#fff;color:#7a1f3d;border:0;border-radius:6px;padding:4px 12px;font-weight:700;cursor:pointer;">Exit and return to my account</button>';
+  bar.firstChild.textContent = `Viewing as ${currentUser ? currentUser.name : 'user'} (${currentUser ? currentUser.role : ''}), signed in by ${by}. Everything you do is recorded.`;
+  bar.lastChild.addEventListener('click', stopViewingAs);
+  document.body.appendChild(bar);
+  document.body.style.paddingTop = '40px';
+}
+async function urxLoadResetRequests(){
+  const boxes = document.querySelectorAll('.urx-resetreqs');
+  if(!boxes.length) return;
+  const r = await pwApi('/api/admin/users/reset-requests');
+  const list = r.ok && Array.isArray(r.data) ? r.data : [];
+  const html = list.length ? `<section class="sf-card" style="padding:12px 16px;margin:0 0 14px;border-left:4px solid #b45309;">
+      <b>${list.length} password reset request${list.length === 1 ? '' : 's'} waiting</b>
+      ${list.map(q => `<div style="display:flex;gap:10px;align-items:center;justify-content:space-between;margin-top:8px;flex-wrap:wrap;">
+        <span><b>${escapeHtml(q.name || q.username)}</b> <small>@${escapeHtml(q.username)}${q.role ? ' · ' + escapeHtml(q.role) : ''} · ${escapeHtml(new Date(q.requestedAt).toLocaleString())}</small></span>
+        <span><button type="button" class="sf-btn sf-btn--link" onclick="adminResetPassword('${urxJs(q.userId)}')">Reset password</button><button type="button" class="sf-btn sf-btn--link" onclick="dismissResetRequest('${urxJs(q.id)}')">Dismiss</button></span></div>`).join('')}
+    </section>` : '';
+  boxes.forEach(b => { b.innerHTML = html; });
+}
+async function dismissResetRequest(id){
+  await pwApi('/api/admin/users/dismiss-reset-request', { id });
+  urxLoadResetRequests();
+}
+/* After an Admin reset, the user must pick their own password before the app opens. */
+function showForcedPasswordChange(){
+  return new Promise(resolve => {
+    document.getElementById('forcedPwOverlay') && document.getElementById('forcedPwOverlay').remove();
+    const o = document.createElement('div');
+    o.id = 'forcedPwOverlay';
+    o.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,.72);display:flex;align-items:center;justify-content:center;padding:16px;';
+    o.innerHTML = `<form style="background:#fff;border-radius:14px;max-width:380px;width:100%;padding:22px;display:grid;gap:10px;">
+      <h3 style="margin:0;">Choose your own password</h3>
+      <p style="margin:0;font-size:.85rem;color:#555;">The school office gave you a temporary password. Set a new one to continue.</p>
+      <input class="input" type="password" id="fpwCur" placeholder="Temporary password" autocomplete="current-password">
+      <input class="input" type="password" id="fpwNew" placeholder="New password" autocomplete="new-password">
+      <input class="input" type="password" id="fpwNew2" placeholder="Confirm new password" autocomplete="new-password">
+      <div id="fpwErr" style="color:#b00020;font-size:.82rem;display:none;"></div>
+      <button class="btn btn-primary" type="submit" style="justify-content:center;">Save and continue</button></form>`;
+    document.body.appendChild(o);
+    o.querySelector('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const err = o.querySelector('#fpwErr'); err.style.display = 'none';
+      const cur = o.querySelector('#fpwCur').value, nw = o.querySelector('#fpwNew').value, nw2 = o.querySelector('#fpwNew2').value;
+      const pp = passwordProblemClient(nw, currentUser && currentUser.role);
+      if(!cur){ err.textContent = 'Enter the temporary password.'; err.style.display = 'block'; return; }
+      if(pp){ err.textContent = pp; err.style.display = 'block'; return; }
+      if(nw !== nw2){ err.textContent = 'The two new passwords do not match.'; err.style.display = 'block'; return; }
+      const r = await pwApi('/api/account/password', { current: cur, next: nw });
+      if(!r.ok){ err.textContent = r.data.error || 'Could not save.'; err.style.display = 'block'; return; }
+      o.remove(); resolve(true);
+    });
+    setTimeout(() => { const f = o.querySelector('#fpwCur'); if(f) f.focus(); }, 0);
+  });
+}
