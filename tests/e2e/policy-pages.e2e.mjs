@@ -1,7 +1,7 @@
 // Policy pages: the office writes them in the ERP; the public site gets only the ones ticked "Show on website".
 // Run with a server on PORT (demo mode ok):  BASE=http://127.0.0.1:4044 DB_*=... node tests/e2e/policy-pages.e2e.mjs
 import assert from 'node:assert/strict';
-import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
+let chromium; try { ({ chromium } = await import('playwright')); } catch (e) { ({ chromium } = await import('/home/claude/.npm-global/lib/node_modules/playwright/index.mjs')); }
 const BASE = process.env.BASE || 'http://127.0.0.1:4044';
 let n = 0; const ok = m => console.log('ok', ++n, m);
 const login = async (u) => { const r = await fetch(BASE + '/api/login', { method:'POST', headers:{'Content-Type':'application/json','x-forwarded-for':'7.7.7.' + (Math.floor(Math.random()*200)+1)}, body: JSON.stringify({ username:u, password:'Demo@123' }) }); assert.equal(r.status, 200, 'login ' + u); return (r.headers.get('set-cookie') || '').split(';')[0]; };
@@ -36,9 +36,9 @@ await page.reload(); await page.waitForTimeout(3500);
 // (signing in through the page replaces the earlier API session, so the page's own session is used from here on)
 const pageFetch = (url, init) => page.evaluate(async ([u, i]) => { const r = await fetch(u, i); return { status: r.status, body: await r.text() }; }, [url, init]);
 assert.equal((await pageFetch('/api/kv/website-extras', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ policies: {} }) })).status, 200);
-await page.evaluate(() => { const e = [...document.querySelectorAll('button,a')].find(x => x.textContent.trim() === 'Website Gallery'); e && e.click(); });
+await page.evaluate(() => { const e = [...document.querySelectorAll('button,a')].find(x => x.textContent.trim() === 'Manage Website'); e && e.click(); });
 await page.waitForTimeout(2000);
-await page.evaluate(() => { setTimeout(() => wcSwitch('content'), 0); }); await page.waitForTimeout(1500);
+await page.evaluate(() => { setTimeout(() => webGo('policies'), 0); }); await page.waitForTimeout(1500);
 assert.equal(await page.locator('textarea[id^="wcPol_"]').count(), 4); ok('editor shows 4 policy boxes');
 await page.evaluate(() => { setTimeout(() => wcPolStarter('refund'), 0); }); await page.waitForTimeout(300);
 let v = await page.inputValue('#wcPol_refund'); assert.ok(v.includes('[[FILL IN')); assert.ok(await page.textContent('#wcPolNote_refund').then(t => /FILL IN/.test(t))); ok('starter text loads and warns about [[FILL IN]]');

@@ -60,8 +60,8 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     { key:'noticeboard_post',     label:'Post / Edit Notices', icon:'✍️', category:'Communication', parent:'noticeboard', isNew:true },
     { key:'noticeboard_headings', label:'Manage Headings',     icon:'🏷️', category:'Communication', parent:'noticeboard', isNew:true },
     { key:'noticeboard_website',  label:'Publish to Public Website', icon:'🌐', category:'Communication', parent:'noticeboard', isNew:true },
-    { key:'websiteinquiries', label:'Website Inquiries', icon:'🌐', category:'Communication' },
-    { key:'websitegallery', label:'Website Gallery',   icon:'🖼️', category:'Communication' },
+    { key:'websiteinquiries', label:'Website Inquiries (Website → Enquiries tab)', icon:'🌐', category:'Website' },
+    { key:'websitegallery', label:'Website Gallery & Content (Website → Home, Pages, Policies, Gallery tabs)', icon:'🖼️', category:'Website' },
     { key:'contactvendor', label:'Contact Vendor',   icon:'✉️', category:'Communication' },
 
     { key:'managefee',   label:'Manage Fee',         icon:'💰', category:'Finance' },
@@ -138,7 +138,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
   ];
 
   const PERMISSION_ACTIONS = ['view','create','edit','delete','print','approve'];
-  const PERMISSION_CATEGORY_COLORS = { Overview:'#544C6B', Academics:'#2a4d8f', Communication:'#a02463', Finance:'#1f7a4d', Staff:'#b8621b', Facilities:'#6b4fa0', Reports:'#188F86', Configuration:'#CB9A2E' };
+  const PERMISSION_CATEGORY_COLORS = { Overview:'#544C6B', Academics:'#2a4d8f', Communication:'#a02463', Website:'#1f7ea1', Finance:'#1f7a4d', Staff:'#b8621b', Facilities:'#6b4fa0', Reports:'#188F86', Configuration:'#CB9A2E' };
   // Built once from each module's own `parent` field, so every place that
   // needs "what are this module's children" (the bug fix below, and the
   // editor UI) reads off one source of truth instead of the many separate
@@ -948,8 +948,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     document.getElementById('navAnnouncements').style.display = allowed.includes('announcements') ? 'flex' : 'none';
     document.getElementById('navInbox').style.display = allowed.includes('inbox') ? 'flex' : 'none';
     document.getElementById('navNoticeBoard').style.display = allowed.includes('noticeboard') ? 'flex' : 'none';
-    document.getElementById('navWebsiteInquiries').style.display = allowed.includes('websiteinquiries') ? 'flex' : 'none';
-    document.getElementById('navWebsiteGallery').style.display = allowed.includes('websitegallery') ? 'flex' : 'none';
+    document.getElementById('navWebsite').style.display = (allowed.includes('websiteinquiries') || allowed.includes('websitegallery')) ? 'flex' : 'none';
     document.getElementById('navContactVendor').style.display = allowed.includes('contactvendor') ? 'flex' : 'none';
     document.getElementById('navMyProfile').style.display = allowed.includes('myprofile') ? 'flex' : 'none';
     document.getElementById('sbUserName').textContent = currentUser.name;

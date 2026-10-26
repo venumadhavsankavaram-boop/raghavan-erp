@@ -15,6 +15,10 @@ function switchView(view){
         : getStaffReportsAccess(currentUser.role) ? 'staffreports'
         : 'staffdirectory';
     }
+    // Legacy aliases: the old separate Website Inquiries / Website Gallery pages now live inside the one Website module.
+    let webTabHint = '';
+    if(view === 'websiteinquiries'){ view = 'website'; webTabHint = 'enquiries'; }
+    else if(view === 'websitegallery'){ view = 'website'; webTabHint = 'gallery'; }
     const allowed = getRoleViews(currentUser.role);
     const setupPages = ['schoolprofile','classessetup','academicyear','feestructuresetup','promotions'];
     const adminOnlyPages = ['usersroles','studentparentlogins','rolespermissions','admintools2','refundpolicy'];
@@ -31,6 +35,7 @@ function switchView(view){
       else if(stab === 'activity') permitted = getStaffActivityAccess(currentUser.role);
       else permitted = getRolePermission(currentUser.role, 'staff', 'view');
     }
+    else if(view === 'website') permitted = allowed.includes('websiteinquiries') || allowed.includes('websitegallery');
     else permitted = allowed.includes(view);
     if(!permitted){
       showToast('You do not have access to that section.');
@@ -70,8 +75,7 @@ function switchView(view){
     document.getElementById('view-announcements').style.display = view === 'announcements' ? 'block' : 'none';
     document.getElementById('view-inbox').style.display = view === 'inbox' ? 'block' : 'none';
     document.getElementById('view-noticeboard').style.display = view === 'noticeboard' ? 'block' : 'none';
-    document.getElementById('view-websiteinquiries').style.display = view === 'websiteinquiries' ? 'block' : 'none';
-    document.getElementById('view-websitegallery').style.display = view === 'websitegallery' ? 'block' : 'none';
+    document.getElementById('view-website').style.display = view === 'website' ? 'block' : 'none';
     document.getElementById('view-contactvendor').style.display = view === 'contactvendor' ? 'block' : 'none';
     document.getElementById('view-myaccount').style.display = view === 'myaccount' ? 'block' : 'none';
     document.getElementById('view-myprofile').style.display = view === 'myprofile' ? 'block' : 'none';
@@ -112,8 +116,7 @@ function switchView(view){
     document.getElementById('navAnnouncements').classList.toggle('active', view === 'announcements');
     document.getElementById('navInbox').classList.toggle('active', view === 'inbox');
     document.getElementById('navNoticeBoard').classList.toggle('active', view === 'noticeboard');
-    document.getElementById('navWebsiteInquiries').classList.toggle('active', view === 'websiteinquiries');
-    document.getElementById('navWebsiteGallery').classList.toggle('active', view === 'websitegallery');
+    document.getElementById('navWebsite').classList.toggle('active', view === 'website');
     document.getElementById('navContactVendor').classList.toggle('active', view === 'contactvendor');
     document.getElementById('navMyProfile').classList.toggle('active', view === 'myprofile');
     qlUpdateQuickLinks();
@@ -148,8 +151,7 @@ function switchView(view){
     if(view === 'announcements'){ initCommsView(); }
     if(view === 'inbox'){ initInboxView(); }
     if(view === 'noticeboard'){ initNoticeBoardView(); }
-    if(view === 'websiteinquiries'){ initWebsiteInquiriesView(); }
-    if(view === 'websitegallery'){ initWebsiteGalleryView(); }
+    if(view === 'website'){ initWebsiteView(webTabHint); }
     if(view === 'contactvendor'){ resetContactVendorForm(); }
     if(view === 'myaccount'){ initMyAccountView(); }
     if(view === 'myprofile'){ switchMyProfileTab(myProfileTab); }

@@ -131,7 +131,7 @@ let sbPreSearchCollapse = null;
   /* Hover-to-preview: resting the cursor on a collapsed section's header temporarily
      reveals its links without actually un-collapsing it — moving away closes the preview
      again. A real click still toggles the permanent collapsed/expanded state as before. */
-  const SB_SECTION_KEYS = ['overview','academics','communication','finance','staffsec','facilities','reportssec','configuration'];
+  const SB_SECTION_KEYS = ['overview','academics','communication','website','finance','staffsec','facilities','reportssec','configuration'];
   // A restricted role (e.g. one denied every link under "Finance") used to
   // still see the "Finance" section header sitting there with nothing
   // underneath — which tells a curious user exactly what modules exist in
