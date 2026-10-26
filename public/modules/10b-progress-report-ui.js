@@ -738,7 +738,7 @@
       ${editor}`;
     const fr = document.getElementById('prcFrame');
     fr.onload = () => { try{ fr.style.height = Math.max(400, fr.contentDocument.documentElement.scrollHeight + 4) + 'px'; }catch(e){} };
-    fr.srcdoc = doc;
+    fr.srcdoc = (window.__dateFmt && window.__dateFmt.convHtml) ? window.__dateFmt.convHtml(doc) : doc; // the preview is a separate page, so show dates dd/mm/yyyy here too
   }
   // module 10's co-scholastic "Save Grades" button re-renders through this name
   function loadReportCardPreview(){ prcPaintPreview(); }
