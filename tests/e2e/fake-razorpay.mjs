@@ -22,6 +22,7 @@ export function startFakeRazorpay(port, keyId, keySecret) {
     if (req.method === 'POST' && url.pathname === '/v1/orders') {
       const o = { id: id('order'), amount: body.amount, currency: body.currency, status: 'created', notes: body.notes }; orders.set(o.id, o); return send(200, o);
     }
+    if (req.method === 'GET' && url.pathname === '/v1/payments') return send(200, { count: payments.size, items: [...payments.values()].slice(0, 1) });
     let m;
     if (req.method === 'GET' && (m = /^\/v1\/payments\/([^/]+)$/.exec(url.pathname))) { const p = payments.get(m[1]); return p ? send(200, p) : send(400, { error: { description: 'not found' } }); }
     if (req.method === 'POST' && (m = /^\/v1\/payments\/([^/]+)\/capture$/.exec(url.pathname))) { const p = payments.get(m[1]); if (!p) return send(400, {}); p.status = 'captured'; return send(200, p); }

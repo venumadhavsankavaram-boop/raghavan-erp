@@ -3669,19 +3669,21 @@ app.post('/api/payments/webhook', async (req, res) => {
   }
 });
 // Background check: orders still "created" after a couple of minutes — if Razorpay says one was paid, record it.
+let lastSweep = null; // { at, checked, recovered, error } — shown on the Admin payment status card
 async function sweepOnlinePayments() {
   if (!razorpayConfigured()) return { checked: 0, recovered: 0 };
   await ensureOnlinePaymentsTable();
   const open = await sql`SELECT order_id FROM online_payments WHERE status = 'created' AND created_at < (NOW() - INTERVAL 2 MINUTE) AND created_at > (NOW() - INTERVAL 3 DAY) ORDER BY created_at LIMIT 50`;
-  let recovered = 0;
+  let recovered = 0, sweepError = null;
   for (const o of open) {
     try {
       const r = await rzApi('GET', '/v1/orders/' + encodeURIComponent(o.order_id) + '/payments');
       const items = (r.ok && r.data && Array.isArray(r.data.items)) ? r.data.items : [];
       const good = items.find(i => i.status === 'captured' || i.status === 'authorized');
       if (good) { const f = await finalizeOnlinePayment(o.order_id, good.id); if (f.ok && f.justRecorded) recovered++; }
-    } catch (e) { console.error('online payment sweep failed for', o.order_id, e.message); }
+    } catch (e) { console.error('online payment sweep failed for', o.order_id, e.message); sweepError = 'Could not reach Razorpay for an open order.'; }
   }
+  lastSweep = { at: new Date().toISOString(), checked: open.length, recovered, error: sweepError };
   return { checked: open.length, recovered };
 }
 setInterval(() => { sweepOnlinePayments().catch(e => console.error('sweepOnlinePayments:', e.message)); }, 5 * 60 * 1000);
@@ -3700,6 +3702,56 @@ app.post('/api/payments/check-now', async (req, res) => {
     if (!req.authUser || !['Admin', 'Principal', 'Accountant'].includes(req.authUser.role)) return res.status(403).json({ error: 'Not allowed.' });
     return res.status(200).json(await sweepOnlinePayments());
   } catch (err) { console.error('check-now error:', err); return res.status(500).json({ error: 'Could not check with Razorpay.' }); }
+});
+
+
+// Admin payment-status card: is online payment set up, in which mode, and is anything stuck? Never returns a secret.
+function maskRzKey(k) {
+  const m = /^(rzp_(?:live|test)_)(.+)$/.exec(k || '');
+  if (m) return m[1] + '••••' + m[2].slice(-4);
+  return k ? String(k).slice(0, 3) + '••••' : '';
+}
+app.get('/api/payments/health', async (req, res) => {
+  try {
+    if (!req.authUser || !['Admin', 'Principal'].includes(req.authUser.role)) return res.status(403).json({ error: 'Not allowed.' });
+    const keyId = process.env.RAZORPAY_KEY_ID || '';
+    const out = {
+      demo: DEMO_MODE,
+      configured: razorpayConfigured(),
+      keyIdSet: !!keyId, keySecretSet: !!process.env.RAZORPAY_KEY_SECRET,
+      mode: /^rzp_live_/.test(keyId) ? 'live' : /^rzp_test_/.test(keyId) ? 'test' : (keyId ? 'unknown' : ''),
+      keyMasked: maskRzKey(keyId),
+      webhookSecretSet: !!process.env.RAZORPAY_WEBHOOK_SECRET,
+      webhookUrl: (isHttpsRequest(req) ? 'https' : 'http') + '://' + (req.headers['x-forwarded-host'] || req.headers.host || '') + '/api/payments/webhook',
+      lastSweep,
+    };
+    if (out.configured) {
+      await ensureOnlinePaymentsTable();
+      const one = async (q) => (q && q[0]) || {};
+      const paid1 = await one(await sql`SELECT COUNT(*) AS c, COALESCE(SUM(amount),0) AS s FROM online_payments WHERE status = 'paid' AND paid_at > (NOW() - INTERVAL 1 DAY)`);
+      const paid30 = await one(await sql`SELECT COUNT(*) AS c, COALESCE(SUM(amount),0) AS s FROM online_payments WHERE status = 'paid' AND paid_at > (NOW() - INTERVAL 30 DAY)`);
+      const stuck = await one(await sql`SELECT COUNT(*) AS c FROM online_payments WHERE status = 'created' AND created_at < (NOW() - INTERVAL 15 MINUTE) AND created_at > (NOW() - INTERVAL 3 DAY)`);
+      const failed = await one(await sql`SELECT COUNT(*) AS c FROM online_payments WHERE status = 'failed' AND created_at > (NOW() - INTERVAL 7 DAY)`);
+      const last = await one(await sql`SELECT MAX(paid_at) AS t FROM online_payments WHERE status = 'paid'`);
+      out.stats = { paidDayCount: Number(paid1.c || 0), paidDayAmount: Number(paid1.s || 0), paid30Count: Number(paid30.c || 0), paid30Amount: Number(paid30.s || 0),
+        stuck: Number(stuck.c || 0), failed7: Number(failed.c || 0), lastPaidAt: last.t || null };
+    }
+    return res.status(200).json(out);
+  } catch (err) { console.error('payments health error:', err); return res.status(500).json({ error: 'Could not load the payment status.' }); }
+});
+// Asks Razorpay one harmless read-only question to prove the saved keys are accepted. Admin only; nothing is changed.
+app.post('/api/payments/test-connection', async (req, res) => {
+  try {
+    if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can test the connection.' });
+    if (!razorpayConfigured()) return res.status(200).json({ ok: false, message: DEMO_MODE ? 'Online payments are switched off in the demo.' : 'No Razorpay keys are set on the server yet.' });
+    const r = await rzApi('GET', '/v1/payments?count=1');
+    if (r.ok) return res.status(200).json({ ok: true, message: 'Razorpay accepted the keys.' });
+    if (r.status === 401) return res.status(200).json({ ok: false, message: 'Razorpay rejected the keys. Check the Key ID and Key Secret on the server.' });
+    return res.status(200).json({ ok: false, message: 'Razorpay answered with an error (code ' + r.status + '). Try again in a minute.' });
+  } catch (err) {
+    console.error('payments test-connection error:', err.message);
+    return res.status(200).json({ ok: false, message: 'Could not reach Razorpay from the server. Check the internet connection and try again.' });
+  }
 });
 
 // Whether this school has online fee payment turned on at all — the deploy-

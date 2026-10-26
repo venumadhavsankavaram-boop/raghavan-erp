@@ -1325,6 +1325,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       <div class="profile-card" style="max-width:720px; margin-bottom:24px;">
         <h4>💳 Online payments</h4>
         <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 12px;">Fees paid by parents through Razorpay. A payment that was made but not yet recorded (for example the parent closed the page) is found automatically every few minutes — or press <b>Check now</b>.</p>
+        <div id="onlinePayHealth" style="margin:0 0 12px; font-size:0.8rem;">Loading status…</div>
         <button class="btn btn-sm" type="button" onclick="loadOnlinePayments()">Refresh</button>
         <button class="btn btn-sm" type="button" onclick="checkOnlinePaymentsNow()" style="margin-left:6px;">Check now</button>
         <div id="onlinePaymentsBox" style="margin-top:12px; font-size:0.8rem;">Loading…</div>
@@ -1522,7 +1523,43 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       loadTwofaOverview();
     }catch(e){ showToast('Could not reach the server.'); }
   }
+  async function loadOnlinePayHealth(testMsg){
+    const el = document.getElementById('onlinePayHealth'); if(!el) return;
+    try{
+      const res = await fetch('/api/payments/health'); await throwIfNotOk(res);
+      const d = await res.json();
+      const ok = (t) => '<span style="color:#0a8f6a;">✓</span> ' + t, warn = (t) => '<span style="color:#b7791f;">⚠</span> ' + t, bad = (t) => '<span style="color:#C0264B;">✕</span> ' + t;
+      const rows = [];
+      if(d.demo) rows.push(warn('This is the demo, so online payments are switched off.'));
+      else if(!d.keyIdSet || !d.keySecretSet) rows.push(bad('Not set up: the Razorpay Key ID and Key Secret are missing on the server.'));
+      else {
+        rows.push(ok('Razorpay keys are set (' + escapeHtml(d.keyMasked) + ').'));
+        if(d.mode === 'live') rows.push(ok('<b>Live mode</b>: real money is being collected.'));
+        else if(d.mode === 'test') rows.push(warn('<b>Test mode</b>: parents can pay, but no real money moves. Switch to live keys before you tell parents to use it.'));
+        else rows.push(warn('The Key ID does not look like a standard Razorpay key.'));
+        rows.push(d.webhookSecretSet ? ok('Safety-net webhook is on. Razorpay address: <code>' + escapeHtml(d.webhookUrl) + '</code>') : warn('Webhook not set (optional). Payments are still found by the automatic check every 5 minutes.'));
+        if(d.lastSweep) rows.push(ok('Automatic check last ran ' + escapeHtml(new Date(d.lastSweep.at).toLocaleString('en-IN', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })) + (d.lastSweep.error ? ' but reported a problem: ' + escapeHtml(d.lastSweep.error) : ' (' + d.lastSweep.checked + ' open, ' + d.lastSweep.recovered + ' recovered).')));
+        else rows.push('<span style="color:var(--ink-soft);">Automatic check has not found any open orders to look at yet.</span>');
+        const st = d.stats;
+        if(st){
+          rows.push('Last 24 hours: <b>' + st.paidDayCount + '</b> paid (' + fmtMoney(st.paidDayAmount) + '). Last 30 days: <b>' + st.paid30Count + '</b> paid (' + fmtMoney(st.paid30Amount) + ').' + (st.lastPaidAt ? ' Last payment: ' + escapeHtml(new Date(st.lastPaidAt).toLocaleString('en-IN', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })) + '.' : ' No payment yet.'));
+          if(st.stuck) rows.push(warn('<b>' + st.stuck + '</b> payment(s) started over 15 minutes ago and not confirmed. Press <b>Check now</b>; if they stay, ask the parent for the Razorpay payment ID.'));
+          if(st.failed7) rows.push(warn(st.failed7 + ' payment(s) failed in the last 7 days (usually a declined card or a cancelled UPI request).'));
+        }
+      }
+      if(testMsg) rows.push(testMsg.ok ? ok(escapeHtml(testMsg.message)) : bad(escapeHtml(testMsg.message)));
+      el.innerHTML = '<div style="display:grid; gap:5px; padding:10px 12px; border:1px solid var(--border); border-radius:10px;">' + rows.map(r => '<div>' + r + '</div>').join('') + '</div>' +
+        (d.configured ? '<button class="btn btn-sm" type="button" style="margin-top:8px;" onclick="testOnlinePayConnection()">Test connection to Razorpay</button>' : '');
+    }catch(e){ el.textContent = 'Could not load the status (' + e.message + ').'; }
+  }
+  async function testOnlinePayConnection(){
+    try{
+      const res = await fetch('/api/payments/test-connection', { method:'POST' }); await throwIfNotOk(res);
+      loadOnlinePayHealth(await res.json());
+    }catch(e){ showToast('Could not test (' + e.message + ').'); }
+  }
   async function loadOnlinePayments(){
+    loadOnlinePayHealth();
     const el = document.getElementById('onlinePaymentsBox'); if(!el) return;
     try{
       const res = await fetch('/api/payments/online-orders'); await throwIfNotOk(res);
