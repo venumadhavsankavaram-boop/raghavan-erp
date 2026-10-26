@@ -1426,6 +1426,15 @@ app.get('/api/website-extras', async (req, res) => {
       teachers = Number((await sql`SELECT COUNT(*) AS c FROM staff WHERE (status IS NULL OR status = '' OR status = 'Active') AND LOWER(COALESCE(designation, '')) LIKE '%teach%'`)[0].c) || 0;
     } catch (e) {}
     out.counts = { students, teachers };
+    // Policy pages (Privacy, Terms, Fee/Refund, Admission): sent only when the school ticked "Show on website" and wrote some text.
+    // Plain text only; the website draws it safely. Capped in size so a mistake cannot make this response huge.
+    out.policies = {};
+    ['privacy', 'terms', 'refund', 'admission'].forEach(k => {
+      const p = (x.policies || {})[k];
+      if (p && p.show === true && String(p.body || '').trim()) {
+        out.policies[k] = { title: String(p.title || '').slice(0, 120), body: String(p.body).slice(0, 20000), updated: /^\d{4}-\d{2}-\d{2}$/.test(String(p.updated || '')) ? p.updated : '' };
+      }
+    });
     res.set('Cache-Control', 'public, max-age=60');
     return res.status(200).json(out);
   } catch (err) {

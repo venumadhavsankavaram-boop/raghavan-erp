@@ -15,11 +15,92 @@
     { k:'downloads', vis:'Show the download buttons on the website', visKey:'explore', one:'download', icon:'📥', title:'Downloads & Forms', hint:'Forms, syllabus or calendar files people can download. Paste the link to the file (https://…). Shown as buttons under Facilities.',
       fields:[['title','Button name (e.g. Academic Calendar)','text'],['url','Link to the file (https://…)','text']] },
   ];
+  /* Policy pages (Privacy, Terms, Fee/Refund, Admission). Written in the ERP, shown on the public site only when ticked.
+     Starter drafts use simple formatting: "## Heading", "- bullet", blank line between paragraphs.
+     {{school}} {{phone}} {{email}} {{address}} are filled in by the website. [[FILL IN: ...]] marks what the school must write itself. */
+  const POLICIES = [
+    { k:'privacy', icon:'🔒', title:'Privacy Policy', hint:'What the website collects (the admission enquiry form) and how it is used.',
+      starter:`## What this page covers
+This page explains what information {{school}} collects through this website and how it is used.
+
+## What we collect
+- Through the admission enquiry form: the parent or guardian's name, phone number, email (if given), the child's name and the class applied for, and any message you write.
+- Basic technical information that every website receives, such as the type of browser, used only to keep the website working.
+
+## How we use it
+- To reply to your enquiry and help you with admission.
+- To keep school records for children who are admitted. This is done in the school office, not on this website.
+
+We do not sell your information or share it with advertisers.
+
+## Who can see it
+Only authorised staff of {{school}}. The company that supplies and supports our school software keeps the system secure.
+
+## Photos
+Photos in the gallery are from school events and are published by the school. If you would like a photo removed, please contact the school office.
+
+## Your choices
+You can ask the school office to correct or delete the details you sent us at any time.
+
+## Contact
+{{school}}, {{address}}
+Phone: {{phone}}
+Email: {{email}}` },
+    { k:'terms', icon:'📄', title:'Terms of Use', hint:'Simple rules for using the website.',
+      starter:`## Using this website
+This website gives information about {{school}}. By using it you agree to these simple terms.
+
+- The information is given in good faith for general guidance. Fees, dates and timings can change, so please confirm with the school office.
+- Please do not misuse the website, try to break into it, or send false enquiries.
+- The logo, photos and text belong to {{school}}. Please do not copy them without permission.
+- The Parent and Student Login is only for registered families and staff. Keep your password private and do not share it.
+- Links to other websites are given for convenience. We are not responsible for what those websites contain.
+
+## Changes
+We may update this page from time to time. The date at the top shows when it was last updated.
+
+## Contact
+{{school}}, {{address}}
+Phone: {{phone}}
+Email: {{email}}` },
+    { k:'refund', icon:'💳', title:'Fee & Refund Policy', hint:'How fees are paid and when a refund is possible. The school must write its own rules.',
+      starter:`## Paying fees
+Fees are paid at the school office against a numbered receipt. Please keep your receipt safe, because it is your proof of payment.
+
+## Refunds
+[[FILL IN: write the school's real refund rules here, for example which fees can be refunded, within how many days, and how the refund is paid.]]
+
+## Fees that are not refundable
+[[FILL IN: for example, "The admission fee, once paid, is not refundable."]]
+
+## How to ask for a refund
+Please meet the school office with your receipt. An approved refund is recorded by the office and given to you in writing.
+
+## Contact
+{{school}}, {{address}}
+Phone: {{phone}}
+Email: {{email}}` },
+    { k:'admission', icon:'📝', title:'Admission Policy', hint:'Optional. Age limits, documents needed and how admission works.',
+      starter:`## How admission works
+[[FILL IN: describe the steps, for example enquiry, visit, form, documents, fee payment.]]
+
+## Age and class
+[[FILL IN: the age needed for each class.]]
+
+## Documents needed
+[[FILL IN: for example birth certificate, transfer certificate, previous marks, photographs, Aadhaar.]]
+
+## Contact
+{{school}}, {{address}}
+Phone: {{phone}}
+Email: {{email}}` }
+  ];
+  const todayIso = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
   async function wcLoad(){
     try{ const r = await fetch(KEY, { credentials:'same-origin' }); wcData = r.ok ? await r.json() : {}; }catch(e){ wcData = {}; }
     wcData = wcData || {};
     SECTIONS.forEach(s => { if(!Array.isArray(wcData[s.k])) wcData[s.k] = []; });
-    ['admission','ratio','recognition','transport','academics','results','visible'].forEach(k => { wcData[k] = wcData[k] || {}; });
+    ['admission','ratio','recognition','transport','academics','results','visible','policies'].forEach(k => { wcData[k] = wcData[k] || {}; });
   }
   const vis = (k, label) => `<label class="wc-show wc-vis"><input type="checkbox" ${(wcData.visible || {})[k] !== false ? 'checked' : ''} onchange="wcVis('${k}',this.checked)"> 👁 ${label}</label>`;
   window.wcVis = (k, v) => { wcData.visible = wcData.visible || {}; wcData.visible[k] = !!v; };
@@ -44,6 +125,42 @@
       <button type="button" class="sf-btn sf-btn--soft" onclick="wcAdd('${s.k}')">+ Add ${s.one}</button>
     </section>`;
   }
+  function policyHtml(){
+    return `<section class="sf-card cm-post">
+      <h3 class="cm-h">📜 Policy pages</h3>
+      <p class="cm-sub">Privacy, terms and fee rules for the public website. They appear as links in the website footer only when you tick <b>Show on website</b>. Use the starter text, then edit it so it says what your school really does. Not legal advice: please read it carefully before showing it.</p>
+      ${POLICIES.map(p => {
+        const d = wcData.policies[p.k] || {};
+        const pending = /\[\[FILL IN/i.test(d.body || '');
+        return `<div class="wc-item">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;"><b>${p.icon} ${p.title}</b>
+            <label class="wc-show"><input type="checkbox" ${d.show === true ? 'checked' : ''} onchange="wcPolSet('${p.k}','show',this.checked)"> Show on website</label></div>
+          <p class="cm-sub" style="margin:4px 0 8px;">${p.hint}${d.updated ? ' · Last edited ' + E(d.updated.split('-').reverse().join('/')) : ''}</p>
+          <textarea id="wcPol_${p.k}" rows="12" style="width:100%;" placeholder="Empty. Press “Use starter text” to begin." oninput="wcPolSet('${p.k}','body',this.value)">${E(d.body || '')}</textarea>
+          <div class="wc-actions"><button type="button" class="sf-btn sf-btn--soft" onclick="wcPolStarter('${p.k}')">✨ Use starter text</button>
+            <span class="cm-sub" id="wcPolNote_${p.k}" style="margin:0;color:#A80D5D;">${pending ? 'Replace every [[FILL IN: …]] before showing this page.' : ''}</span></div>
+        </div>`;
+      }).join('')}
+    </section>`;
+  }
+  window.wcPolSet = (k, f, v) => {
+    const p = (wcData.policies[k] = wcData.policies[k] || { title: (POLICIES.find(x => x.k === k) || {}).title || k });
+    p[f] = v;
+    if(f === 'body'){
+      p.updated = todayIso();
+      const n = document.getElementById('wcPolNote_' + k);
+      if(n) n.textContent = /\[\[FILL IN/i.test(v) ? 'Replace every [[FILL IN: …]] before showing this page.' : '';
+    }
+  };
+  window.wcPolStarter = async function(k){
+    const def = POLICIES.find(x => x.k === k); if(!def) return;
+    const ta = document.getElementById('wcPol_' + k); if(!ta) return;
+    if(ta.value.trim()){
+      const ok = (typeof showConfirmDialog === 'function') ? await showConfirmDialog('Replace what is written here with the starter text?', { title: 'Use starter text' }) : true;
+      if(!ok) return;
+    }
+    ta.value = def.starter; wcPolSet(k, 'body', def.starter);
+  };
   function paintContent(body){
     const r = wcData.ratio;
     body.innerHTML = `
@@ -95,6 +212,7 @@
         ${vis('glance','Show the "At a glance" strip (students, teachers, ratio) on the website')}
         <div class="form-grid"><div class="f-field"><label>Show this instead (optional, e.g. 1 : 20)</label><input type="text" value="${E(r.manual)}" oninput="wcSetKey('ratio','manual',this.value)"></div></div>
       </section>
+      ${policyHtml()}
       ${SECTIONS.map(sectionHtml).join('')}
       <div class="wc-bar">${typeof sfBtn === 'function' ? sfBtn('primary','','Save website content','wcSave()','sf-btn--lg') : '<button class="btn btn-primary" onclick="wcSave()">Save website content</button>'}
         <span class="cm-sub" id="wcMsg" style="margin:0;"></span></div>`;
@@ -104,8 +222,15 @@
   window.wcAdd = k => { wcData[k].push({ id: 'w' + Date.now(), show: true }); paintContent(document.getElementById('websiteGalleryBody')); wcShell(); };
   window.wcRemove = (k, i) => { if(!confirm('Remove this item from the website?')) return; wcData[k].splice(i, 1); paintContent(document.getElementById('websiteGalleryBody')); wcShell(); };
   window.wcSave = async function(){
-    if(wcBusy) return; wcBusy = true;
-    const msg = document.getElementById('wcMsg'); if(msg) msg.textContent = 'Saving…';
+    if(wcBusy) return;
+    const msg = document.getElementById('wcMsg');
+    const unfinished = POLICIES.filter(p => { const d = wcData.policies[p.k] || {}; return d.show === true && /\[\[FILL IN/i.test(d.body || ''); });
+    if(unfinished.length){
+      const m = 'Finish the ' + unfinished.map(p => p.title).join(' and ') + ' first (replace the [[FILL IN: …]] parts), or untick Show on website.';
+      if(msg) msg.textContent = m; if(typeof showToast === 'function') showToast(m); return;
+    }
+    wcBusy = true;
+    if(msg) msg.textContent = 'Saving…';
     try{
       const out = JSON.parse(JSON.stringify(wcData)); delete out._counts;
       const r = await fetch(KEY, { method:'PUT', credentials:'same-origin', headers:{'Content-Type':'application/json', ...(typeof actorHeaders === 'function' ? actorHeaders() : {})}, body: JSON.stringify(out) });
