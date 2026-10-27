@@ -402,7 +402,9 @@
     if(!host){ host = document.createElement('div'); host.id = 'dashInsights'; byId('dashBanner').insertAdjacentElement('afterend', host); }
     const tiles = [];
     try{ if(can('managefee') && planOk('managefee')){ const r = feeRows(); const none = r.filter(x => x.paidState === 'none').length;
-      tiles.push({ k:'fees', icon:'💰', n:r.length, label:'students with fees overdue', sub: r.length ? money(r.reduce((a, x) => a + x.amount, 0)) + ' · ' + none + ' paid nothing' : 'All clear' }); } }catch(e){}
+      tiles.push({ k:'fees', icon:'💰', n:r.length, label:'students with a late fee instalment', sub: r.length ? money(r.reduce((a, x) => a + x.amount, 0)) + ' · ' + none + ' paid nothing' : 'All clear' }); } }catch(e){}
+    try{ if(can('managefee') && planOk('managefee')){ const t = feeRows('unpaid').filter(x => x.tuitionNone);
+      tiles.push({ k:'tuition', icon:'🎓', n:t.length, label:'families have paid no tuition at all', sub: t.length ? money(t.reduce((a, x) => a + (x.tuitionLeft || x.amount), 0)) + ' tuition not yet paid' : 'All clear' }); } }catch(e){}
     try{ if(can('attendance') && planOk('attendance')){ await ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData); const a = attStats();
       tiles.push({ k:'attendance', icon:'🗓️', n:a.length, label:'children need an attendance follow-up', sub: a.length ? a.filter(x => x.reasons.includes('streak')).length + ' absent 3+ days in a row' : 'All clear' }); } }catch(e){}
     try{ if(can('websiteinquiries') && typeof admissionInquiries !== 'undefined'){ const q = enquiryRows().filter(x => x.q.status !== 'Contacted');
@@ -411,7 +413,7 @@
     host.innerHTML = `<div class="dash-section-title"><div><span class="eyebrow-sm">Smart Insights</span><h3>Needs your attention today</h3></div></div>
       <div class="si-dash">${tiles.map(t => `<button type="button" class="si-dash-tile ${t.n ? 'has' : ''}" onclick="siGoFrom('${t.k}')"><span class="si-dash-ico">${t.icon}</span><b>${t.n}</b><span class="si-dash-lbl">${t.label}</span><small>${esc(t.sub)}</small></button>`).join('')}</div>`;
   }
-  window.siGoFrom = k => { siTab = k; try{ switchView('insights'); }catch(e){} };
+  window.siGoFrom = k => { if(k === 'tuition'){ k = 'fees'; st.feeScope = 'unpaid'; st.feeView = 'classes'; st.feeClass = ''; st.feePaid = ''; } else if(k === 'fees'){ st.feeScope = 'overdue'; } siTab = k; try{ switchView('insights'); }catch(e){} };
   (function hookDashboard(){
     if(typeof renderDashboard !== 'function') return;
     const base = renderDashboard;

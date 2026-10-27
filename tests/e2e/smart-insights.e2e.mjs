@@ -40,7 +40,7 @@ try {
 
   // Dashboard card
   await pg.evaluate(() => switchView('dashboard')); await pg.waitForSelector('#dashInsights .si-dash-tile', { timeout: 15000 });
-  const dc = await pg.innerText('#dashInsights'); assert.match(dc, /Needs your attention today/i); assert.match(dc, /fees overdue/i); assert.match(dc, /attendance follow-up/i); assert.match(dc, /enquiries/i); ok('Dashboard: attention card shows fees, attendance and enquiries');
+  const dc = await pg.innerText('#dashInsights'); assert.match(dc, /Needs your attention today/i); assert.match(dc, /late fee instalment/i); assert.match(dc, /paid no tuition/i); assert.match(dc, /attendance follow-up/i); assert.match(dc, /enquiries/i); ok('Dashboard: attention card shows fees, attendance and enquiries');
   await pg.click('#dashInsights .si-dash-tile >> nth=0'); await pg.waitForSelector('#siTabs .mf-tab'); assert.match(await pg.innerText('#siPane'), /overdue/i); ok('Dashboard: card opens Smart Insights on the right tab');
   await pg.evaluate(() => { attendanceRecords = window.__rec; _lazyDataPromises['attendanceRecords'] = Promise.resolve(); admissionInquiries = window.__inq || admissionInquiries; const a4 = window.__act[4]; window.computeStudentFinance = s => s.id === a4 ? { perCat: { fee: { collected: 0, receivable: 8000 } }, totals: {} } : { perCat: { fee: { collected: 1, receivable: 0 } }, totals: {} }; }); // the dashboard reloads real data; put the controlled data back
   // Fees: class summary first, then the list
