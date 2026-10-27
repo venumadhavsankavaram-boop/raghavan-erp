@@ -12,7 +12,7 @@ try {
     const act = students.filter(isActive); window.__act = act.slice(0, 5).map(s => s.id);
     const iso = d => { const x = new Date(Date.now() - d * 86400000); return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); };
     window.__iso = iso;
-    act[0].fatherPhone = '9876543210'; act[1].fatherPhone = '9123456780'; act[2].fatherPhone = '9000000001'; act[3].fatherPhone = ''; act[3].motherPhone = ''; act[3].guardianPhone = ''; act[4].dob = '';
+    act[0].fatherPhone = '9876543210'; act[1].fatherPhone = '9123456780'; act[2].fatherPhone = '9000000001'; act[3].fatherPhone = ''; act[3].motherPhone = ''; act[3].guardianPhone = ''; act[4].dob = ''; act[4].fatherPhone = '9444444444';
     const rec = []; let i = 0;
     for (let d = 1; d <= 30; d++) { // student 0: absent last 4 days, present before
       rec.push({ id: 'a0' + d, studentId: act[0].id, date: iso(d), session: 'Morning', status: d <= 4 ? 'Absent' : 'Present' });
@@ -25,6 +25,7 @@ try {
       ? { state: 'overdue', dueNow: 2000, totals: { collected: 3000, receivable: 2000 }, rows: { allRows: [{ overdueAmount: 2000, installments: [{ status: 'overdue', outstanding: 2000, due: iso(60) }] }] } }
       : s.id === act[2].id
       ? { state: 'overdue', dueNow: 5000, totals: { receivable: 5000 }, rows: { allRows: [{ overdueAmount: 5000, installments: [{ status: 'overdue', outstanding: 5000, due: iso(60) }] }] } }
+      : s.id === act[4].id ? { state: 'pending', dueNow: 0, nextDue: iso(-20), totals: { collected: 0, receivable: 8000 }, rows: { allRows: [] } }
       : { state: 'paid', dueNow: 0, totals: { receivable: 0 }, rows: { allRows: [] } };
     window.refreshAdmissionInquiries = async () => {};
     admissionInquiries = window.__inq = [
@@ -52,11 +53,16 @@ try {
   const none = was.find(w => /919000000001/.test(w)), part = was.find(w => /919123456780/.test(w));
   assert.ok(none && /60 days/.test(none) && /5,000/.test(none)); ok('Fees: nothing-paid family gets the urgent message');
   assert.ok(part && /Thank you for the payment already made/.test(part) && !/60 days/.test(part)); ok('Fees: part-paid family gets a thank-you and gentle reminder');
-  await pg.selectOption('#siPane select >> nth=2', 'gentle');
+  await pg.selectOption('#siPane select >> nth=3', 'gentle');
   assert.ok((await pg.$$eval('#siPane a[href*="wa.me"]', as => as.map(a => decodeURIComponent(a.href)))).every(w => !/60 days/.test(w))); ok('Fees: always-gentle override works');
-  await pg.selectOption('#siPane select >> nth=1', 'part'); assert.doesNotMatch(await pg.innerText('#siPane tbody'), /Nothing paid/); ok('Fees: paid filter works');
+  await pg.selectOption('#siPane select >> nth=2', 'part'); assert.doesNotMatch(await pg.innerText('#siPane tbody'), /Nothing paid/); ok('Fees: paid filter works');
   const dl = await Promise.all([pg.waitForEvent('download'), pg.click('#siPane button:has-text("Download list")')]); assert.match(dl[0].suggestedFilename(), /overdue-fees-.*\.csv/); ok('Fees: CSV download');
   await pg.click('#siPane button:has-text("All classes")'); assert.match(await pg.innerText('#siPane'), /Open class/); ok('Fees: back to class summary');
+  assert.match(await pg.innerText('#siPane'), /Nothing paid at all/i); assert.match(await pg.innerText('#siPane'), /₹7,000/); ok('Fees: overdue view does not count fees not yet due');
+  await pg.selectOption('#siPane select >> nth=0', 'unpaid'); const un = await pg.innerText('#siPane'); assert.match(un, /₹15,000/); await pg.click('#siPane button:has-text("See all students in one list")');
+  const ul = await pg.innerText('#siPane tbody'); assert.match(ul, /not due yet/i); assert.match(ul, /₹8,000/); ok('Fees: "Also fees not yet due" shows a family that owes everything but is not late yet');
+  const w3 = (await pg.$$eval('#siPane a[href*="wa.me"]', as => as.map(a => decodeURIComponent(a.href)))).find(w => /is due on/.test(w)); assert.ok(w3 && /8,000/.test(w3)); ok('Fees: not-yet-due message is a plain reminder');
+  await pg.selectOption('#siPane select >> nth=0', 'overdue'); await pg.click('#siPane button:has-text("All classes")');
 
   // Attendance
   await pg.evaluate(() => siGo('attendance')); await pg.waitForFunction(() => /Need follow-up/i.test(document.getElementById('siPane').innerText));

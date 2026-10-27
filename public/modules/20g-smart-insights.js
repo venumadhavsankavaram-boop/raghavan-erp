@@ -12,7 +12,7 @@
     { k:'health',    icon:'🧹', label:'Data health' },
   ];
   let siTab = 'fees';
-  const st = { feeClass:'', feeTier:'', feePaid:'', feeView:'classes', feeTone:'auto', attClass:'', attReason:'', attnClass:'', healthType:'', cache:{} };
+  const st = { feeClass:'', feeTier:'', feePaid:'', feeView:'classes', feeTone:'auto', feeScope:'overdue', attClass:'', attReason:'', attnClass:'', healthType:'', cache:{} };
   const byId = id => document.getElementById(id);
   const esc = s => (typeof escapeHtml === 'function' ? escapeHtml(String(s == null ? '' : s)) : String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
   const can = key => { try{ return getRoleViews(currentUser.role).includes(key); }catch(e){ return false; } };
@@ -66,17 +66,22 @@
   }
 
   /* ---------- Fees ---------- */
-  function feeRows(){
-    const today = todayIso(), out = [];
+  function feeRows(scope){
+    const today = todayIso(), out = [], wide = scope === 'unpaid';
     activeStudents().forEach(s => {
       let sum; try{ sum = sfStudentSummary(s); }catch(e){ return; }
-      if(!sum || sum.state !== 'overdue') return;
+      if(!sum) return;
+      // Default: instalments that are already late. "unpaid" scope also brings in families who have paid nothing at all
+      // but whose first instalment is not due yet (or has no due date), so nobody who owes the whole fee is invisible.
+      const upcoming = wide && sum.state === 'pending' && !(Number((sum.totals || {}).collected) > 0) && Number((sum.totals || {}).receivable) > 0;
+      if(sum.state !== 'overdue' && !upcoming) return;
       let amount = 0, oldest = '';
       (sum.rows.allRows || []).forEach(r => {
         amount += Number(r.overdueAmount) || 0;
         (r.installments || []).forEach(i => { if(i.status === 'overdue' && i.outstanding > 0 && i.due && (!oldest || i.due < oldest)) oldest = i.due; });
       });
       if(amount <= 0) amount = Number(sum.dueNow) || 0;
+      if(upcoming){ amount = Number((sum.totals || {}).receivable) || 0; oldest = ''; }
       const days = oldest ? Math.max(daysBetween(oldest, today), 0) : 0;
       const t = sum.totals || {};
       const paid = Number(t.collected) || 0, left = Number(t.receivable) || amount;
@@ -87,7 +92,7 @@
       let tier = 'gentle';
       if(paidState === 'none') tier = days > 45 ? 'urgent' : days > 15 ? 'firm' : 'gentle';
       else if(paidShare < 0.5 && days > 30) tier = 'firm';
-      out.push({ s, amount, oldest, days, tier, paid, paidShare, paidState });
+      out.push({ s, amount, oldest, days, tier, paid, paidShare, paidState, upcoming, nextDue: upcoming ? (sum.nextDue || '') : '' });
     });
     // Biggest unpaid share first, then the largest amount, then the longest wait.
     return out.sort((a, b) => (a.paidState === b.paidState ? 0 : a.paidState === 'none' ? -1 : 1) || b.amount - a.amount || b.days - a.days);
@@ -96,6 +101,7 @@
     const n = nameOf(r.s), c = classOf(r.s), amt = money(r.amount), sch = school(), since = r.oldest ? niceDate(r.oldest) : '';
     const tier = st.feeTone === 'gentle' ? 'gentle' : r.tier;
     const head = `Dear Parent, this is a message from ${sch}.`;
+    if(r.upcoming) return `${head} A reminder that the fee of ${amt} for ${n} (${c}) ${r.nextDue ? 'is due on ' + niceDate(r.nextDue) : 'is payable'}. Kindly pay at the school office when convenient. If you have already paid, please ignore this message. Thank you.`;
     if(r.paidState === 'part' && tier === 'gentle') return `${head} Thank you for the payment already made towards ${n}'s (${c}) fee. A balance of ${amt} is still pending${since ? ' since ' + niceDate(r.oldest) : ''}. Kindly clear it at the school office when convenient. If you have already paid, please ignore this message. Thank you.`;
     if(tier === 'gentle') return `${head} A gentle reminder: the fee of ${amt} for ${n} (${c}) ${since ? 'was due on ' + since : 'is due'}. Kindly pay at the school office when convenient. If you have already paid, please ignore this message. Thank you.`;
     if(tier === 'firm') return `${head} The fee of ${amt} for ${n} (${c}) has been pending since ${since}. Kindly clear it this week at the school office. If there is any difficulty, please tell us. Thank you.`;
@@ -106,14 +112,15 @@
     return ['Student,Admission no,Class,Overdue amount,Paid so far,Days late,Parent,Phone'].concat(rows.map(r => [nameOf(r.s), r.s.admissionNo || '', classOf(r.s), r.amount, r.paid, r.days, r.s.fatherName || r.s.motherName || '', phoneOf(r.s)].map(q).join(','))).join('\r\n');
   };
   window.siFeeCsv = async () => {
-    let rows = feeRows(); if(st.feeClass) rows = rows.filter(r => r.s.className === st.feeClass); if(st.feePaid) rows = rows.filter(r => r.paidState === st.feePaid);
+    let rows = feeRows(st.feeScope); if(st.feeClass) rows = rows.filter(r => r.s.className === st.feeClass); if(st.feePaid) rows = rows.filter(r => r.paidState === st.feePaid);
     const blob = new Blob(['﻿' + feeCsv(rows)], { type:'text/csv' }), a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = 'overdue-fees-' + todayIso() + '.csv'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   };
   window.siFeeClass = c => { st.feeClass = c; st.feeView = 'list'; paintPane(); };
   function paintFees(el){
     if(!can('managefee') || !planOk('managefee')){ el.innerHTML = empty('Fees are not available for your login.'); return; }
-    const all = feeRows();
+    const all = feeRows(st.feeScope);
+    const unpaidAll = feeRows('unpaid').filter(r => r.paidState === 'none').length;
     let rows = all;
     if(st.feeClass) rows = rows.filter(r => r.s.className === st.feeClass);
     if(st.feePaid) rows = rows.filter(r => r.paidState === st.feePaid);
@@ -122,25 +129,25 @@
     const noPhone = all.filter(r => !phoneOf(r.s)).length;
     const view = st.feeView === 'list' || st.feeClass ? 'list' : 'classes';
     const head = `<p class="si-note">Students with an overdue fee instalment. Work one class at a time. Nothing is sent by itself: press WhatsApp (opens a ready message you can send) or Copy.</p>
-      <div class="sf-kpis">${kpi('Students overdue', all.length, all.length ? 'warn' : 'good')}${kpi('Total overdue', money(sum(all)), all.length ? 'danger' : 'good')}${kpi('Nothing paid yet', none, none ? 'danger' : 'good', 'Families to call first')}${kpi('Part paid', part, part ? 'warn' : 'good', 'Gentle reminder')}${kpi('No parent phone', noPhone, noPhone ? 'warn' : 'good', 'Cannot be messaged')}</div>`;
+      <div class="sf-kpis">${kpi('Students overdue', all.length, all.length ? 'warn' : 'good')}${kpi('Total overdue', money(sum(all)), all.length ? 'danger' : 'good')}${kpi('Nothing paid yet', none, none ? 'danger' : 'good', 'Families to call first')}${st.feeScope === 'unpaid' ? '' : kpi('Nothing paid at all', unpaidAll, unpaidAll ? 'warn' : 'good', 'Includes fees not yet due')}${kpi('Part paid', part, part ? 'warn' : 'good', 'Gentle reminder')}${kpi('No parent phone', noPhone, noPhone ? 'warn' : 'good', 'Cannot be messaged')}</div>`;
     if(view === 'classes'){
       const by = new Map();
       all.forEach(r => { const k = r.s.className || '—'; let g = by.get(k); if(!g) by.set(k, g = { cls:k, n:0, amt:0, none:0, part:0 }); g.n++; g.amt += r.amount; if(r.paidState === 'none') g.none++; else g.part++; });
       const order = typeof CLASS_LEVELS !== 'undefined' ? CLASS_LEVELS : [];
       const groups = [...by.values()].sort((a, b) => { const ia = order.indexOf(a.cls), ib = order.indexOf(b.cls); return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib); });
       el.innerHTML = head + (groups.length ? `<div class="table-wrap" style="overflow-x:auto"><table class="sf-table si-table"><thead><tr><th>Class</th><th>Students overdue</th><th>Total overdue</th><th>Nothing paid</th><th>Part paid</th><th></th></tr></thead><tbody>${groups.map(g => `<tr><td><b>${esc(g.cls)}</b></td><td>${g.n}</td><td><b>${money(g.amt)}</b></td><td>${g.none}</td><td>${g.part}</td><td class="si-acts"><button type="button" class="sf-btn sf-btn--soft" onclick="siFeeClass('${esc(g.cls)}')">Open class</button></td></tr>`).join('')}</tbody></table></div>
-        <div class="si-bar" style="margin-top:14px"><button type="button" class="sf-btn sf-btn--soft" onclick="siSet('feeView','list')">See all students in one list</button><button type="button" class="sf-btn sf-btn--soft" onclick="siFeeCsv()">Download list (CSV)</button></div>`
+        <div class="si-bar" style="margin-top:14px"><select class="input" onchange="siSet('feeScope',this.value)"><option value="overdue" ${st.feeScope !== 'unpaid' ? 'selected' : ''}>Overdue fees only</option><option value="unpaid" ${st.feeScope === 'unpaid' ? 'selected' : ''}>Also fees not yet due (nothing paid)</option></select><button type="button" class="sf-btn sf-btn--soft" onclick="siSet('feeView','list')">See all students in one list</button><button type="button" class="sf-btn sf-btn--soft" onclick="siFeeCsv()">Download list (CSV)</button></div>`
         : empty('No overdue fees right now.', 'Every instalment that has fallen due is paid.'))
         + `<p class="si-fine">Families who paid nothing get a firmer message the longer it goes. Families who paid part get a thank-you and a gentle reminder.</p>`;
       return;
     }
-    el.innerHTML = head + `<div class="si-bar"><button type="button" class="sf-btn sf-btn--soft" onclick="st_feeBack()">← All classes</button><select class="input" onchange="siSet('feeClass',this.value)">${classOptions(st.feeClass)}</select>
+    el.innerHTML = head + `<div class="si-bar"><button type="button" class="sf-btn sf-btn--soft" onclick="st_feeBack()">← All classes</button><select class="input" onchange="siSet('feeScope',this.value)"><option value="overdue" ${st.feeScope !== 'unpaid' ? 'selected' : ''}>Overdue fees only</option><option value="unpaid" ${st.feeScope === 'unpaid' ? 'selected' : ''}>Also fees not yet due (nothing paid)</option></select><select class="input" onchange="siSet('feeClass',this.value)">${classOptions(st.feeClass)}</select>
         <select class="input" onchange="siSet('feePaid',this.value)"><option value="">Everyone</option><option value="none" ${st.feePaid === 'none' ? 'selected' : ''}>Nothing paid yet</option><option value="part" ${st.feePaid === 'part' ? 'selected' : ''}>Part paid</option></select>
         <select class="input" onchange="siSet('feeTone',this.value)"><option value="auto" ${st.feeTone !== 'gentle' ? 'selected' : ''}>Tone: by situation</option><option value="gentle" ${st.feeTone === 'gentle' ? 'selected' : ''}>Tone: always gentle</option></select>
         <button type="button" class="sf-btn sf-btn--soft" onclick="siFeeCsv()">Download list (CSV)</button><span class="si-note" style="margin:0">${rows.length} shown · ${money(sum(rows))}</span></div>
       ${rows.length ? `<div class="table-wrap" style="overflow-x:auto"><table class="sf-table si-table"><thead><tr><th>Student</th><th>Class</th><th>Overdue</th><th>Paid so far</th><th>Days late</th><th>Parent</th><th></th></tr></thead><tbody>${rows.slice(0, 300).map(r => `<tr>
         <td><b>${esc(nameOf(r.s))}</b><small>${esc(r.s.admissionNo || '')}</small></td><td>${esc(classOf(r.s))}</td>
-        <td><b>${money(r.amount)}</b></td><td>${r.paidState === 'none' ? badge('overdue', 'Nothing paid') : badge('due', 'Part paid') + '<small>' + money(r.paid) + '</small>'}</td><td>${r.days}</td>
+        <td><b>${money(r.amount)}</b></td><td>${r.paidState === 'none' ? badge(r.upcoming ? 'due' : 'overdue', r.upcoming ? 'Nothing paid, not due yet' : 'Nothing paid') : badge('due', 'Part paid') + '<small>' + money(r.paid) + '</small>'}</td><td>${r.upcoming ? '—' : r.days}</td>
         <td>${esc(r.s.fatherName || r.s.motherName || '')}<small>${esc(phoneOf(r.s) || 'no phone')}</small></td>
         <td class="si-acts">${msgButtons(phoneOf(r.s), feeMessage(r))}</td></tr>`).join('')}</tbody></table></div>${rows.length > 300 ? '<p class="si-fine">Showing the first 300. Use the class filter to narrow down.</p>' : ''}`
         : empty(all.length ? 'Nothing matches these filters.' : 'No overdue fees right now.', all.length ? '' : 'Every instalment that has fallen due is paid.')}`;
