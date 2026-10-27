@@ -42,7 +42,7 @@ try {
   await pg.evaluate(() => switchView('dashboard')); await pg.waitForSelector('#dashInsights .si-dash-tile', { timeout: 15000 });
   const dc = await pg.innerText('#dashInsights'); assert.match(dc, /Needs your attention today/i); assert.match(dc, /fees overdue/i); assert.match(dc, /attendance follow-up/i); assert.match(dc, /enquiries/i); ok('Dashboard: attention card shows fees, attendance and enquiries');
   await pg.click('#dashInsights .si-dash-tile >> nth=0'); await pg.waitForSelector('#siTabs .mf-tab'); assert.match(await pg.innerText('#siPane'), /overdue/i); ok('Dashboard: card opens Smart Insights on the right tab');
-  await pg.evaluate(() => { attendanceRecords = window.__rec; _lazyDataPromises['attendanceRecords'] = Promise.resolve(); admissionInquiries = window.__inq || admissionInquiries; }); // the dashboard reloads real data; put the controlled data back
+  await pg.evaluate(() => { attendanceRecords = window.__rec; _lazyDataPromises['attendanceRecords'] = Promise.resolve(); admissionInquiries = window.__inq || admissionInquiries; const a4 = window.__act[4]; window.computeStudentFinance = s => s.id === a4 ? { perCat: { fee: { collected: 0, receivable: 8000 } }, totals: {} } : { perCat: { fee: { collected: 1, receivable: 0 } }, totals: {} }; }); // the dashboard reloads real data; put the controlled data back
   // Fees: class summary first, then the list
   const feeTxt = await pg.innerText('#siPane');
   assert.match(feeTxt, /Students overdue/i); assert.match(feeTxt, /Nothing paid/i); assert.match(feeTxt, /₹7,000/); assert.match(feeTxt, /Open class/i); ok('Fees: class summary with totals and paid counts');
@@ -58,10 +58,10 @@ try {
   await pg.selectOption('#siPane select >> nth=2', 'part'); assert.doesNotMatch(await pg.innerText('#siPane tbody'), /Nothing paid/); ok('Fees: paid filter works');
   const dl = await Promise.all([pg.waitForEvent('download'), pg.click('#siPane button:has-text("Download list")')]); assert.match(dl[0].suggestedFilename(), /overdue-fees-.*\.csv/); ok('Fees: CSV download');
   await pg.click('#siPane button:has-text("All classes")'); assert.match(await pg.innerText('#siPane'), /Open class/); ok('Fees: back to class summary');
-  assert.match(await pg.innerText('#siPane'), /Nothing paid at all/i); assert.match(await pg.innerText('#siPane'), /₹7,000/); ok('Fees: overdue view does not count fees not yet due');
+  assert.match(await pg.innerText('#siPane'), /Tuition not paid at all/i); assert.match(await pg.innerText('#siPane'), /₹7,000/); ok('Fees: overdue view does not count fees not yet due');
   await pg.selectOption('#siPane select >> nth=0', 'unpaid'); const un = await pg.innerText('#siPane'); assert.match(un, /₹15,000/); await pg.click('#siPane button:has-text("See all students in one list")');
-  const ul = await pg.innerText('#siPane tbody'); assert.match(ul, /not due yet/i); assert.match(ul, /₹8,000/); ok('Fees: "Also fees not yet due" shows a family that owes everything but is not late yet');
-  const w3 = (await pg.$$eval('#siPane a[href*="wa.me"]', as => as.map(a => decodeURIComponent(a.href)))).find(w => /is due on/.test(w)); assert.ok(w3 && /8,000/.test(w3)); ok('Fees: not-yet-due message is a plain reminder');
+  const ul = await pg.innerText('#siPane tbody'); assert.match(ul, /Tuition not paid/i); assert.match(ul, /₹8,000/); ok('Fees: "Also tuition not paid yet" shows a family that has paid no tuition');
+  const w3 = (await pg.$$eval('#siPane a[href*="wa.me"]', as => as.map(a => decodeURIComponent(a.href)))).find(w => /tuition fee/.test(w)); assert.ok(w3 && /8,000/.test(w3)); ok('Fees: not-yet-due message is a plain reminder');
   await pg.selectOption('#siPane select >> nth=0', 'overdue'); await pg.click('#siPane button:has-text("All classes")');
 
   // Attendance
