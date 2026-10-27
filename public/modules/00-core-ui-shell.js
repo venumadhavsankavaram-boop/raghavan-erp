@@ -43,7 +43,7 @@
     admissions:'academics', attendance:'academics', subjects:'academics', exams:'academics', result:'academics', timetable:'academics', syllabus:'academics', promotransfer:'academics', myprofile:'academics',
     managefee:'finance', accounting:'finance',
     announcements:'communication', inbox:'communication', noticeboard:'communication', contactvendor:'communication',
-    website:'website', websiteinquiries:'website', websitegallery:'website',
+    insights:'overview', website:'website', websiteinquiries:'website', websitegallery:'website',
     staffdirectory:'staffsec', staffdepts:'staffsec', staffidcards:'staffsec', staffpayroll:'staffsec', staffattendance:'staffsec', staffreports:'staffsec', staffactivity:'staffsec',
     inventory:'facilities', transport:'facilities', library:'facilities', hostel:'facilities',
     reports:'reportssec',

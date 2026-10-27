@@ -3290,6 +3290,7 @@
     <button type="button" class="sb-section-toggle" id="sbToggle-overview" style="--accent:#E8C874;--accent-rgb:232,200,116;" onclick="toggleSbSection('overview')"><span class="sb-section-toggle-left"><span class="sb-section-icon"><svg class="sb-icon sb-section-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11 L12 4 L20 11"/><path d="M6 10 V20 H18 V10"/><rect x="10" y="14" width="4" height="6"/></svg></span><span>Overview</span></span><span class="sb-section-toggle-right"><span class="sb-section-count" id="sbCount-overview">1</span><span class="sb-chevron" id="sbChevron-overview">▾</span></span></button>
     <div class="sb-section-group" id="sbGroup-overview" style="--accent:#E8C874;--accent-rgb:232,200,116;">
       <button class="sb-link active" id="navDashboard" onclick="switchView('dashboard')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11 L12 4 L20 11"/><path d="M6 10 V20 H18 V10"/><rect x="10" y="14" width="4" height="6"/></svg></span> Dashboard</button>
+      <button class="sb-link" id="navInsights" onclick="switchView('insights')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg></span> Smart Insights</button>
     </div>
     <button type="button" class="sb-section-toggle" id="sbToggle-academics" style="--accent:#6FCF97;--accent-rgb:111,207,151;" onclick="toggleSbSection('academics')"><span class="sb-section-toggle-left"><span class="sb-section-icon"><svg class="sb-icon sb-section-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5 C4 4 5 3.5 7 3.5 C9.5 3.5 11 4.5 12 5.5 C13 4.5 14.5 3.5 17 3.5 C19 3.5 20 4 20 5 V18 C20 17 19 16.5 17 16.5 C14.5 16.5 13 17.5 12 18.5 C11 17.5 9.5 16.5 7 16.5 C5 16.5 4 17 4 18 Z"/><line x1="12" y1="5.5" x2="12" y2="18.5"/></svg></span><span>Academics</span></span><span class="sb-section-toggle-right"><span class="sb-section-count" id="sbCount-academics">9</span><span class="sb-chevron" id="sbChevron-academics">▾</span></span></button>
     <div class="sb-section-group" id="sbGroup-academics" style="--accent:#6FCF97;--accent-rgb:111,207,151;">
@@ -3384,6 +3385,11 @@
 
   <main class="main">
     <div id="view-dashboard"></div>
+    <div id="view-insights" style="display:none;">
+      <div class="topbar"><div><h1>Smart Insights</h1><p>Plain-rule helpers working on your own school data: who needs a reminder, who is missing school, and records to fix. Nothing is sent automatically.</p></div></div>
+      <div class="mf-tabs si-tabs" id="siTabs"></div>
+      <div id="siPane"></div>
+    </div>
     <div id="view-admissions" style="display:none;">
     <div class="topbar">
       <div>
@@ -4982,6 +4988,7 @@
 <script src="modules/20-communications-module-intro.js"></script>
 <script src="modules/20b-communications-ui.js"></script>
 <script src="modules/20f-website-content.js"></script>
+<script src="modules/20g-smart-insights.js"></script>
 <script src="modules/30-parent-login-link.js"></script>
 <script src="modules/21-communications-notices-accounting.js"></script>
 <script src="modules/20c-accounting-ui.js"></script>

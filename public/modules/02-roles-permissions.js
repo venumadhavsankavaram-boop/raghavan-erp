@@ -11,6 +11,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
   // target — it no longer gets its own row in the matrix.
   const PERMISSION_MODULES = [
     { key:'dashboard',   label:'Dashboard',          icon:'📊', category:'Overview' },
+    { key:'insights',    label:'Smart Insights',     icon:'💡', category:'Overview' },
     { key:'dashboard_headcount', label:'Live Headcount card (total strength, boys / girls)', icon:'👥', category:'Overview', parent:'dashboard', isNew:true, viewOnly:true },
     { key:'dashboard_quickaccess', label:'Quick Access shortcuts', icon:'⚡', category:'Overview', parent:'dashboard', isNew:true, viewOnly:true },
     { key:'dashboard_fee_totals', label:'Fee totals (expected, collected, discount, receivable)', icon:'💰', category:'Overview', parent:'dashboard', isNew:true, viewOnly:true },
@@ -909,6 +910,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
   function applyRolePermissions(){
     const allowed = getRoleViews(currentUser.role);
     document.getElementById('navDashboard').style.display = allowed.includes('dashboard') ? 'flex' : 'none';
+    document.getElementById('navInsights').style.display = allowed.includes('insights') ? 'flex' : 'none';
     document.getElementById('navAdmissions').style.display = allowed.includes('admissions') ? 'flex' : 'none';
     document.getElementById('navManageFee').style.display = (allowed.includes('managefee') && isModuleEnabledByPlan('managefee')) ? 'flex' : 'none';
     document.getElementById('navAttendance').style.display = (allowed.includes('attendance') && isModuleEnabledByPlan('attendance')) ? 'flex' : 'none';

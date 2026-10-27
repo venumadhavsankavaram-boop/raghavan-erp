@@ -45,6 +45,7 @@ function switchView(view){
     closeMobileSidebar();
     expandSbSectionFor(view);
     document.getElementById('view-dashboard').style.display = view === 'dashboard' ? 'block' : 'none';
+    document.getElementById('view-insights').style.display = view === 'insights' ? 'block' : 'none';
     document.getElementById('view-admissions').style.display = view === 'admissions' ? 'block' : 'none';
     document.getElementById('view-managefee').style.display = view === 'managefee' ? 'block' : 'none';
     document.getElementById('view-attendance').style.display = view === 'attendance' ? 'block' : 'none';
@@ -80,6 +81,7 @@ function switchView(view){
     document.getElementById('view-myaccount').style.display = view === 'myaccount' ? 'block' : 'none';
     document.getElementById('view-myprofile').style.display = view === 'myprofile' ? 'block' : 'none';
     document.getElementById('navDashboard').classList.toggle('active', view === 'dashboard');
+    document.getElementById('navInsights').classList.toggle('active', view === 'insights');
     document.getElementById('navAdmissions').classList.toggle('active', view === 'admissions');
     document.getElementById('navManageFee').classList.toggle('active', view === 'managefee');
     document.getElementById('navAttendance').classList.toggle('active', view === 'attendance');
@@ -150,6 +152,7 @@ function switchView(view){
     if(view === 'accounting'){ initAccountingView(); }
     if(view === 'announcements'){ initCommsView(); }
     if(view === 'inbox'){ initInboxView(); }
+    if(view === 'insights'){ initInsightsView(); }
     if(view === 'noticeboard'){ initNoticeBoardView(); }
     if(view === 'website'){ initWebsiteView(webTabHint); }
     if(view === 'contactvendor'){ resetContactVendorForm(); }
