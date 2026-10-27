@@ -2171,7 +2171,6 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     document.getElementById('userModalTitle').textContent = mode === 'studentparent' ? 'Add Student/Parent Login' : (mode === 'staff' ? 'Add Staff User' : 'Add User');
     document.getElementById('userForm').reset();
     document.getElementById('editUserId').value = '';
-    document.getElementById('uRecoveryCode').value = generateRecoveryCode();
     userModalUsernameTouched = false;
     document.getElementById('uPassword').placeholder = 'Set a login password';
     document.getElementById('uPassword').value = generateLoginPassword();
@@ -2193,9 +2192,6 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     const role = document.getElementById('uRole').value;
     document.getElementById('uStudentField').style.display = (role==='Student'||role==='Parent') ? 'block' : 'none';
   }
-  function regenerateRecoveryCode(){
-    document.getElementById('uRecoveryCode').value = generateRecoveryCode();
-  }
   function populateUserStudentPicker(){
     const sel = document.getElementById('uLinkedStudent');
     sel.innerHTML = '<option value="">Not linked</option>' +
@@ -2215,7 +2211,6 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     document.getElementById('uPassword').placeholder = 'Leave blank to keep the current password';
     populateUserRoleSelect();
     document.getElementById('uRole').value = u.role;
-    document.getElementById('uRecoveryCode').value = u.recoveryCode || generateRecoveryCode();
     populateUserStudentPicker();
     document.getElementById('uLinkedStudent').value = u.linkedStudentId || '';
     toggleUserStudentField();
@@ -2257,7 +2252,6 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       password: document.getElementById('uPassword').value,
       role: document.getElementById('uRole').value,
       linkedStudentId: document.getElementById('uLinkedStudent').value,
-      recoveryCode: document.getElementById('uRecoveryCode').value,
     };
     let linkedStaff = null;
     let prevLinkedUserId;

@@ -464,13 +464,6 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     };
   }
 
-  function generateRecoveryCode(){
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let code = '';
-    for(let i=0;i<8;i++) code += chars[Math.floor(Math.random()*chars.length)];
-    return code;
-  }
-
   async function loadUsers(){
     // The default admin account is seeded server-side on first run (server.js),
     // with a random password printed once to the server console — this used to
@@ -479,9 +472,6 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     // of whether anyone had actually changed it since. Nothing here fabricates
     // a login anymore; this only loads whatever accounts already exist.
     let stored = await storageGet(USERS_KEY, null) || [];
-    let changed = false;
-    stored.forEach(u => { if(!u.recoveryCode){ u.recoveryCode = generateRecoveryCode(); changed = true; } });
-    if(changed) await storageSet(USERS_KEY, stored);
     users = stored;
   }
 

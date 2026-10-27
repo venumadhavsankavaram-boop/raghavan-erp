@@ -764,7 +764,7 @@ let saSelectedTeacherId = '';
           const newUser = {
             id: 'u_' + Date.now(), name: data.firstName+' '+data.lastName, username: uname,
             password: pwd || Math.random().toString(36).slice(-8), role: g('stfSystemRole'),
-            linkedStudentId: '', recoveryCode: generateRecoveryCode(),
+            linkedStudentId: '',
           };
           users.push(newUser);
           const prevLinkedUserId = staffRecord.linkedUserId;
