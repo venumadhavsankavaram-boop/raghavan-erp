@@ -1967,6 +1967,8 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     if(loginNameEl && schoolInfo.name) loginNameEl.textContent = schoolInfo.name;
     const loginLogoEl = document.getElementById('loginLogoImg');
     if(loginLogoEl && schoolInfo.logo) loginLogoEl.src = schoolInfo.logo;
+    try{ if(schoolInfo.name && schoolInfo.name !== 'Your School Name') localStorage.setItem('rgv_brand', JSON.stringify({ name: schoolInfo.name, logo: schoolInfo.logo || '' })); }catch(e){}
+    document.documentElement.classList.remove('brand-pending');
   }
   function schoolLogoSrc(){
     return schoolLogoData || schoolInfo.logo || document.getElementById('sbLogoImg').src;

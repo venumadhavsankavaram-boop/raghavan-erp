@@ -427,6 +427,7 @@
   @media (prefers-reduced-motion: reduce){
     .login-card{ animation:none; }
   }
+  html.brand-pending #loginSchoolName, html.brand-pending #loginLogoImg{ visibility:hidden; }
   .login-logo-wrap{
     width:96px; height:96px; margin:0 auto 20px; border-radius:50%; position:relative;
     display:flex; align-items:center; justify-content:center;
@@ -3182,6 +3183,24 @@
     <img id="loginLogoImg" src="data:image/png;base64,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" alt="logo" class="login-logo">
     </div>
     <h2 id="loginSchoolName">Your School Name</h2>
+    <script>
+    // Show this school's own name/logo straight away (remembered from the last visit) so the
+    // template placeholder never flashes. First-ever visit: hide the placeholder until the real
+    // details arrive (or 2.5 seconds, whichever is first).
+    (function(){
+      var el = document.documentElement, done = function(){ el.classList.remove('brand-pending'); };
+      try{
+        var b = JSON.parse(localStorage.getItem('rgv_brand') || 'null');
+        if(b && b.name){
+          document.getElementById('loginSchoolName').textContent = b.name;
+          document.title = b.name + ' \u2014 ERP';
+          if(b.logo) document.getElementById('loginLogoImg').src = b.logo;
+          return;
+        }
+      }catch(e){}
+      el.classList.add('brand-pending'); setTimeout(done, 2500);
+    })();
+    </script>
     <p class="login-sub">ERP Portal — sign in to continue</p>
 
     <div class="login-audience-toggle" role="tablist" aria-label="Sign in as">
