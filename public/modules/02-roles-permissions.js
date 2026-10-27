@@ -582,6 +582,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
       moduleAccess = u.moduleAccess || { restricted: false, enabledKeys: [] };
       sessionStorage.setItem('rgv_current_user', u.id);
       if(u.mustChangePassword && !u.impersonating){ await showForcedPasswordChange(); location.reload(); return; }
+      if(u.mustSetup2fa && !u.impersonating){ loginLoaderStop(); hideLoginScreen(); await showForcedTwofaSetup(); location.reload(); return; }
       loginLoaderStart('Restoring your session…', 0);
       loginLoaderStage('Loading students, fees and records…', 0, true);
       try{ await loadAllAppData(); } finally { loginLoaderStop(); }
@@ -759,6 +760,14 @@ const CUSTOM_ROLES_KEY = "custom-roles";
       loginLoaderStop();
       if(submitBtn) submitBtn.disabled = false;
       await showForcedPasswordChange();
+      location.reload();
+      return false;
+    }
+    if(u.mustSetup2fa){
+      loginLoaderStop();
+      if(submitBtn) submitBtn.disabled = false;
+      hideLoginScreen();
+      await showForcedTwofaSetup();
       location.reload();
       return false;
     }
