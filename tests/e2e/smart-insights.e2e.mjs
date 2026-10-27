@@ -19,7 +19,7 @@ try {
       rec.push({ id: 'a1' + d, studentId: act[1].id, date: iso(d), session: 'Morning', status: d % 2 ? 'Absent' : 'Present' }); // 50%
       rec.push({ id: 'a2' + d, studentId: act[2].id, date: iso(d), session: 'Morning', status: 'Present' });
     }
-    attendanceRecords = rec; _lazyDataPromises['attendanceRecords'] = Promise.resolve();
+    window.__rec = rec; attendanceRecords = rec; _lazyDataPromises['attendanceRecords'] = Promise.resolve();
     window.__sfOrig = window.sfStudentSummary;
     window.sfStudentSummary = s => s.id === act[1].id
       ? { state: 'overdue', dueNow: 2000, totals: { collected: 3000, receivable: 2000 }, rows: { allRows: [{ overdueAmount: 2000, installments: [{ status: 'overdue', outstanding: 2000, due: iso(60) }] }] } }
@@ -27,7 +27,7 @@ try {
       ? { state: 'overdue', dueNow: 5000, totals: { receivable: 5000 }, rows: { allRows: [{ overdueAmount: 5000, installments: [{ status: 'overdue', outstanding: 5000, due: iso(60) }] }] } }
       : { state: 'paid', dueNow: 0, totals: { receivable: 0 }, rows: { allRows: [] } };
     window.refreshAdmissionInquiries = async () => {};
-    admissionInquiries = [
+    admissionInquiries = window.__inq = [
       { id: 'q1', studentName: 'Asha', parentName: 'Ravi', parentPhone: '9811111111', applyingGrade: 'Class 1', submittedDate: iso(5), status: 'New' },
       { id: 'q2', studentName: 'Kiran', parentName: 'Lata', parentPhone: '9822222222', applyingGrade: 'Class 3', submittedDate: iso(12), status: 'Contacted' },
       { id: 'q3', studentName: 'Done', parentName: 'X', parentPhone: '9833333333', applyingGrade: 'Class 2', submittedDate: iso(1), status: 'Converted' },
@@ -37,6 +37,11 @@ try {
   const tabs = await pg.$$eval('#siTabs .mf-tab', els => els.map(e => e.textContent.trim()));
   assert.ok(tabs.some(t => /Fees/.test(t)) && tabs.some(t => /Attendance/.test(t)) && tabs.some(t => /Notice helper/.test(t)) && tabs.some(t => /Enquiries/.test(t)) && tabs.some(t => /Data health/.test(t)) && tabs.some(t => /Needs attention/.test(t))); ok('all six tabs are there');
 
+  // Dashboard card
+  await pg.evaluate(() => switchView('dashboard')); await pg.waitForSelector('#dashInsights .si-dash-tile', { timeout: 15000 });
+  const dc = await pg.innerText('#dashInsights'); assert.match(dc, /Needs your attention today/i); assert.match(dc, /fees overdue/i); assert.match(dc, /attendance follow-up/i); assert.match(dc, /enquiries/i); ok('Dashboard: attention card shows fees, attendance and enquiries');
+  await pg.click('#dashInsights .si-dash-tile >> nth=0'); await pg.waitForSelector('#siTabs .mf-tab'); assert.match(await pg.innerText('#siPane'), /overdue/i); ok('Dashboard: card opens Smart Insights on the right tab');
+  await pg.evaluate(() => { attendanceRecords = window.__rec; _lazyDataPromises['attendanceRecords'] = Promise.resolve(); admissionInquiries = window.__inq || admissionInquiries; }); // the dashboard reloads real data; put the controlled data back
   // Fees: class summary first, then the list
   const feeTxt = await pg.innerText('#siPane');
   assert.match(feeTxt, /Students overdue/i); assert.match(feeTxt, /Nothing paid/i); assert.match(feeTxt, /₹7,000/); assert.match(feeTxt, /Open class/i); ok('Fees: class summary with totals and paid counts');

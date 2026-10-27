@@ -57,7 +57,11 @@
 .si-bar select,.si-bar input{max-width:200px}.si-nophone{font-size:.74rem;color:var(--ink-soft);margin-right:6px}
 .si-table td small{display:block;color:var(--ink-soft)}.si-acts{white-space:nowrap}.si-acts .sf-btn{padding:5px 10px;font-size:.78rem;text-decoration:none}
 .si-draft{width:100%;min-height:170px;border:1px solid var(--border);border-radius:12px;padding:12px;font:inherit}
-.si-chips span{display:inline-block;margin:2px 4px 2px 0}.si-fine{font-size:.78rem;color:var(--ink-soft);margin-top:14px}`;
+.si-chips span{display:inline-block;margin:2px 4px 2px 0}.si-fine{font-size:.78rem;color:var(--ink-soft);margin-top:14px}
+.si-dash{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin:0 0 26px}
+.si-dash-tile{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;padding:14px 16px;border:1px solid var(--border);border-radius:16px;background:var(--surface,#fff);cursor:pointer;font:inherit;color:inherit}
+.si-dash-tile.has{border-color:#e3b64e;box-shadow:0 2px 10px rgba(200,150,30,.12)}.si-dash-tile:hover{transform:translateY(-1px)}
+.si-dash-tile b{font-size:1.7rem;line-height:1.1}.si-dash-ico{font-size:1.15rem}.si-dash-lbl{font-size:.84rem;font-weight:600}.si-dash-tile small{color:var(--ink-soft);font-size:.76rem}`;
     document.head.appendChild(s);
   }
 
@@ -380,5 +384,29 @@
     try{ if(can('websiteinquiries')) out.enquiries = enquiryRows().filter(r => r.q.status !== 'Contacted').length; }catch(e){}
     return out;
   };
-  window.__siTest = { feeRows, attStats, enquiryRows, healthChecks, noticeDraft, NOTICE_TYPES, nf: () => nf };
+  /* ---------- Dashboard card ---------- */
+  async function paintDashCard(){
+    if(!can('insights') || !byId('dashBanner')) return;
+    ensureCss();
+    let host = byId('dashInsights');
+    if(!host){ host = document.createElement('div'); host.id = 'dashInsights'; byId('dashBanner').insertAdjacentElement('afterend', host); }
+    const tiles = [];
+    try{ if(can('managefee') && planOk('managefee')){ const r = feeRows(); const none = r.filter(x => x.paidState === 'none').length;
+      tiles.push({ k:'fees', icon:'💰', n:r.length, label:'students with fees overdue', sub: r.length ? money(r.reduce((a, x) => a + x.amount, 0)) + ' · ' + none + ' paid nothing' : 'All clear' }); } }catch(e){}
+    try{ if(can('attendance') && planOk('attendance')){ await ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData); const a = attStats();
+      tiles.push({ k:'attendance', icon:'🗓️', n:a.length, label:'children need an attendance follow-up', sub: a.length ? a.filter(x => x.reasons.includes('streak')).length + ' absent 3+ days in a row' : 'All clear' }); } }catch(e){}
+    try{ if(can('websiteinquiries') && typeof admissionInquiries !== 'undefined'){ const q = enquiryRows().filter(x => x.q.status !== 'Contacted');
+      tiles.push({ k:'enquiries', icon:'📨', n:q.length, label:'new admission enquiries not answered', sub: q.length ? 'Reply quickly to win the family' : 'All clear' }); } }catch(e){}
+    if(!tiles.length){ host.innerHTML = ''; return; }
+    host.innerHTML = `<div class="dash-section-title"><div><span class="eyebrow-sm">Smart Insights</span><h3>Needs your attention today</h3></div></div>
+      <div class="si-dash">${tiles.map(t => `<button type="button" class="si-dash-tile ${t.n ? 'has' : ''}" onclick="siGoFrom('${t.k}')"><span class="si-dash-ico">${t.icon}</span><b>${t.n}</b><span class="si-dash-lbl">${t.label}</span><small>${esc(t.sub)}</small></button>`).join('')}</div>`;
+  }
+  window.siGoFrom = k => { siTab = k; try{ switchView('insights'); }catch(e){} };
+  (function hookDashboard(){
+    if(typeof renderDashboard !== 'function') return;
+    const base = renderDashboard;
+    renderDashboard = async function(){ const r = await base.apply(this, arguments); setTimeout(() => { paintDashCard().catch(() => {}); }, 0); return r; };
+  })();
+
+  window.__siTest = { paintDashCard, feeRows, attStats, enquiryRows, healthChecks, noticeDraft, NOTICE_TYPES, nf: () => nf };
 })();
