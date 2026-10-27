@@ -21,7 +21,9 @@ try {
     }
     attendanceRecords = rec; _lazyDataPromises['attendanceRecords'] = Promise.resolve();
     window.__sfOrig = window.sfStudentSummary;
-    window.sfStudentSummary = s => s.id === act[2].id
+    window.sfStudentSummary = s => s.id === act[1].id
+      ? { state: 'overdue', dueNow: 2000, totals: { collected: 3000, receivable: 2000 }, rows: { allRows: [{ overdueAmount: 2000, installments: [{ status: 'overdue', outstanding: 2000, due: iso(60) }] }] } }
+      : s.id === act[2].id
       ? { state: 'overdue', dueNow: 5000, totals: { receivable: 5000 }, rows: { allRows: [{ overdueAmount: 5000, installments: [{ status: 'overdue', outstanding: 5000, due: iso(60) }] }] } }
       : { state: 'paid', dueNow: 0, totals: { receivable: 0 }, rows: { allRows: [] } };
     window.refreshAdmissionInquiries = async () => {};
@@ -35,11 +37,21 @@ try {
   const tabs = await pg.$$eval('#siTabs .mf-tab', els => els.map(e => e.textContent.trim()));
   assert.ok(tabs.some(t => /Fees/.test(t)) && tabs.some(t => /Attendance/.test(t)) && tabs.some(t => /Notice helper/.test(t)) && tabs.some(t => /Enquiries/.test(t)) && tabs.some(t => /Data health/.test(t)) && tabs.some(t => /Needs attention/.test(t))); ok('all six tabs are there');
 
-  // Fees
+  // Fees: class summary first, then the list
   const feeTxt = await pg.innerText('#siPane');
-  assert.match(feeTxt, /Students overdue/i); assert.match(feeTxt, /₹5,000/); assert.match(feeTxt, /Urgent/); assert.match(feeTxt, /60/); ok('Fees: overdue student shown with amount, days and Urgent tone');
-  const wa = await pg.$eval('#siPane a[href*="wa.me"]', a => decodeURIComponent(a.href)); assert.match(wa, /wa\.me\/919000000001/); assert.match(wa, /5,000/); assert.match(wa, /60 days/); ok('Fees: WhatsApp link goes to the parent with the right message');
-  await pg.selectOption('#siPane select >> nth=1', 'gentle'); assert.match(await pg.innerText('#siPane'), /No overdue fees right now|Nothing matches/i); ok('Fees: delay filter works');
+  assert.match(feeTxt, /Students overdue/i); assert.match(feeTxt, /Nothing paid/i); assert.match(feeTxt, /₹7,000/); assert.match(feeTxt, /Open class/i); ok('Fees: class summary with totals and paid counts');
+  await pg.click('#siPane button:has-text("See all students in one list")');
+  const list = await pg.innerText('#siPane');
+  assert.match(list, /Nothing paid/i); assert.match(list, /Part paid/i); assert.match(list, /₹3,000/); ok('Fees: list shows paid so far and Nothing paid / Part paid status');
+  const was = await pg.$$eval('#siPane a[href*="wa.me"]', as => as.map(a => decodeURIComponent(a.href)));
+  const none = was.find(w => /919000000001/.test(w)), part = was.find(w => /919123456780/.test(w));
+  assert.ok(none && /60 days/.test(none) && /5,000/.test(none)); ok('Fees: nothing-paid family gets the urgent message');
+  assert.ok(part && /Thank you for the payment already made/.test(part) && !/60 days/.test(part)); ok('Fees: part-paid family gets a thank-you and gentle reminder');
+  await pg.selectOption('#siPane select >> nth=2', 'gentle');
+  assert.ok((await pg.$$eval('#siPane a[href*="wa.me"]', as => as.map(a => decodeURIComponent(a.href)))).every(w => !/60 days/.test(w))); ok('Fees: always-gentle override works');
+  await pg.selectOption('#siPane select >> nth=1', 'part'); assert.doesNotMatch(await pg.innerText('#siPane tbody'), /Nothing paid/); ok('Fees: paid filter works');
+  const dl = await Promise.all([pg.waitForEvent('download'), pg.click('#siPane button:has-text("Download list")')]); assert.match(dl[0].suggestedFilename(), /overdue-fees-.*\.csv/); ok('Fees: CSV download');
+  await pg.click('#siPane button:has-text("All classes")'); assert.match(await pg.innerText('#siPane'), /Open class/); ok('Fees: back to class summary');
 
   // Attendance
   await pg.evaluate(() => siGo('attendance')); await pg.waitForFunction(() => /Need follow-up/i.test(document.getElementById('siPane').innerText));

@@ -12,7 +12,7 @@
     { k:'health',    icon:'🧹', label:'Data health' },
   ];
   let siTab = 'fees';
-  const st = { feeClass:'', feeTier:'', attClass:'', attReason:'', attnClass:'', healthType:'', cache:{} };
+  const st = { feeClass:'', feeTier:'', feePaid:'', feeView:'classes', feeTone:'auto', attClass:'', attReason:'', attnClass:'', healthType:'', cache:{} };
   const byId = id => document.getElementById(id);
   const esc = s => (typeof escapeHtml === 'function' ? escapeHtml(String(s == null ? '' : s)) : String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
   const can = key => { try{ return getRoleViews(currentUser.role).includes(key); }catch(e){ return false; } };
@@ -74,39 +74,74 @@
       });
       if(amount <= 0) amount = Number(sum.dueNow) || 0;
       const days = oldest ? Math.max(daysBetween(oldest, today), 0) : 0;
-      const tier = days > 45 ? 'urgent' : days > 15 ? 'firm' : 'gentle';
-      out.push({ s, amount, oldest, days, tier });
+      const t = sum.totals || {};
+      const paid = Number(t.collected) || 0, left = Number(t.receivable) || amount;
+      const paidShare = paid + left > 0 ? paid / (paid + left) : 0;
+      const paidState = paid <= 0 ? 'none' : 'part';
+      // Everyone often shares one due date, so days late alone cannot tell families apart: what has
+      // already been paid decides the tone. Firm and urgent are only for families who paid nothing.
+      let tier = 'gentle';
+      if(paidState === 'none') tier = days > 45 ? 'urgent' : days > 15 ? 'firm' : 'gentle';
+      else if(paidShare < 0.5 && days > 30) tier = 'firm';
+      out.push({ s, amount, oldest, days, tier, paid, paidShare, paidState });
     });
-    return out.sort((a, b) => b.days - a.days || b.amount - a.amount);
+    // Biggest unpaid share first, then the largest amount, then the longest wait.
+    return out.sort((a, b) => (a.paidState === b.paidState ? 0 : a.paidState === 'none' ? -1 : 1) || b.amount - a.amount || b.days - a.days);
   }
   function feeMessage(r){
     const n = nameOf(r.s), c = classOf(r.s), amt = money(r.amount), sch = school(), since = r.oldest ? niceDate(r.oldest) : '';
+    const tier = st.feeTone === 'gentle' ? 'gentle' : r.tier;
     const head = `Dear Parent, this is a message from ${sch}.`;
-    if(r.tier === 'gentle') return `${head} A gentle reminder: the fee of ${amt} for ${n} (${c}) ${since ? 'was due on ' + since : 'is due'}. Kindly pay at the school office when convenient. If you have already paid, please ignore this message. Thank you.`;
-    if(r.tier === 'firm') return `${head} The fee of ${amt} for ${n} (${c}) has been pending since ${since}. Kindly clear it this week at the school office. If there is any difficulty, please tell us. Thank you.`;
+    if(r.paidState === 'part' && tier === 'gentle') return `${head} Thank you for the payment already made towards ${n}'s (${c}) fee. A balance of ${amt} is still pending${since ? ' since ' + niceDate(r.oldest) : ''}. Kindly clear it at the school office when convenient. If you have already paid, please ignore this message. Thank you.`;
+    if(tier === 'gentle') return `${head} A gentle reminder: the fee of ${amt} for ${n} (${c}) ${since ? 'was due on ' + since : 'is due'}. Kindly pay at the school office when convenient. If you have already paid, please ignore this message. Thank you.`;
+    if(tier === 'firm') return `${head} The fee of ${amt} for ${n} (${c}) has been pending since ${since}. Kindly clear it this week at the school office. If there is any difficulty, please tell us. Thank you.`;
     return `${head} The fee of ${amt} for ${n} (${c}) has been pending for ${r.days} days. Please meet the school office within 3 days so we can sort it out together, or let us know if you need a payment plan. Thank you.`;
   }
+  const feeCsv = rows => {
+    const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+    return ['Student,Admission no,Class,Overdue amount,Paid so far,Days late,Parent,Phone'].concat(rows.map(r => [nameOf(r.s), r.s.admissionNo || '', classOf(r.s), r.amount, r.paid, r.days, r.s.fatherName || r.s.motherName || '', phoneOf(r.s)].map(q).join(','))).join('\r\n');
+  };
+  window.siFeeCsv = async () => {
+    let rows = feeRows(); if(st.feeClass) rows = rows.filter(r => r.s.className === st.feeClass); if(st.feePaid) rows = rows.filter(r => r.paidState === st.feePaid);
+    const blob = new Blob(['﻿' + feeCsv(rows)], { type:'text/csv' }), a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'overdue-fees-' + todayIso() + '.csv'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  };
+  window.siFeeClass = c => { st.feeClass = c; st.feeView = 'list'; paintPane(); };
   function paintFees(el){
     if(!can('managefee') || !planOk('managefee')){ el.innerHTML = empty('Fees are not available for your login.'); return; }
-    let rows = feeRows();
-    const all = rows;
+    const all = feeRows();
+    let rows = all;
     if(st.feeClass) rows = rows.filter(r => r.s.className === st.feeClass);
-    if(st.feeTier) rows = rows.filter(r => r.tier === st.feeTier);
-    const total = all.reduce((a, r) => a + r.amount, 0);
+    if(st.feePaid) rows = rows.filter(r => r.paidState === st.feePaid);
+    const sum = l => l.reduce((a, r) => a + r.amount, 0);
+    const none = all.filter(r => r.paidState === 'none').length, part = all.length - none;
     const noPhone = all.filter(r => !phoneOf(r.s)).length;
-    el.innerHTML = `<p class="si-note">Students with an overdue fee instalment, longest overdue first. Nothing is sent by itself: press WhatsApp (opens a ready message you can send) or Copy.</p>
-      <div class="sf-kpis">${kpi('Students overdue', all.length, all.length ? 'warn' : 'good')}${kpi('Total overdue', money(total), total ? 'danger' : 'good')}${kpi('Over 45 days', all.filter(r => r.tier === 'urgent').length, 'danger', 'Need a personal call')}${kpi('No parent phone', noPhone, noPhone ? 'warn' : 'good', 'Cannot be messaged')}</div>
-      <div class="si-bar"><select class="input" onchange="siSet('feeClass',this.value)">${classOptions(st.feeClass)}</select>
-        <select class="input" onchange="siSet('feeTier',this.value)"><option value="">All delays</option><option value="gentle" ${st.feeTier === 'gentle' ? 'selected' : ''}>Up to 15 days</option><option value="firm" ${st.feeTier === 'firm' ? 'selected' : ''}>16 to 45 days</option><option value="urgent" ${st.feeTier === 'urgent' ? 'selected' : ''}>Over 45 days</option></select>
-        <span class="si-note" style="margin:0">${rows.length} shown</span></div>
-      ${rows.length ? `<div class="table-wrap" style="overflow-x:auto"><table class="sf-table si-table"><thead><tr><th>Student</th><th>Class</th><th>Overdue</th><th>Days late</th><th>Parent</th><th></th></tr></thead><tbody>${rows.slice(0, 300).map(r => `<tr>
+    const view = st.feeView === 'list' || st.feeClass ? 'list' : 'classes';
+    const head = `<p class="si-note">Students with an overdue fee instalment. Work one class at a time. Nothing is sent by itself: press WhatsApp (opens a ready message you can send) or Copy.</p>
+      <div class="sf-kpis">${kpi('Students overdue', all.length, all.length ? 'warn' : 'good')}${kpi('Total overdue', money(sum(all)), all.length ? 'danger' : 'good')}${kpi('Nothing paid yet', none, none ? 'danger' : 'good', 'Families to call first')}${kpi('Part paid', part, part ? 'warn' : 'good', 'Gentle reminder')}${kpi('No parent phone', noPhone, noPhone ? 'warn' : 'good', 'Cannot be messaged')}</div>`;
+    if(view === 'classes'){
+      const by = new Map();
+      all.forEach(r => { const k = r.s.className || '—'; let g = by.get(k); if(!g) by.set(k, g = { cls:k, n:0, amt:0, none:0, part:0 }); g.n++; g.amt += r.amount; if(r.paidState === 'none') g.none++; else g.part++; });
+      const order = typeof CLASS_LEVELS !== 'undefined' ? CLASS_LEVELS : [];
+      const groups = [...by.values()].sort((a, b) => { const ia = order.indexOf(a.cls), ib = order.indexOf(b.cls); return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib); });
+      el.innerHTML = head + (groups.length ? `<div class="table-wrap" style="overflow-x:auto"><table class="sf-table si-table"><thead><tr><th>Class</th><th>Students overdue</th><th>Total overdue</th><th>Nothing paid</th><th>Part paid</th><th></th></tr></thead><tbody>${groups.map(g => `<tr><td><b>${esc(g.cls)}</b></td><td>${g.n}</td><td><b>${money(g.amt)}</b></td><td>${g.none}</td><td>${g.part}</td><td class="si-acts"><button type="button" class="sf-btn sf-btn--soft" onclick="siFeeClass('${esc(g.cls)}')">Open class</button></td></tr>`).join('')}</tbody></table></div>
+        <div class="si-bar" style="margin-top:14px"><button type="button" class="sf-btn sf-btn--soft" onclick="siSet('feeView','list')">See all students in one list</button><button type="button" class="sf-btn sf-btn--soft" onclick="siFeeCsv()">Download list (CSV)</button></div>`
+        : empty('No overdue fees right now.', 'Every instalment that has fallen due is paid.'))
+        + `<p class="si-fine">Families who paid nothing get a firmer message the longer it goes. Families who paid part get a thank-you and a gentle reminder.</p>`;
+      return;
+    }
+    el.innerHTML = head + `<div class="si-bar"><button type="button" class="sf-btn sf-btn--soft" onclick="st_feeBack()">← All classes</button><select class="input" onchange="siSet('feeClass',this.value)">${classOptions(st.feeClass)}</select>
+        <select class="input" onchange="siSet('feePaid',this.value)"><option value="">Everyone</option><option value="none" ${st.feePaid === 'none' ? 'selected' : ''}>Nothing paid yet</option><option value="part" ${st.feePaid === 'part' ? 'selected' : ''}>Part paid</option></select>
+        <select class="input" onchange="siSet('feeTone',this.value)"><option value="auto" ${st.feeTone !== 'gentle' ? 'selected' : ''}>Tone: by situation</option><option value="gentle" ${st.feeTone === 'gentle' ? 'selected' : ''}>Tone: always gentle</option></select>
+        <button type="button" class="sf-btn sf-btn--soft" onclick="siFeeCsv()">Download list (CSV)</button><span class="si-note" style="margin:0">${rows.length} shown · ${money(sum(rows))}</span></div>
+      ${rows.length ? `<div class="table-wrap" style="overflow-x:auto"><table class="sf-table si-table"><thead><tr><th>Student</th><th>Class</th><th>Overdue</th><th>Paid so far</th><th>Days late</th><th>Parent</th><th></th></tr></thead><tbody>${rows.slice(0, 300).map(r => `<tr>
         <td><b>${esc(nameOf(r.s))}</b><small>${esc(r.s.admissionNo || '')}</small></td><td>${esc(classOf(r.s))}</td>
-        <td><b>${money(r.amount)}</b></td><td>${r.days} ${badge(r.tier === 'urgent' ? 'overdue' : r.tier === 'firm' ? 'due' : 'upcoming', r.tier === 'urgent' ? 'Urgent' : r.tier === 'firm' ? 'Firm' : 'Gentle')}</td>
+        <td><b>${money(r.amount)}</b></td><td>${r.paidState === 'none' ? badge('overdue', 'Nothing paid') : badge('due', 'Part paid') + '<small>' + money(r.paid) + '</small>'}</td><td>${r.days}</td>
         <td>${esc(r.s.fatherName || r.s.motherName || '')}<small>${esc(phoneOf(r.s) || 'no phone')}</small></td>
         <td class="si-acts">${msgButtons(phoneOf(r.s), feeMessage(r))}</td></tr>`).join('')}</tbody></table></div>${rows.length > 300 ? '<p class="si-fine">Showing the first 300. Use the class filter to narrow down.</p>' : ''}`
-        : empty(all.length ? 'Nothing matches these filters.' : 'No overdue fees right now.', all.length ? '' : 'Every instalment that has fallen due is paid.')}
-      <p class="si-fine">Tone follows how late the fee is: gentle up to 15 days, firm up to 45, then a request to meet the office.</p>`;
+        : empty(all.length ? 'Nothing matches these filters.' : 'No overdue fees right now.', all.length ? '' : 'Every instalment that has fallen due is paid.')}`;
   }
+  window.st_feeBack = () => { st.feeClass = ''; st.feePaid = ''; st.feeView = 'classes'; paintPane(); };
 
   /* ---------- Attendance ---------- */
   function attStats(){
@@ -119,10 +154,15 @@
       if(r.status === 'Absent') a.abs++; else if(r.status === 'Present' || r.status === 'Late') a.pres++;
       m.set(r.date, a);
     });
+    // A day on which nearly everyone is marked absent is almost certainly not a real school day (holiday, closure or a
+    // mistake), so it is ignored instead of flagging the whole school.
+    const dayTot = new Map();
+    byStu.forEach(m => m.forEach((v, d) => { const t = dayTot.get(d) || { a:0, n:0 }; t.n++; if(v.abs > 0 && v.pres === 0) t.a++; dayTot.set(d, t); }));
+    const skip = new Set([...dayTot.entries()].filter(([, t]) => t.n >= 10 && t.a / t.n >= 0.85).map(([d]) => d));
     const out = [];
     activeStudents().forEach(s => {
       const m = byStu.get(s.id); if(!m) return;
-      const days = [...m.entries()].map(([d, v]) => ({ d, absent: v.abs > 0 && v.pres === 0, present: v.pres > 0 })).filter(x => x.absent || x.present).sort((a, b) => b.d.localeCompare(a.d));
+      const days = [...m.entries()].filter(([d]) => !skip.has(d)).map(([d, v]) => ({ d, absent: v.abs > 0 && v.pres === 0, present: v.pres > 0 })).filter(x => x.absent || x.present).sort((a, b) => b.d.localeCompare(a.d));
       if(!days.length) return;
       const last = days[0].d;
       let streak = 0; if(daysBetween(last, today) <= 7){ for(const x of days){ if(x.absent) streak++; else break; } }
@@ -135,7 +175,8 @@
       if(streak >= 3) reasons.push('streak');
       if(pc !== null && win.length >= 8 && pc < thr) reasons.push('low');
       if(streak < 3 && rp !== null && ep !== null && ep - rp >= 20) reasons.push('drop');
-      if(reasons.length) out.push({ s, streak, pc, rp, ep, reasons, marked: win.length, thr });
+      const since = streak ? days[streak - 1].d : '';
+      if(reasons.length) out.push({ s, streak, since, pc, rp, ep, reasons, marked: win.length, thr });
     });
     return out.sort((a, b) => b.reasons.length - a.reasons.length || b.streak - a.streak || (a.pc == null ? 101 : a.pc) - (b.pc == null ? 101 : b.pc));
   }
@@ -160,7 +201,7 @@
         <span class="si-note" style="margin:0">${rows.length} shown</span></div>
       ${rows.length ? `<div class="table-wrap" style="overflow-x:auto"><table class="sf-table si-table"><thead><tr><th>Student</th><th>Class</th><th>Why</th><th>Last 30 days</th><th>Parent</th><th></th></tr></thead><tbody>${rows.slice(0, 300).map(r => `<tr>
         <td><b>${esc(nameOf(r.s))}</b><small>${esc(r.s.admissionNo || '')}</small></td><td>${esc(classOf(r.s))}</td>
-        <td class="si-chips">${r.reasons.map(x => badge(x === 'streak' ? 'overdue' : 'due', REASON_TXT[x])).join('')}${r.streak >= 3 ? `<small>${r.streak} days in a row</small>` : ''}</td>
+        <td class="si-chips">${r.reasons.map(x => badge(x === 'streak' ? 'overdue' : 'due', REASON_TXT[x])).join('')}${r.streak >= 3 ? `<small>${r.streak} days in a row, since ${esc(niceDate(r.since))}</small>` : ''}</td>
         <td>${r.pc == null ? '—' : r.pc + '%'}<small>${r.marked} days marked</small></td>
         <td>${esc(r.s.fatherName || r.s.motherName || '')}<small>${esc(phoneOf(r.s) || 'no phone')}</small></td>
         <td class="si-acts">${msgButtons(phoneOf(r.s), attMessage(r))}</td></tr>`).join('')}</tbody></table></div>`
