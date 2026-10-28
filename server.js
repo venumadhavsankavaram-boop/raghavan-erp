@@ -2645,6 +2645,10 @@ app.get('/api/student-media/:id', async (req, res) => {
   }
 });
 
+// Same normalisation the browser uses: RGV2026-005 == rgv2026005 == RGV2026-5
+function studentAdmKey(v) {
+  return String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, '').replace(/\d+/g, d => String(parseInt(d, 10)));
+}
 async function handleHybrid(req, res, config) {
   const { table, core, softDelete, deleteViaApprovalOnly } = config;
   if (req.method === 'GET') {
@@ -2704,6 +2708,22 @@ async function handleHybrid(req, res, config) {
     const { coreVals, extra } = splitCoreExtra(body, core);
     const cols = core.map(f => f.col);
     const vals = core.map(f => coreVals[f.app]);
+    if (table === 'students' && body.admissionNo) {
+      // Duplicate-admission-number guard (bulk import and manual add alike).
+      // On an edit, only a CHANGED number is checked, so records that already
+      // share a number from the past can still be saved.
+      const k = studentAdmKey(body.admissionNo);
+      let changed = true;
+      if (req.method === 'PUT') {
+        const cur = await sql.query(`SELECT admission_no FROM students WHERE id = $1`, [body.id]);
+        if (cur[0] && studentAdmKey(cur[0].admission_no) === k) changed = false;
+      }
+      if (k && changed) {
+        const rows = await sql.query(`SELECT id, first_name, last_name, admission_no FROM students WHERE deleted_at IS NULL AND id <> $1`, [body.id]);
+        const hit = rows.find(r => studentAdmKey(r.admission_no) === k);
+        if (hit) return res.status(409).json({ error: `Admission No ${body.admissionNo} already belongs to ${(hit.first_name || '')} ${(hit.last_name || '')}`.trim() + '. Use a different number or leave it blank.' });
+      }
+    }
     if (req.method === 'POST') {
       const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
       await sql.query(
@@ -3185,19 +3205,38 @@ async function handleDeleteDuplicateStudents(req, res) {
     return res.status(403).json({ error: 'Admin or Principal access required to delete duplicate students.' });
   }
   const rows = await sql`SELECT * FROM students WHERE deleted_at IS NULL ORDER BY created_at ASC`;
-  const groups = {};
+  // A "duplicate" must be the same PERSON, not just the same name: same name
+  // (any order/case) AND same class, unless both have different, known dates of
+  // birth (then they are two children). Same admission number also counts.
+  // Whichever copy already has fee receipts is the one kept; two copies that
+  // both have receipts are never deleted - they are reported for a manual merge.
+  const nk = r => `${r.first_name || ''} ${r.last_name || ''}`.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean).sort().join(' ');
+  const ck = r => String(r.class_name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const dk = r => String((r.extra && r.extra.dob) || '').slice(0, 10);
+  const payRows = await sql`SELECT student_id, COUNT(*) AS n FROM payments GROUP BY student_id`;
+  const paid = new Map(payRows.map(p => [String(p.student_id), Number(p.n)]));
+  const groups = [];
   for (const row of rows) {
-    const key = `${(row.first_name || '').trim()} ${(row.last_name || '').trim()}`.trim().toLowerCase();
-    if (!key) continue;
-    (groups[key] = groups[key] || []).push(row);
+    if (!nk(row)) continue;
+    let g = groups.find(grp => grp.some(o => {
+      if (row.admission_no && studentAdmKey(o.admission_no) === studentAdmKey(row.admission_no)) return nk(o) === nk(row);
+      if (nk(o) !== nk(row)) return false;
+      if (dk(o) && dk(row) && dk(o) !== dk(row)) return false;
+      return ck(o) === ck(row);
+    }));
+    if (g) g.push(row); else groups.push([row]);
   }
-  // Within each group, rows are already oldest-first (created_at ASC
-  // above) — index 0 is the original to keep; everything after it in the
-  // same group is a duplicate to remove.
   const toDelete = [];
-  for (const group of Object.values(groups)) {
+  const needsManual = [];
+  for (const group of groups) {
     if (group.length < 2) continue;
-    for (let i = 1; i < group.length; i++) toDelete.push(group[i]);
+    const withPay = group.filter(r => paid.get(String(r.id)));
+    const keep = withPay.length ? withPay.sort((x, y) => paid.get(String(y.id)) - paid.get(String(x.id)))[0] : group[0];
+    for (const r of group) {
+      if (r === keep) continue;
+      if (paid.get(String(r.id))) { needsManual.push(r); continue; }
+      toDelete.push(r);
+    }
   }
   const label = row => `${row.first_name || ''} ${row.last_name || ''}`.trim() + (row.admission_no ? ` (Adm# ${row.admission_no})` : '');
   for (const row of toDelete) {
@@ -3213,6 +3252,7 @@ async function handleDeleteDuplicateStudents(req, res) {
     ok: true,
     deletedCount: toDelete.length,
     deleted: toDelete.map(row => ({ id: row.id, label: label(row) })),
+    needsManualMerge: needsManual.map(row => ({ id: row.id, label: label(row) })),
   });
 }
 
