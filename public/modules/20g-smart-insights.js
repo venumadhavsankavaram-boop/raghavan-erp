@@ -248,7 +248,8 @@
       const cur = per[0], prev = per[1] || null, reasons = [];
       if(cur.weak.length) reasons.push('weak');
       if(cur.pct < LOW_PCT) reasons.push('low');
-      if(prev && prev.pct - cur.pct >= DROP_PTS) reasons.push('drop');
+      // A drop only matters when the child is also weak or below 60%: 93% down to 73% is still doing well.
+      if(prev && prev.pct - cur.pct >= DROP_PTS && (cur.pct < 60 || cur.weak.length)) reasons.push('drop');
       if(reasons.length) out.push({ s, exam: cur.ex.name, pct: cur.pct, prevPct: prev ? prev.pct : null, weak: cur.weak, reasons });
     });
     return out;
@@ -268,11 +269,12 @@
     const map = new Map();
     const get = s => { let x = map.get(s.id); if(!x) map.set(s.id, x = { s, signals: [], score: 0 }); return x; };
     att.forEach(r => { const x = get(r.s); x.score += r.reasons.length + (r.streak >= 5 ? 1 : 0); x.signals.push('Attendance: ' + r.reasons.map(k => REASON_TXT[k].toLowerCase()).join(', ') + (r.pc != null ? ' (' + r.pc + '% in 30 days)' : '')); });
-    fees.forEach(r => { const x = get(r.s); x.score += r.tier === 'urgent' ? 2 : 1; x.signals.push('Fees: ' + money(r.amount) + ' overdue ' + (r.days ? 'for ' + r.days + ' days' : '')); });
+    // A late instalment counts as a worry only when nothing at all has been paid; a part-paying family is not a concern here.
+    fees.filter(r => r.paidState === 'none').forEach(r => { const x = get(r.s); x.score += r.tier === 'urgent' ? 2 : 1; x.signals.push('Fees: ' + money(r.amount) + ' overdue ' + (r.days ? 'for ' + r.days + ' days' : '')); });
     marks.forEach(r => { const x = get(r.s); x.score += r.reasons.length; x.signals.push(marksText(r)); });
     let rows = [...map.values()].filter(x => x.signals.length >= 2 || x.score >= 3).sort((a, b) => b.score - a.score);
     if(st.attnClass) rows = rows.filter(r => r.s.className === st.attnClass);
-    el.innerHTML = `<p class="si-note">Children who show more than one worry at the same time, so the class teacher or office can have a caring conversation. Fees, attendance and marks from the latest exam are looked at together. This is a prompt to talk, not a verdict.</p>
+    el.innerHTML = `<p class="si-note">Children who show more than one worry at the same time, so the class teacher or office can have a caring conversation. Fees (only when nothing has been paid), attendance and marks from the latest exam are looked at together. This is a prompt to talk, not a verdict.</p>
       <div class="si-bar"><select class="input" onchange="siSet('attnClass',this.value)">${classOptions(st.attnClass)}</select><span class="si-note" style="margin:0">${rows.length} shown</span></div>
       ${rows.length ? `<div class="table-wrap" style="overflow-x:auto"><table class="sf-table si-table"><thead><tr><th>Student</th><th>Class</th><th>What we noticed</th><th>Parent</th><th></th></tr></thead><tbody>${rows.slice(0, 200).map(r => `<tr>
         <td><b>${esc(nameOf(r.s))}</b><small>${esc(r.s.admissionNo || '')}</small></td><td>${esc(classOf(r.s))}</td>

@@ -80,12 +80,13 @@ try {
     examDefs = [{ id: 'e1', name: 'Unit 1', startDate: window.__iso(40), subjects: sub }, { id: 'e2', name: 'Mid Term', startDate: window.__iso(5), subjects: sub }];
     const R = (e, id, subj, m) => ({ id: e + id + subj, examId: e, studentId: id, subject: subj, marks: m, absent: false });
     examResults = [R('e1', ids[0], 'Maths', 80), R('e1', ids[0], 'Science', 80), R('e2', ids[0], 'Maths', 20), R('e2', ids[0], 'Science', 30),
-                   R('e1', ids[2], 'Maths', 70), R('e1', ids[2], 'Science', 72), R('e2', ids[2], 'Maths', 71), R('e2', ids[2], 'Science', 69)];
+                   R('e1', ids[2], 'Maths', 70), R('e1', ids[2], 'Science', 72), R('e2', ids[2], 'Maths', 71), R('e2', ids[2], 'Science', 69),
+                   R('e1', ids[1], 'Maths', 93), R('e1', ids[1], 'Science', 93), R('e2', ids[1], 'Maths', 73), R('e2', ids[1], 'Science', 73)];
     _lazyDataPromises['examResults'] = Promise.resolve();
   });
   const ms = await pg.evaluate(() => __siTest.marksStats().map(x => ({ id: x.s.id, r: x.reasons, w: x.weak, pct: x.pct })));
   const idsMk = await pg.evaluate(() => window.__act);
-  const m0 = ms.find(x => x.id === idsMk[0]); assert.ok(m0 && m0.r.includes('weak') && m0.r.includes('low') && m0.r.includes('drop') && m0.pct === 25); assert.ok(!ms.find(x => x.id === idsMk[2])); ok('Marks: weak, low and dropping child is flagged; steady child is not');
+  const m0 = ms.find(x => x.id === idsMk[0]); assert.ok(m0 && m0.r.includes('weak') && m0.r.includes('low') && m0.r.includes('drop') && m0.pct === 25); assert.ok(!ms.find(x => x.id === idsMk[2])); assert.ok(!ms.find(x => x.id === idsMk[1]), 'a 93% to 73% dip is not a concern'); ok('Marks: weak, low and dropping child is flagged; steady child is not');
   await pg.evaluate(() => siGo('attention')); await pg.waitForFunction(() => /Mid Term/.test(document.querySelector('#siPane').innerText), null, { timeout: 8000 }); assert.match(await pg.innerText('#siPane'), /weak in Maths, Science/); ok('Needs attention: shows the marks concern in plain words');
 
   // Enquiries
