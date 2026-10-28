@@ -74,6 +74,19 @@ try {
   // Needs attention
   await pg.evaluate(() => siGo('attention')); await pg.waitForFunction(() => document.getElementById('siPane').innerText.includes('prompt to talk'));
   const na = await pg.evaluate(() => __siTest.attStats().length); assert.ok(na >= 2); ok('Needs attention: loads without errors');
+  // Marks: a child who did well in Unit 1 and badly in the Mid Term is flagged; a steady child is not
+  await pg.evaluate(() => {
+    const ids = window.__act, sub = [{ name: 'Maths', maxMarks: 100 }, { name: 'Science', maxMarks: 100 }];
+    examDefs = [{ id: 'e1', name: 'Unit 1', startDate: window.__iso(40), subjects: sub }, { id: 'e2', name: 'Mid Term', startDate: window.__iso(5), subjects: sub }];
+    const R = (e, id, subj, m) => ({ id: e + id + subj, examId: e, studentId: id, subject: subj, marks: m, absent: false });
+    examResults = [R('e1', ids[0], 'Maths', 80), R('e1', ids[0], 'Science', 80), R('e2', ids[0], 'Maths', 20), R('e2', ids[0], 'Science', 30),
+                   R('e1', ids[2], 'Maths', 70), R('e1', ids[2], 'Science', 72), R('e2', ids[2], 'Maths', 71), R('e2', ids[2], 'Science', 69)];
+    _lazyDataPromises['examResults'] = Promise.resolve();
+  });
+  const ms = await pg.evaluate(() => __siTest.marksStats().map(x => ({ id: x.s.id, r: x.reasons, w: x.weak, pct: x.pct })));
+  const idsMk = await pg.evaluate(() => window.__act);
+  const m0 = ms.find(x => x.id === idsMk[0]); assert.ok(m0 && m0.r.includes('weak') && m0.r.includes('low') && m0.r.includes('drop') && m0.pct === 25); assert.ok(!ms.find(x => x.id === idsMk[2])); ok('Marks: weak, low and dropping child is flagged; steady child is not');
+  await pg.evaluate(() => siGo('attention')); await pg.waitForFunction(() => /Mid Term/.test(document.querySelector('#siPane').innerText), null, { timeout: 8000 }); assert.match(await pg.innerText('#siPane'), /weak in Maths, Science/); ok('Needs attention: shows the marks concern in plain words');
 
   // Enquiries
   await pg.evaluate(() => siGo('enquiries')); await pg.waitForFunction(() => /Open enquiries/i.test(document.getElementById('siPane').innerText));
@@ -89,8 +102,8 @@ try {
 
   // Data health
   await pg.evaluate(() => { switchView('insights'); siGo('health'); }); await pg.waitForFunction(() => /Records with issues/i.test(document.getElementById('siPane').innerText));
-  const hc = await pg.evaluate(() => Object.fromEntries(__siTest.healthChecks().checks.map(c => [c.k, c.rows.map(s => s.id)]))); const ids2 = await pg.evaluate(() => window.__act);
-  assert.ok(hc.nophone.includes(ids2[3])); assert.ok(hc.nodob.includes(ids2[4])); ok('Data health: finds a student with no phone and one with no birth date');
+  const hc = await pg.evaluate(() => Object.fromEntries(__siTest.healthChecks().checks.map(c => [c.k, c.rows.map(s => s.id)]))); const idsM = await pg.evaluate(() => window.__act);
+  assert.ok(hc.nophone.includes(idsM[3])); assert.ok(hc.nodob.includes(idsM[4])); ok('Data health: finds a student with no phone and one with no birth date');
 
   assert.deepEqual(errs, []); ok('no page errors');
 } finally { await br.close(); }

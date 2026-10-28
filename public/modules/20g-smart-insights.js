@@ -222,19 +222,57 @@
         : empty(all.length ? 'Nothing matches these filters.' : 'No attendance concerns right now.', all.length ? '' : 'Either attendance is healthy, or not enough days have been marked yet.')}`;
   }
 
-  /* ---------- Needs attention (attendance + fees together) ---------- */
+  /* ---------- Marks (latest exam: weak subjects, low overall, sharp drop) ---------- */
+  const WEAK_PCT = 35, LOW_PCT = 40, DROP_PTS = 15;
+  function marksStats(){
+    const defs = typeof examDefs !== 'undefined' ? examDefs : [], res = typeof examResults !== 'undefined' ? examResults : [];
+    if(!defs.length || !res.length) return [];
+    const exById = new Map(defs.map(e => [e.id, e])), byStu = new Map();
+    res.forEach(r => { if(!r || !r.studentId || !exById.has(r.examId)) return; let m = byStu.get(r.studentId); if(!m) byStu.set(r.studentId, m = new Map()); let l = m.get(r.examId); if(!l) m.set(r.examId, l = []); l.push(r); });
+    const out = [];
+    activeStudents().forEach(s => {
+      const m = byStu.get(s.id); if(!m) return;
+      const per = [];
+      m.forEach((list, exId) => {
+        const ex = exById.get(exId); let subs = []; try{ subs = getExamSubjects(ex, s.className, s.section) || []; }catch(e){}
+        let got = 0, max = 0; const weak = [];
+        list.forEach(r => {
+          if(r.absent || r.marks == null || isNaN(Number(r.marks))) return;
+          const sj = subs.find(x => x.name === r.subject), mx = sj ? Number(sj.maxMarks) : 0; if(!mx) return;
+          got += Number(r.marks); max += mx; if(100 * Number(r.marks) / mx < WEAK_PCT) weak.push(r.subject);
+        });
+        if(max > 0) per.push({ ex, pct: Math.round(100 * got / max), weak, when: ex.startDate || ex.endDate || '' });
+      });
+      if(!per.length) return;
+      per.sort((a, b) => String(b.when).localeCompare(String(a.when)));
+      const cur = per[0], prev = per[1] || null, reasons = [];
+      if(cur.weak.length) reasons.push('weak');
+      if(cur.pct < LOW_PCT) reasons.push('low');
+      if(prev && prev.pct - cur.pct >= DROP_PTS) reasons.push('drop');
+      if(reasons.length) out.push({ s, exam: cur.ex.name, pct: cur.pct, prevPct: prev ? prev.pct : null, weak: cur.weak, reasons });
+    });
+    return out;
+  }
+  const marksText = r => 'Marks (' + r.exam + '): ' + r.pct + '% overall'
+    + (r.weak.length ? ', weak in ' + r.weak.slice(0, 3).join(', ') + (r.weak.length > 3 ? ' +' + (r.weak.length - 3) + ' more' : '') : '')
+    + (r.reasons.includes('drop') ? ', down from ' + r.prevPct + '%' : '');
+
+  /* ---------- Needs attention (attendance + fees + marks together) ---------- */
   async function paintAttention(el){
     el.innerHTML = '<p class="si-note">Working it out…</p>';
     const fees = (can('managefee') && planOk('managefee')) ? feeRows() : [];
     let att = [];
     if(can('attendance') && planOk('attendance')){ try{ await ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData); }catch(e){} att = attStats(); }
+    let marks = [];
+    if(can('exams') && planOk('exams')){ try{ await ensureDataLoaded('examResults', loadExamResultsData); }catch(e){} try{ marks = marksStats(); }catch(e){ console.error('Smart Insights marks', e); } }
     const map = new Map();
     const get = s => { let x = map.get(s.id); if(!x) map.set(s.id, x = { s, signals: [], score: 0 }); return x; };
     att.forEach(r => { const x = get(r.s); x.score += r.reasons.length + (r.streak >= 5 ? 1 : 0); x.signals.push('Attendance: ' + r.reasons.map(k => REASON_TXT[k].toLowerCase()).join(', ') + (r.pc != null ? ' (' + r.pc + '% in 30 days)' : '')); });
     fees.forEach(r => { const x = get(r.s); x.score += r.tier === 'urgent' ? 2 : 1; x.signals.push('Fees: ' + money(r.amount) + ' overdue ' + (r.days ? 'for ' + r.days + ' days' : '')); });
+    marks.forEach(r => { const x = get(r.s); x.score += r.reasons.length; x.signals.push(marksText(r)); });
     let rows = [...map.values()].filter(x => x.signals.length >= 2 || x.score >= 3).sort((a, b) => b.score - a.score);
     if(st.attnClass) rows = rows.filter(r => r.s.className === st.attnClass);
-    el.innerHTML = `<p class="si-note">Children who show more than one worry at the same time, so the class teacher or office can have a caring conversation. This is a prompt to talk, not a verdict. Marks will be added here later.</p>
+    el.innerHTML = `<p class="si-note">Children who show more than one worry at the same time, so the class teacher or office can have a caring conversation. Fees, attendance and marks from the latest exam are looked at together. This is a prompt to talk, not a verdict.</p>
       <div class="si-bar"><select class="input" onchange="siSet('attnClass',this.value)">${classOptions(st.attnClass)}</select><span class="si-note" style="margin:0">${rows.length} shown</span></div>
       ${rows.length ? `<div class="table-wrap" style="overflow-x:auto"><table class="sf-table si-table"><thead><tr><th>Student</th><th>Class</th><th>What we noticed</th><th>Parent</th><th></th></tr></thead><tbody>${rows.slice(0, 200).map(r => `<tr>
         <td><b>${esc(nameOf(r.s))}</b><small>${esc(r.s.admissionNo || '')}</small></td><td>${esc(classOf(r.s))}</td>
@@ -420,5 +458,5 @@
     renderDashboard = async function(){ const r = await base.apply(this, arguments); setTimeout(() => { paintDashCard().catch(() => {}); }, 0); return r; };
   })();
 
-  window.__siTest = { paintDashCard, feeRows, attStats, enquiryRows, healthChecks, noticeDraft, NOTICE_TYPES, nf: () => nf };
+  window.__siTest = { marksStats, paintDashCard, feeRows, attStats, enquiryRows, healthChecks, noticeDraft, NOTICE_TYPES, nf: () => nf };
 })();
