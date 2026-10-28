@@ -652,6 +652,12 @@ function ringSVG(pct, color, size, stroke, trackColor){
           <div class="dh-amount">${fmtMoney(oldBalanceReceivable)}</div>
           <div class="dh-sub">${fmtMoney(oldBalanceCollected)} collected of ${fmtMoney(oldBalanceExpected)} carried forward</div>
         </div>
+        <div class="dh-card grandtotal" style="cursor:pointer;" onclick="openGrandTotal()" role="button" tabindex="0" onkeydown="if(event.key==='Enter')openGrandTotal()">
+          <div class="dh-icon">${ICONS.expected}</div>
+          <div class="dh-label">Grand Total</div>
+          <div class="dh-amount">${fmtMoney(grandTotals().expected)}</div>
+          <div class="dh-sub">Fees + Extra + Old Balance + Inventory · tap for breakdown</div>
+        </div>
       </div>
 
       <div class="dash-section-title">
@@ -925,6 +931,83 @@ function ringSVG(pct, color, size, stroke, trackColor){
         </div>
       </div>
     `;
+  }
+
+  // ---- Grand Total: every kind of money the school expects, in one place ----
+  // Tuition/Bus/Stock/Hostel come from computeFinance() (class fee structure).
+  // Extra fees (Admission, fines...) and Old Balance come from per-student extra-fee records.
+  // Inventory sold to a STUDENT is already stored as one of that student's extra fees
+  // (linked by sefId), so it is shown as "Inventory" and NOT counted again under Extra Fees.
+  function grandTotals(){
+    const { perCat } = computeFinance();
+    const activeIds = new Set(students.filter(s => isActive(s)).map(s => s.id));
+    const sefIdsFromSales = new Set(inventorySales.filter(x => x.sefId).map(x => x.sefId));
+    const carryNames = new Set(Object.values(CARRYFORWARD_LABELS));
+    const obPattern = /old\s*balance|previous\s*year|previous\s*dues|carried\s*forward/i;
+    const paidOf = e => { const a = Number(e.amount)||0; const p = e.paidAmount != null ? Number(e.paidAmount)||0 : (e.paid ? a : 0); return Math.min(p, a); };
+    const sum = (arr, f) => arr.reduce((t,x) => t + f(x), 0);
+    const mine = studentExtraFees.filter(e => activeIds.has(e.studentId));
+    const isOB = e => carryNames.has(e.name) || obPattern.test(e.name||'') || e.kind === 'opening';
+    const obRows = mine.filter(e => isOB(e) && !sefIdsFromSales.has(e.id));
+    const invStudentRows = mine.filter(e => sefIdsFromSales.has(e.id));
+    const extraRows = mine.filter(e => !isOB(e) && !sefIdsFromSales.has(e.id));
+    const invOther = inventorySales.filter(x => !x.sefId);
+    const retRefund = sum(inventoryReturns, r => Number(r.refundAmount)||0);
+    const retCash = sum(inventoryReturns, r => Number(r.cashRefunded)||0);
+    const lines = [];
+    Object.keys(CATS).forEach(c => {
+      const p = perCat[c];
+      lines.push({ label: CATS[c], expected: p.expected, discount: p.discount, collected: p.collected, pending: p.receivable });
+    });
+    const ex = sum(extraRows, e => Number(e.amount)||0), exc = sum(extraRows, paidOf);
+    lines.push({ label:'Extra Fees (Admission, fines, etc.)', expected: ex, discount: 0, collected: exc, pending: Math.max(ex-exc,0) });
+    const ob = sum(obRows, e => Number(e.amount)||0), obc = sum(obRows, paidOf);
+    lines.push({ label:'Old Balance (previous dues)', expected: ob, discount: 0, collected: obc, pending: Math.max(ob-obc,0) });
+    const inv = sum(invStudentRows, e => Number(e.amount)||0) + sum(invOther, x => Number(x.totalAmount)||0) - retRefund;
+    const invc = sum(invStudentRows, paidOf) + sum(invOther, x => Number(x.paidAmount)||0) - retCash;
+    lines.push({ label:'Inventory Purchased (uniforms, books, etc.)', expected: inv, discount: 0, collected: invc, pending: Math.max(inv-invc,0) });
+    const t = lines.reduce((a,l) => ({ expected:a.expected+l.expected, discount:a.discount+l.discount, collected:a.collected+l.collected, pending:a.pending+l.pending }), { expected:0, discount:0, collected:0, pending:0 });
+    t.lines = lines;
+    return t;
+  }
+  function openGrandTotal(){
+    const wrap = document.getElementById('dashCatTxnModalWrap');
+    if(!wrap) return;
+    const g = grandTotals();
+    const pct = g.expected > 0 ? Math.round(g.collected / g.expected * 100) : 0;
+    wrap.innerHTML = `
+      <div style="position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; z-index:999; padding:20px;" onclick="if(event.target===this) closeCategoryTransactions();">
+        <div class="profile-card" style="width:100%; max-width:860px; max-height:82vh; overflow:auto;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:4px;">
+            <h4>Grand Total — everything the school expects</h4>
+            <button class="btn btn-ghost btn-sm" onclick="closeCategoryTransactions()">Close ✕</button>
+          </div>
+          <p style="font-size:0.8rem; color:var(--ink-soft); margin:4px 0 14px;">Active students only. Inventory sold to a student is shown once, under Inventory.</p>
+          <div style="display:flex; align-items:center; gap:22px; flex-wrap:wrap; margin:0 0 18px;">
+            <div class="overview-ring" style="position:relative; width:148px; height:148px; flex:0 0 auto;">
+              ${ringGradSVG(pct, 'var(--teal)', 148, 15)}
+              <div class="overview-ring-label"><b>${pct}%</b><span>Collected</span></div>
+            </div>
+            <div style="flex:1; min-width:220px;">
+              <div style="font-size:0.8rem; color:var(--ink-soft);">Grand Total Expected</div>
+              <div style="font-size:1.9rem; font-weight:800; line-height:1.15;">${fmtMoney(g.expected)}</div>
+              <div style="display:flex; gap:18px; flex-wrap:wrap; margin-top:8px; font-size:0.88rem;">
+                <span><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--teal);margin-right:6px;"></i>Collected <b>${fmtMoney(g.collected)}</b></span>
+                <span><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--magenta);margin-right:6px;"></i>Pending <b>${fmtMoney(g.pending)}</b></span>
+              </div>
+            </div>
+          </div>
+          <div class="table-wrap" style="box-shadow:none; border:1px solid var(--border);">
+            <table>
+              <thead><tr><th>What</th><th>Expected</th><th>Discount</th><th>Collected</th><th>Pending</th><th style="min-width:140px;">Progress</th></tr></thead>
+              <tbody>
+                ${g.lines.map(l => `<tr><td class="name-cell">${l.label}</td><td>${fmtMoney(l.expected)}</td><td>${l.discount ? fmtMoney(l.discount) : '—'}</td><td>${fmtMoney(l.collected)}</td><td>${fmtMoney(l.pending)}</td><td>${(() => { const base = Math.max(l.expected - l.discount, 0); const cp = base > 0 ? Math.min(100, Math.round(l.collected / base * 100)) : 0; return base > 0 ? `<div style="display:flex;height:9px;border-radius:5px;overflow:hidden;background:var(--line,#e6e2d6);gap:2px;" title="${cp}% collected"><i style="width:${cp}%;background:var(--teal);"></i><i style="width:${100-cp}%;background:var(--magenta);opacity:.55;"></i></div><small>${cp}%</small>` : '<small>—</small>'; })()}</td></tr>`).join('')}
+                <tr style="font-weight:800; background:rgba(0,0,0,.04);"><td>GRAND TOTAL</td><td>${fmtMoney(g.expected)}</td><td>${g.discount ? fmtMoney(g.discount) : '—'}</td><td>${fmtMoney(g.collected)} <small>(${pct}%)</small></td><td>${fmtMoney(g.pending)}</td><td></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>`;
   }
   function closeCategoryTransactions(){
     const wrap = document.getElementById('dashCatTxnModalWrap');
