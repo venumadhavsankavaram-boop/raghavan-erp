@@ -384,7 +384,9 @@ const SETTINGS_KEY = "finance-settings";
     });
     const extras = studentExtraFees.filter(e => e.studentId === s.id);
     const extraTotal = extras.reduce((sum,e) => sum + (Number(e.amount)||0), 0);
-    const extraUnpaid = extras.filter(e => !e.paid).reduce((sum,e) => sum + (Number(e.amount)||0), 0);
+    // A part-paid extra fee (paidAmount set, not yet fully paid) counts only its
+    // unpaid remainder as receivable - not the whole amount.
+    const extraUnpaid = extras.reduce((sum,e) => { const a = Number(e.amount)||0; return sum + (e.paid ? 0 : Math.max(a - Math.min(Number(e.paidAmount)||0, a), 0)); }, 0);
     const extraPaid = extraTotal - extraUnpaid;
 
     const totals = Object.values(perCat).reduce((acc,c) => ({

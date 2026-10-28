@@ -32,7 +32,6 @@
   // ---------- engine ----------
   function studentFigures(s, o){
     const types = o.types;
-    const allTypes = types.length === Object.keys(RT()).length;
     let totalFee = 0, payable = 0, paid = 0, due = 0, excess = 0, lastPaid = '', lastReceipt = '';
     const perType = {};
     types.forEach(c => {
@@ -53,13 +52,27 @@
       perType[c] = { expected, net, collected, due: rec };
       pays.forEach(p => { const d = String(p.date || ''); if(d >= lastPaid){ lastPaid = d; lastReceipt = p.receiptNo || ''; } });
     });
-    if(allTypes){
-      studentExtraFees.filter(e => e.studentId === s.id).forEach(e => {
-        const a = num(e.amount); totalFee += a; payable += a;
-        if(e.paid) paid += a; else due += a;
-      });
-    }
-    return { totalFee, concession: totalFee - payable, payable, paid, due, excess, lastPaid, lastReceipt, perType };
+    // Old balance (dues carried from a previous year) and Extra fees (admission,
+    // fines, inventory, anything assigned by hand) live in studentExtraFees. A
+    // part-paid one counts only its unpaid remainder as due.
+    let oldDue = 0, extraDue = 0, oldTotal = 0, extraTotal = 0;
+    const cfNames = new Set(typeof CARRYFORWARD_LABELS !== 'undefined' ? Object.values(CARRYFORWARD_LABELS) : []);
+    const oldPattern = /old\s*balance|previous\s*year|carried\s*forward/i;
+    studentExtraFees.filter(e => e.studentId === s.id).forEach(e => {
+      const isOld = cfNames.has(e.name) || oldPattern.test(e.name || '');
+      if(isOld ? !o.old : !o.extras) return;
+      const a = num(e.amount);
+      let got = e.paid ? a : Math.min(num(e.paidAmount), a);
+      if(o.asOn){
+        const dated = payments.filter(p => p.category === 'extra' && p.extraFeeId === e.id && !p.voided && String(p.date || '') <= o.asOn);
+        const any = payments.some(p => p.category === 'extra' && p.extraFeeId === e.id && !p.voided);
+        if(any) got = Math.min(dated.reduce((x, p) => x + (typeof payNet === 'function' ? payNet(p) : num(p.amount)), 0), a);
+      }
+      totalFee += a; payable += a; paid += got; due += a - got;
+      if(isOld){ oldTotal += a; oldDue += a - got; } else { extraTotal += a; extraDue += a - got; }
+      payments.filter(p => p.category === 'extra' && p.extraFeeId === e.id && !p.voided && (!o.asOn || String(p.date || '') <= o.asOn)).forEach(p => { const d = String(p.date || ''); if(d >= lastPaid){ lastPaid = d; lastReceipt = p.receiptNo || ''; } });
+    });
+    return { totalFee, concession: totalFee - payable, payable, paid, due, excess, lastPaid, lastReceipt, perType, oldDue, extraDue, oldTotal, extraTotal };
   }
 
   const SUM_KEYS = ['totalFee', 'concession', 'payable', 'paid', 'due'];
@@ -109,7 +122,7 @@
     if(o.to) list = list.filter(p => String(p.date || '') <= o.to);
     if(o.mode) list = list.filter(p => (p.mode || '') === o.mode);
     if(o.user) list = list.filter(p => (p.collectedBy || '—') === o.user);
-    if(o.types.length !== Object.keys(RT()).length) list = list.filter(p => o.types.includes(p.category));
+    list = list.filter(p => p.category === 'extra' ? (o.extras || o.old) : o.types.includes(p.category));
     const byId = new Map((students || []).map(s => [s.id, s]));
     list = list.filter(p => {
       const s = byId.get(p.studentId);
@@ -141,7 +154,8 @@
   function filterLine(filters, o, extra){
     const bits = [];
     bits.push(filters.studentId ? 'One student' : (filters.className ? filters.className + (filters.section ? ' — Section ' + filters.section : '') : 'All classes'));
-    if(o.types && o.types.length !== Object.keys(RT()).length) bits.push('Fee types: ' + o.types.map(c => RT()[c]).join(', '));
+    const names = (o.types || []).map(c => RT()[c]).concat(o.old ? ['Old balance'] : [], o.extras ? ['Extra fees'] : []);
+    if(names.length !== Object.keys(RT()).length + 2) bits.push('Includes: ' + (names.join(', ') || 'nothing'));
     if(o.asOn && o.asOn < todayISO()) bits.push('As on ' + dmy(o.asOn));
     if(o.includeInactive) bits.push('Includes inactive students');
     if(extra) bits.push(extra);
@@ -198,23 +212,24 @@
     }
     const withLast = id === 'fee_due_list';
     const cols = ['S.No', 'Student ID', 'Roll No.', 'Name', 'Class', 'Section', 'Contact No', 'Total Fee', 'Concession Fee', 'Payable Fee', 'Paid Fee', 'Due Amount'];
+    cols.push('of which Old Balance Due', 'of which Extra Fee Due');
     if(withLast) cols.push('Last Paid On', 'Last Receipt No', 'Father Name');
     const aoa = top(); aoa.push(cols);
     let n = 1;
     R.groups.forEach(g => {
       aoa.push(['', '', '', 'Class : ' + g.className]);
       g.students.forEach(r => {
-        const row = [n++, r.admissionNo, r.rollNo, r.name, r.className, r.section, r.contact, r.totalFee, r.concession, r.payable, r.paid, r.due];
+        const row = [n++, r.admissionNo, r.rollNo, r.name, r.className, r.section, r.contact, r.totalFee, r.concession, r.payable, r.paid, r.due, r.oldDue, r.extraDue];
         if(withLast) row.push(r.lastPaid ? dmy(r.lastPaid) : 'No payment', r.lastReceipt, r.father);
         aoa.push(row);
       });
-      aoa.push(['', '', '', 'Total:', '', '', '', g.subtotal.totalFee, g.subtotal.concession, g.subtotal.payable, g.subtotal.paid, g.subtotal.due]);
+      aoa.push(['', '', '', 'Total:', '', '', '', g.subtotal.totalFee, g.subtotal.concession, g.subtotal.payable, g.subtotal.paid, g.subtotal.due, g.students.reduce((a, r) => a + r.oldDue, 0), g.students.reduce((a, r) => a + r.extraDue, 0)]);
       aoa.push([]);
     });
     const G = R.grand;
-    aoa.push(['', '', '', 'Grand Total:', '', '', '', G.totalFee, G.concession, G.payable, G.paid, G.due]);
+    aoa.push(['', '', '', 'Grand Total:', '', '', '', G.totalFee, G.concession, G.payable, G.paid, G.due, R.rows.reduce((a, r) => a + r.oldDue, 0), R.rows.reduce((a, r) => a + r.extraDue, 0)]);
     aoa.push([], ['Report Generated on ' + stamp()]);
-    addSheet(id === 'fee_due_list' ? 'Fee Due List' : 'Fee Report', aoa, [6, 16, 9, 28, 14, 8, 14, 12, 14, 12, 12, 12, 14, 16, 22]);
+    addSheet(id === 'fee_due_list' ? 'Fee Due List' : 'Fee Report', aoa, [6, 16, 9, 28, 14, 8, 14, 12, 14, 12, 12, 12, 16, 16, 14, 16, 22]);
     XLSX.writeFile(wb, `${slugifySchoolName()}_${id}.xlsx`);
   }
 
@@ -257,7 +272,7 @@
         const lastCol = id === 'fee_due_list';
         body = R.groups.map(g => `<div class="cls">Class : ${esc(g.className)}</div>
           <table><thead><tr><th>S.No.</th><th>Student ID</th><th>Roll No.</th><th>Name</th><th>Contact No</th><th class="n">Total Fee</th><th class="n">Concession</th><th class="n">Payable Fee</th><th class="n">Paid Fee</th><th class="n">Due Amount</th>${lastCol ? '<th>Last Paid</th>' : ''}</tr></thead><tbody>
-          ${g.students.map(r => `<tr><td>${n++}</td><td>${esc(r.admissionNo)}</td><td>${esc(r.rollNo)}</td><td>${esc(r.name)}${r.excess > 0 ? `<div class="note">Paid ${inr(r.excess)} more than payable</div>` : ''}</td><td>${esc(r.contact)}</td><td class="n">${inr(r.totalFee)}</td><td class="n">${inr(r.concession)}</td><td class="n">${inr(r.payable)}</td><td class="n">${inr(r.paid)}</td><td class="n due">${inr(r.due)}</td>${lastCol ? `<td>${r.lastPaid ? dmy(r.lastPaid) : 'No payment'}</td>` : ''}</tr>`).join('')}
+          ${g.students.map(r => `<tr><td>${n++}</td><td>${esc(r.admissionNo)}</td><td>${esc(r.rollNo)}</td><td>${esc(r.name)}${(r.oldDue || r.extraDue) ? `<div class="note">Due includes${r.oldDue ? ' old balance ' + inr(r.oldDue) : ''}${r.oldDue && r.extraDue ? ',' : ''}${r.extraDue ? ' extra fees ' + inr(r.extraDue) : ''}</div>` : ''}${r.excess > 0 ? `<div class="note">Paid ${inr(r.excess)} more than payable</div>` : ''}</td><td>${esc(r.contact)}</td><td class="n">${inr(r.totalFee)}</td><td class="n">${inr(r.concession)}</td><td class="n">${inr(r.payable)}</td><td class="n">${inr(r.paid)}</td><td class="n due">${inr(r.due)}</td>${lastCol ? `<td>${r.lastPaid ? dmy(r.lastPaid) : 'No payment'}</td>` : ''}</tr>`).join('')}
           <tr class="sub"><td colspan="5">Total:</td><td class="n">${inr(g.subtotal.totalFee)}</td><td class="n">${inr(g.subtotal.concession)}</td><td class="n">${inr(g.subtotal.payable)}</td><td class="n">${inr(g.subtotal.paid)}</td><td class="n">${inr(g.subtotal.due)}</td>${lastCol ? '<td></td>' : ''}</tr></tbody></table>`).join('')
           + `<table><tbody><tr class="grand"><td>Grand Total (${R.grand.count} students${R.grand.defaulters ? ', ' + R.grand.defaulters + ' with due' : ''})</td><td class="n">Total Fee ${inr(R.grand.totalFee)}</td><td class="n">Concession ${inr(R.grand.concession)}</td><td class="n">Payable ${inr(R.grand.payable)}</td><td class="n">Paid ${inr(R.grand.paid)}</td><td class="n">Due ${inr(R.grand.due)}</td></tr></tbody></table>`;
       }
@@ -280,7 +295,8 @@
     const g = k => document.getElementById('fr2_' + k);
     const types = Object.keys(RT()).filter(c => g('t_' + c) && g('t_' + c).checked);
     const o = {
-      types: types.length ? types : Object.keys(RT()),
+      types: types.length ? types : (g('t_old') && g('t_old').checked || g('t_extra') && g('t_extra').checked ? [] : Object.keys(RT())),
+      old: g('t_old') ? g('t_old').checked : true, extras: g('t_extra') ? g('t_extra').checked : true,
       asOn: g('asOn') && g('asOn').value && g('asOn').value < todayISO() ? g('asOn').value : '',
       includeInactive: !!(g('inactive') && g('inactive').checked),
       show: (DEFAULTS[id] || {}).show,
@@ -346,8 +362,10 @@
             ${isRec ? row('From', date('from', monthStart)) + row('To', date('to', todayISO())) + row('Payment mode', sel('mode', [['', 'All modes'], ...modes.map(m => [m, m])], '')) + row('Collected by', sel('user', [['', 'Everyone'], ...users.map(m => [m, m])], '')) : row('As on date', date('asOn', todayISO()))}
             ${row('Sort by', isRec ? sel('sort', [['date', 'Date'], ['receipt', 'Receipt no.']], 'date') : sel('sort', [['id', 'Student ID'], ['roll', 'Section & roll no.'], ['name', 'Name'], ['due', 'Highest due first']], 'id'))}
           </div>
-          <div style="margin-bottom:12px;"><div style="font-size:0.72rem;font-weight:700;color:var(--ink-soft);margin-bottom:5px;">Fee types included</div>
-            <div style="display:flex;gap:14px;flex-wrap:wrap;">${Object.keys(types).map(c => `<label style="font-size:0.82rem;display:flex;gap:5px;align-items:center;"><input type="checkbox" id="fr2_t_${c}" ${(!ft || ft === c) ? 'checked' : ''} onchange="fr2Refresh()"> ${esc(types[c])}</label>`).join('')}</div></div>
+          <div style="margin-bottom:12px;"><div style="font-size:0.72rem;font-weight:700;color:var(--ink-soft);margin-bottom:5px;">What to include</div>
+            <div style="display:flex;gap:14px;flex-wrap:wrap;">${Object.keys(types).map(c => `<label style="font-size:0.82rem;display:flex;gap:5px;align-items:center;"><input type="checkbox" id="fr2_t_${c}" ${(!ft || ft === c) ? 'checked' : ''} onchange="fr2Refresh()"> ${esc(types[c])}</label>`).join('')}
+              <label style="font-size:0.82rem;display:flex;gap:5px;align-items:center;"><input type="checkbox" id="fr2_t_old" ${ft ? '' : 'checked'} onchange="fr2Refresh()"> Old balance (previous year dues)</label>
+              <label style="font-size:0.82rem;display:flex;gap:5px;align-items:center;"><input type="checkbox" id="fr2_t_extra" ${ft ? '' : 'checked'} onchange="fr2Refresh()"> Extra fees (admission, fines, other)</label></div></div>
           ${isRec ? '' : `<label style="font-size:0.82rem;display:flex;gap:6px;align-items:center;margin-bottom:12px;"><input type="checkbox" id="fr2_inactive" onchange="fr2Refresh()"> Also include inactive students</label>`}
           <div id="fr2_preview" style="padding:10px 12px;border-radius:10px;background:#f4f1fb;font-size:0.82rem;margin-bottom:16px;"></div>
           <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">

@@ -16,7 +16,7 @@ try {
   const cmp = await pg.evaluate(() => {
     const all = Object.keys(CATS); let bad = [];
     students.filter(isActive).forEach(s => {
-      const a = computeStudentFinance(s).totals, b = __feeReports.studentFigures(s, { types: all, asOn: '' });
+      const a = computeStudentFinance(s).totals, b = __feeReports.studentFigures(s, { types: all, old: true, extras: true, asOn: '' });
       if (Math.round(a.expected) !== Math.round(b.totalFee) || Math.round(a.collected) !== Math.round(b.paid) || Math.round(a.receivable) !== Math.round(b.due)) bad.push([s.firstName, a.expected, b.totalFee, a.collected, b.paid, a.receivable, b.due].join('/'));
     });
     return { n: students.filter(isActive).length, bad: bad.slice(0, 5), nbad: bad.length };
@@ -24,15 +24,29 @@ try {
   assert.equal(cmp.nbad, 0, 'engine mismatch: ' + cmp.bad.join(' | ')); ok('Report engine matches the ERP fee calculation for all ' + cmp.n + ' active students');
   // 2. identities
   const idn = await pg.evaluate(() => {
-    const R = __feeReports.buildRegister({}, { types: Object.keys(CATS), asOn: '', show: 'all', sort: 'id' });
+    const R = __feeReports.buildRegister({}, { types: Object.keys(CATS), old: true, extras: true, asOn: '', show: 'all', sort: 'id' });
     const bad = R.rows.filter(r => Math.round(r.totalFee - r.concession) !== Math.round(r.payable) || r.due < 0 || Math.round(r.payable - r.paid + r.excess) !== Math.round(r.due)).length;
     const sumG = R.groups.reduce((a, g) => a + g.subtotal.due, 0);
     return { bad, grandDue: R.grand.due, sumG, rows: R.rows.length, grandPaid: R.grand.paid };
   });
   assert.equal(idn.bad, 0); assert.equal(Math.round(idn.grandDue), Math.round(idn.sumG)); ok('Total − Concession = Payable, Payable − Paid (+excess) = Due, grand total = sum of classes');
+  // 2b. old balance + extra fees (incl. a part-paid one) are inside the balance
+  const ex = await pg.evaluate(() => {
+    const s = students.filter(isActive)[0];
+    const all = { types: Object.keys(CATS), old: true, extras: true, asOn: '' };
+    const base = __feeReports.studentFigures(s, { types: Object.keys(CATS), old: false, extras: false, asOn: '' });
+    studentExtraFees.push({ id: 'tx_old', studentId: s.id, name: 'Previous Year Dues', amount: 5000, paid: false, paidAmount: 2000 });
+    studentExtraFees.push({ id: 'tx_ex', studentId: s.id, name: 'Admission Fee', amount: 1000, paid: false });
+    const w = __feeReports.studentFigures(s, all), onlyOld = __feeReports.studentFigures(s, { types: [], old: true, extras: false, asOn: '' });
+    const fin = computeStudentFinance(s).totals;
+    return { dueAdd: Math.round(w.due - base.due), paidAdd: Math.round(w.paid - base.paid), oldDue: w.oldDue, extraDue: w.extraDue, onlyOldDue: onlyOld.due, finDueAdd: Math.round(fin.receivable - base.due) };
+  });
+  assert.equal(ex.dueAdd, 4000); assert.equal(ex.paidAdd, 2000); assert.equal(ex.oldDue, 3000); assert.equal(ex.extraDue, 1000); assert.equal(ex.onlyOldDue, 3000); assert.equal(ex.finDueAdd, 4000);
+  ok('Old balance (₹3,000 left of ₹5,000) and extra fee (₹1,000) are in the balance; part-paid counted correctly, also in the ERP totals');
+  await pg.evaluate(() => { studentExtraFees = studentExtraFees.filter(e => !/^tx_/.test(e.id)); });
   // 3. only-due list & as-on date
   const f = await pg.evaluate(() => {
-    const o = { types: Object.keys(CATS), asOn: '', show: 'due', sort: 'due', minDue: 0 };
+    const o = { types: Object.keys(CATS), old: true, extras: true, asOn: '', show: 'due', sort: 'due', minDue: 0 };
     const D = __feeReports.buildRegister({}, o); const A = __feeReports.buildRegister({}, Object.assign({}, o, { show: 'all' }));
     const early = __feeReports.buildRegister({}, Object.assign({}, o, { show: 'all', asOn: '2000-01-01' }));
     const firstClass = D.groups[0].students; const sorted = firstClass.every((r, i) => !i || firstClass[i - 1].due >= r.due);
@@ -53,7 +67,7 @@ try {
   assert.match(html, /Fee Paid, Payable and Due Report for Student wise/); assert.match(html, /Class : /); assert.match(html, /Grand Total/); assert.match(html, /Report Generated on/); assert.match(html, /S\.No\./); assert.match(html, /Due Amount/); ok('Print view has the register layout: title, class blocks, totals, generated-on footer');
   await pop.close(); await pg.evaluate(() => fr2Close());
   // 6. summary + receipts
-  const sm = await pg.evaluate(() => { const R = __feeReports.buildRegister({}, { types: Object.keys(CATS), asOn: '', show: 'all', sort: 'id' }); return R.groups.length; });
+  const sm = await pg.evaluate(() => { const R = __feeReports.buildRegister({}, { types: Object.keys(CATS), old: true, extras: true, asOn: '', show: 'all', sort: 'id' }); return R.groups.length; });
   assert.ok(sm > 0); await pg.evaluate(() => generateLibraryReport('fee_class_summary', 'pdf')); await pg.waitForSelector('#fr2_overlay');
   const [p2] = await Promise.all([ctx.waitForEvent('page'), pg.click('#fr2_overlay button:has-text("Print")')]); await p2.waitForLoadState(); assert.match(await p2.content(), /Collected/); await p2.close(); await pg.evaluate(() => fr2Close()); ok('Class-wise summary prints');
   await pg.evaluate(() => generateLibraryReport('fee_receipts_between', 'excel')); await pg.waitForSelector('#fr2_overlay');
