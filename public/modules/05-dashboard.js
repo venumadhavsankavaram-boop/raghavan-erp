@@ -520,13 +520,11 @@ function ringSVG(pct, color, size, stroke, trackColor){
     const carryForwardNames = new Set(Object.values(CARRYFORWARD_LABELS));
     const oldBalanceNamePattern = /old\s*balance|previous\s*year|carried\s*forward/i;
     const oldBalanceEntries = studentExtraFees.filter(e => carryForwardNames.has(e.name) || oldBalanceNamePattern.test(e.name||''));
-    const oldBalanceExpected = oldBalanceEntries.reduce((sum,e) => sum + (Number(e.amount)||0), 0);
-    const oldBalanceCollected = oldBalanceEntries.reduce((sum,e) => {
-      const amt = Number(e.amount) || 0;
-      const paid = e.paidAmount != null ? Number(e.paidAmount)||0 : (e.paid ? amt : 0);
-      return sum + Math.min(paid, amt);
-    }, 0);
-    const oldBalanceReceivable = Math.max(0, oldBalanceExpected - oldBalanceCollected);
+    // Same figures as the Grand Total popup (one calculation, so the card and the popup always agree).
+    const _obLine = grandTotals().lines.find(l => l.label.indexOf('Old Balance') === 0);
+    const oldBalanceExpected = _obLine.expected;
+    const oldBalanceCollected = _obLine.collected;
+    const oldBalanceReceivable = _obLine.pending;
 
     // Dashboard's main totals (expected/collected/receivable/discount) only
     // ever tracked the four per-class fee categories (Fee/Bus/Stock/Hostel) —
