@@ -178,10 +178,21 @@ function frcBuildData(recs){
 async function printReceiptRecords(recs){
   await ensureDataLoaded('payments', loadPaymentsData);
   if(!recs || !recs[0]) return;
+  // A voided line is NOT money received, so a receipt prints only its live lines (this is what made a
+  // voided duplicate still add up to 2,000 on the printout). If every line is voided, the copy is
+  // printed clearly stamped VOID instead of looking like a normal receipt.
+  const live = recs.filter(r => !r.voided);
+  const allVoid = live.length === 0;
+  if(!allVoid) recs = live;
   const d = frcBuildData(recs);
   if(!d) return;
   const w = window.open('', '_blank');
   if(!w){ showToast('Allow pop-ups for this site to print the receipt.'); return; }
-  w.document.write(frcDocHtml(d));
+  let html = frcDocHtml(d);
+  if(allVoid){
+    const why = recs.map(r => r.voidReason).filter(Boolean)[0] || '';
+    html = html.replace(/<body[^>]*>/i, m => m + '<div style="position:fixed;top:38%;left:0;right:0;text-align:center;transform:rotate(-18deg);font:800 74px Arial,sans-serif;color:rgba(192,57,43,.35);letter-spacing:.08em;pointer-events:none;z-index:9999;">VOID' + (why ? '<div style="font-size:20px;letter-spacing:0;">' + frcEsc(why) + '</div>' : '') + '</div>');
+  }
+  w.document.write(html);
   w.document.close();
 }

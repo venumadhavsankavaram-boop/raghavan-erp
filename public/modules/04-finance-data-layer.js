@@ -98,6 +98,8 @@ const SETTINGS_KEY = "finance-settings";
               // Server says an identical entry was just saved: drop this extra copy, don't treat as failure.
               let b = null; try{ b = await r.clone().json(); }catch(e){}
               if(b && b.code === 'DUPLICATE'){ dupes.push({ item, number: b.existing && b.existing.number }); return new Response('{}', { status:200 }); }
+              // Accounting rule refusal (same receipt line twice / more than the fee amount): carry the real reason up.
+              if(b && b.code === 'RULE'){ const re = new Error(b.error || 'This entry breaks an accounting rule.'); re.businessRule = true; throw re; }
             }
             return r;
           });
@@ -132,6 +134,8 @@ const SETTINGS_KEY = "finance-settings";
       usingLocalFallback = false;
       return true;
     }catch(e){
+      // Rule refusal: nothing is kept locally, the caller shows the reason (see saveKeySafely) and reloads.
+      if(e && e.businessRule){ window.__saveRejected = e.message; return false; }
       if(e.message !== 'SESSION_EXPIRED') showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
       try{ localStorage.setItem(key, JSON.stringify(newArray)); }catch(e2){}
       if(e.message !== 'SESSION_EXPIRED') usingLocalFallback = true;

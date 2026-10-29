@@ -2305,6 +2305,48 @@ async function findRecentDuplicate(table, guard, body) {
   return rows[0] || null;
 }
 
+// ---- Accounting integrity rules for fee payments ---------------------------
+// Rule 1 (same receipt line): one receipt can carry several lines (tuition + bus,
+//   several instalments, several extra fees, several children), but never the SAME
+//   line twice: same receipt number + same student + same fee head + same instalment
+//   + same extra fee, both not voided. That is a duplicate of money already recorded
+//   (this is how one admission fee ended up counted twice under one receipt number).
+// Rule 2 (over-collection): active payments against one extra fee can never add up to
+//   more than that fee's amount. Void the wrong one first if it really needs re-entering.
+// Both run inside the per-student lock handleSimple already takes, so two simultaneous
+// saves cannot both pass. Refusals use code 'RULE' so the browser shows the real
+// reason instead of the "internet dropped" message.
+async function checkPaymentRules(body) {
+  if (!body || body.voided) return null;
+  const amount = Number(body.amount) || 0;
+  const rcpt = String(body.receiptNo || '').trim();
+  if (rcpt) {
+    const same = await sql.query(
+      `SELECT id FROM payments WHERE receipt_no = $1 AND COALESCE(student_id, '') = $2 AND COALESCE(category, '') = $3
+         AND COALESCE(extra_fee_id, '') = $4 AND COALESCE(instalment, '') = $5 AND COALESCE(voided, 0) = 0 AND id <> $6 LIMIT 1`,
+      [rcpt, String(body.studentId || ''), String(body.category || ''), String(body.extraFeeId || ''), String(body.instalment || ''), String(body.id || '')]);
+    if (same.length) {
+      return { error: 'Receipt ' + rcpt + ' already has this same fee line saved for this student, so the extra copy was NOT saved. ' +
+        'If the first entry is wrong, void it first and then enter it again.', code: 'RULE', rule: 'DUPLICATE_RECEIPT_LINE', existing: { number: rcpt } };
+    }
+  }
+  if (body.category === 'extra' && body.extraFeeId && amount > 0) {
+    const fee = await sql.query(`SELECT amount FROM student_extra_fees WHERE id = $1 LIMIT 1`, [String(body.extraFeeId)]);
+    const feeAmt = fee.length ? Number(fee[0].amount) || 0 : 0;
+    if (fee.length && feeAmt > 0) {
+      const got = await sql.query(
+        `SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE extra_fee_id = $1 AND category = 'extra' AND COALESCE(voided, 0) = 0 AND id <> $2`,
+        [String(body.extraFeeId), String(body.id || '')]);
+      const already = Number(got[0] && got[0].paid) || 0;
+      if (already + amount > feeAmt + 0.009) {
+        return { error: 'This would collect more than the fee amount (Rs ' + already + ' already received of Rs ' + feeAmt + '), so it was NOT saved. ' +
+          'If an earlier entry is a mistake, void it first.', code: 'RULE', rule: 'OVER_COLLECTION' };
+      }
+    }
+  }
+  return null;
+}
+
 async function handleSimple(req, res, config, resourceName) {
   const { table, fields } = config;
   if (req.method === 'GET') {
@@ -2346,6 +2388,10 @@ async function handleSimple(req, res, config, resourceName) {
             });
           }
         }
+        if (table === 'payments') {
+          const broken = await checkPaymentRules(body);
+          if (broken) return res.status(409).json(broken);
+        }
         if (guard) {
           const dup = await findRecentDuplicate(table, guard, body);
           if (dup) {
@@ -2375,6 +2421,16 @@ async function handleSimple(req, res, config, resourceName) {
       if (table === 'student_discounts') return withKeyLock('student_discounts:' + (body.studentId || ''), doInsert);
       return withKeyLock(table + ':id:' + body.id, doInsert);
     } else {
+      // Restoring a voided payment brings its money back into the books, so it must pass the same
+      // duplicate / over-collection rules as a brand-new entry. Ordinary edits (note, mode...) and
+      // voiding are not re-checked.
+      if (table === 'payments' && !body.voided) {
+        const before = await sql.query(`SELECT COALESCE(voided, 0) AS v FROM payments WHERE id = $1`, [body.id]);
+        if (before.length && Number(before[0].v) === 1) {
+          const broken = await withKeyLock('payments:' + (body.studentId || ''), () => checkPaymentRules(body));
+          if (broken) return res.status(409).json(broken);
+        }
+      }
       const setClause = cols.filter(c => c !== 'id').map((c, i) => `${c} = $${i + 2}`).join(', ');
       const updateVals = [body.id, ...fields.filter(f => f.col !== 'id').map(f => (body[f.app] === undefined ? null : body[f.app]))];
       await sql.query(`UPDATE ${table} SET ${setClause} WHERE id = $1`, updateVals);

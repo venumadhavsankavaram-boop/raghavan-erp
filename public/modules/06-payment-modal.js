@@ -180,14 +180,16 @@ function openPaymentModal(presetStudentId){
     // grouping by receiptNo here prints them as one itemized receipt instead
     // of one receipt per head — while a normal single-category payment's
     // receiptNo is unique to itself, so this group is always just [p].
-    const group = p.receiptNo ? payments.filter(x => x.receiptNo === p.receiptNo && x.studentId === p.studentId) : [p];
+    // Same receipt number can hold a voided line and a live one (a voided duplicate): print the side that was clicked.
+    const group = p.receiptNo ? payments.filter(x => x.receiptNo === p.receiptNo && x.studentId === p.studentId && !!x.voided === !!p.voided) : [p];
     printReceiptRecords(group.length ? group : [p]);
   }
   // Prints every payment record sharing one receipt number (e.g. from
   // recordFamilyPayment) as a single itemized receipt.
   async function printReceiptByNo(receiptNo){
     await ensureDataLoaded('payments', loadPaymentsData);
-    const recs = payments.filter(p => p.receiptNo === receiptNo);
+    const all = payments.filter(p => p.receiptNo === receiptNo);
+    const recs = all.some(p => !p.voided) ? all.filter(p => !p.voided) : all;   // live lines only; all-voided prints as VOID
     if(!recs.length) return;
     printReceiptRecords(recs);
   }
