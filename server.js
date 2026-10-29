@@ -1648,7 +1648,7 @@ app.get('/api/voucher-gaps', async (req, res) => {
       periods.sort().reverse();
     }
     let period = String(req.query.period || '');
-    if (!validRegisterPeriod(src, period)) period = src.kind === 'voucher' ? currentFinancialYear() : (periods[0] || '');
+    if (!validRegisterPeriod(src, period)) period = src.kind === 'voucher' ? currentFinancialYear() : (periods.find(p => !/TEST/i.test(p)) || periods[0] || '');
     if (!period) return res.status(200).json({ series, label: src.label, kind: src.kind, prefix: src.prefix, period: '', periods: [], from: 1, issuedUpTo: 0, savedCount: 0, missingCount: 0, unexplainedCount: 0, missing: [] });
     if (!periods.includes(period)) periods.unshift(period);
     const counter = await sql.query('SELECT next_seq FROM doc_counters WHERE series = $1 AND period = $2', [series, period]);
@@ -1684,12 +1684,14 @@ app.get('/api/voucher-gaps', async (req, res) => {
         seq: n, docNumber: registerNumber(src, period, n),
         issuedTo: lg ? (lg.issued_by || '') : null, issuedRole: lg ? (lg.issued_role || '') : null, issuedAt: lg ? lg.issued_at : null,
         note: nt ? { reason: nt.reason || '', notedBy: nt.noted_by || '', notedAt: nt.noted_at } : null,
+        // A receipt number that was issued, never saved and has no reason noted goes to the next receipt automatically.
+        reusable: src.kind === 'receipt' && !!lg && !nt,
       });
     }
     return res.status(200).json({
       series, label: src.label, kind: src.kind, prefix: src.prefix, period, periods,
       from, issuedUpTo: top, savedCount: saved.size, missingCount: missing.length,
-      unexplainedCount: missing.filter(m => !m.note).length, missing,
+      unexplainedCount: missing.filter(m => !m.note && !m.reusable).length, reusableCount: missing.filter(m => m.reusable).length, missing,
     });
   } catch (err) {
     console.error('voucher-gaps error:', err);

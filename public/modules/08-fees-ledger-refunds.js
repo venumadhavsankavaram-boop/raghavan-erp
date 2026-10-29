@@ -313,10 +313,6 @@ let refundPaymentId = null;
   function submitFamilyPayments(){ return rcGuard(() => submitFamilyPaymentsImpl()); }
   async function submitFamilyPaymentsImpl(){
     await ensureDataLoaded('payments', loadPaymentsData);
-    await rcEnsure(new Set(Array.from(document.querySelectorAll('.ff-head-row')).filter(r => {
-      const c = document.getElementById('ffChk_'+r.dataset.hid), a = document.getElementById('ffAmt_'+r.dataset.hid);
-      return c && c.checked && (Number(a ? a.value : 0) || 0) > 0;
-    }).map(r => r.dataset.studentId)).size || 1);
     const mode = document.getElementById('ffMode').value;
     const date = document.getElementById('ffDate').value || new Date().toISOString().slice(0,10);
     const note = document.getElementById('ffNote').value.trim();
@@ -348,6 +344,11 @@ let refundPaymentId = null;
     }
     const details = (typeof ffReadDetails === 'function') ? ffReadDetails(mode, date) : { ok:true, data:{} };
     if(!details.ok) return;
+    // Numbers are reserved only now, after every check above passed, so a refused form wastes none.
+    await rcEnsure(new Set(Array.from(document.querySelectorAll('.ff-head-row')).filter(r => {
+      const c = document.getElementById('ffChk_'+r.dataset.hid), a = document.getElementById('ffAmt_'+r.dataset.hid);
+      return c && c.checked && (Number(a ? a.value : 0) || 0) > 0;
+    }).map(r => r.dataset.studentId)).size || 1);
     const results = [];
     const _famBefore = payments.length;
     studentIds.forEach(sid => {

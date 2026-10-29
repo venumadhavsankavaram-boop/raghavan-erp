@@ -64,10 +64,10 @@ function openPaymentModal(presetStudentId){
   async function savePaymentImpl(e){
     e.preventDefault();
     await ensureDataLoaded('payments', loadPaymentsData);
-    await rcEnsure(1);
     const studentId = document.getElementById('pStudent').value;
     const student = students.find(s => s.id === studentId);
     if(!student){ showToast('Please select a student.'); return false; }
+    await rcEnsure(1);   // reserve the number only once the form passed its checks
     const record = {
       id: 'pay_' + Date.now(),
       receiptNo: nextReceiptNo(),

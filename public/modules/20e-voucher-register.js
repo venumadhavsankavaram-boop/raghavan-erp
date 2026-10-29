@@ -197,6 +197,7 @@ function vrPaint(body){
       ${sfKpi('Numbers issued', d.issuedUpTo - (d.from || 1) + 1, 'plain', vrPeriodLabel(vrState.series, d.period))}
       ${sfKpi('Saved', d.savedCount, 'good', 'have a ' + (d.kind === 'receipt' ? 'receipt' : 'voucher'))}
       ${sfKpi('Missing', d.missingCount, d.missingCount ? 'danger' : 'plain', d.missingCount ? 'issued, never saved' : 'none')}
+      ${d.reusableCount ? sfKpi('Free to reuse', d.reusableCount, 'plain', 'the next receipts will take these') : ''}
       ${sfKpi('Not yet explained', d.unexplainedCount, d.unexplainedCount ? 'danger' : 'plain', d.unexplainedCount ? 'add a reason below' : 'all noted')}
     </section>
     <div class="iv-toolbar">
@@ -245,7 +246,9 @@ function vrPaintRows(){
       : 'Issued to <b>' + escapeHtml(g.issuedTo || '—') + '</b>' + (g.issuedRole ? ' (' + escapeHtml(g.issuedRole) + ')' : '') + (g.issuedAt ? ' · ' + escapeHtml(vrWhen(g.issuedAt)) : '');
     const note = g.note
       ? `<span class="sf-badge sf-badge--paid">Explained</span> ${escapeHtml(g.note.reason)} <small>— ${escapeHtml(g.note.notedBy)}</small> <button type="button" class="sf-btn sf-btn--soft" onclick="vrEditNote(${r.seq})">Edit</button>`
-      : `<span class="sf-badge sf-badge--overdue">Unexplained</span> <button type="button" class="sf-btn sf-btn--soft" onclick="vrEditNote(${r.seq})">Add reason</button>`;
+      : (g.reusable
+        ? `<span class="sf-badge sf-badge--pending">Free to reuse</span> <small>The next receipt takes this number by itself (after about 10 minutes). Adding a reason instead keeps it unused for good.</small> <button type="button" class="sf-btn sf-btn--soft" onclick="vrEditNote(${r.seq})">Add reason</button>`
+        : `<span class="sf-badge sf-badge--overdue">Unexplained</span> <button type="button" class="sf-btn sf-btn--soft" onclick="vrEditNote(${r.seq})">Add reason</button>`);
     return `<tr id="vrRow-${r.seq}" style="background:rgba(220,38,38,.07)">
       <td><b style="color:#b91c1c">${escapeHtml(r.number)}</b><br><span class="sf-badge sf-badge--overdue">MISSING</span></td>
       <td colspan="3"><small>${who}</small></td><td colspan="3" id="vrNote-${r.seq}">${note}</td></tr>`;

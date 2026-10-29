@@ -298,7 +298,6 @@ const FEE_TYPES_KEY = "fee-types";
   function submitLedgerPayments(studentId){ return rcGuard(() => submitLedgerPaymentsImpl(studentId)); }
   async function submitLedgerPaymentsImpl(studentId){
     await ensureDataLoaded('payments', loadPaymentsData);
-    await rcEnsure(1);
     const modeSel = document.getElementById('ledgerPayMode');
     const mode = modeSel ? modeSel.value : 'Cash';
     const entries = Array.from(document.querySelectorAll('.ledger-pay-input'))
@@ -314,6 +313,7 @@ const FEE_TYPES_KEY = "fee-types";
     if(payDate > today){ showToast('Payment date can\'t be in the future.'); return; }
     // Every head paid in this one collection shares ONE receipt number, so the
     // school fee + bus fee (etc.) print together as a single itemized receipt.
+    await rcEnsure(1);   // reserve the number only once the form passed its checks
     const sharedReceiptNo = nextReceiptNo();
     let lastId = null;
     const payCat = computeStudentFinance(student).perCat;
