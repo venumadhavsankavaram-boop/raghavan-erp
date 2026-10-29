@@ -113,7 +113,13 @@ function tacHomeroomInfo(cls, sec, ids, attAM, attPM, pmDue, isHoliday){
   return { cls, sec, level: tacLevelOf(cls), total, am, pm, amState, pmState: tacSingle ? 'na' : pmState, marked: pmDue ? Math.min(am, pm) : am, state, holiday: !!isHoliday };
 }
 // One headline status for a teacher's own attendance from the two sessions.
-function tacOwnStatus(m, a, pmDue){
+// wM / wA = does this teacher work the Morning / Afternoon session? A teacher
+// set to one session only is judged on that session alone: the other one is
+// "not applicable", never "absent" or "half marked". Default (both) = old behaviour.
+function tacOwnStatus(m, a, pmDue, wM, wA){
+  if(wM === undefined) wM = true; if(wA === undefined) wA = true;
+  if(wM && !wA) return m || 'Not Marked';
+  if(wA && !wM) return a || (pmDue ? 'Not Marked' : 'Not Due');
   if(!m && !a) return 'Not Marked';
   if(m && a){
     if(m === a) return m;
@@ -137,7 +143,7 @@ function tacOwnLabel(t){
   if(t.own === 'Half Marked') return (t.ownM ? 'Afternoon' : 'Morning') + ' not marked';
   return t.own;
 }
-const TAC_OWN_TONE = { Present: 'ok', Late: 'warn', Leave: 'warn', 'Half Day': 'warn', 'Half Marked': 'warn', Absent: 'bad', 'Not Marked': 'mute' };
+const TAC_OWN_TONE = { 'Not Due': 'mute', Present: 'ok', Late: 'warn', Leave: 'warn', 'Half Day': 'warn', 'Half Marked': 'warn', Absent: 'bad', 'Not Marked': 'mute' };
 function tacOwnNeedsAttention(t){ return ['Absent', 'Leave', 'Half Day', 'Half Marked'].includes(t.own) || (t.own === 'Not Marked' && !tacModel.isHoliday); }
 function tacBuildModel(){
   const today = localDateStr(new Date());
@@ -220,7 +226,11 @@ function tacBuildModel(){
     }
     const ses = staffAttToday.get(st.id) || {};
     const ownM = ses.Morning || '', ownA = tacSingle ? '' : (ses.Afternoon || '');
-    const own = tacOwnStatus(ownM, ownA, pmDue);
+    // One-session teachers (Staff > work session): only their own session counts.
+    const wp = (typeof staffWorkPattern === 'function') ? staffWorkPattern(st) : 'Both';
+    const worksM = tacSingle || wp !== 'Afternoon';
+    const worksA = !tacSingle && wp !== 'Morning';
+    const own = tacOwnStatus(ownM, ownA, pmDue, worksM, worksA);
     const oldestSub = pendSubs.length ? Math.max(...pendSubs.map(s => daysAgo(s.createdAt))) : 0;
     const oldestCon = openCons.length ? Math.max(...openCons.map(c => daysAgo(c.createdAt))) : 0;
     const levels = new Set(mine.map(t => t.level)); if(homeroom) levels.add(homeroom.level);
@@ -231,7 +241,7 @@ function tacBuildModel(){
       expected: exp, entered: ent, pct: exp ? Math.round(ent / exp * 100) : null,
       hwCount: (hw.get(st.id) || []).filter(d => d >= sinceDate).length,
       pendSubs: pendSubs.length, oldestSub, openCons: openCons.length, oldestCon,
-      homeroom, own, ownM, ownA, pmDue, levels,
+      homeroom, own, ownM, ownA, worksM, worksA, pmDue, levels,
       behind: pend.length > 0,
       worstOverdue: pend.reduce((m, t) => Math.max(m, t.overdue), 0),
     };
@@ -741,6 +751,7 @@ async function tacOpenClassAtt(cls, sec, sess){
 function tacStaffSessBtns(t){
   const can = (typeof getStaffAttendanceAccess === 'function') ? getStaffAttendanceAccess(currentUser.role, 'edit') || getStaffAttendanceAccess(currentUser.role, 'create') : false;
   const one = (sess, val, due) => {
+    if((sess === 'Morning' && t.worksM === false) || (sess === 'Afternoon' && t.worksA === false)) return `<span class="tac-pill tac-p-mute">${sess === 'Morning' ? '🌅' : '🌇'} Not working</span>`;
     const label = val || (due ? 'Not marked' : 'Not due');
     const tone = !val ? (due ? 'bad' : 'mute') : (val === 'Present' ? 'ok' : val === 'Absent' ? 'bad' : 'warn');
     const inner = `<span class="tac-pill tac-p-${tone}">${sess === 'Morning' ? '🌅' : '🌇'} ${tacEsc(label)}</span>`;
@@ -940,7 +951,7 @@ function tacDrawerHtml(){
       <div class="tac-dstats"><div><b>${pend.length}</b><span>Pending</span></div><div><b>${done.length}</b><span>Complete</span></div><div><b>${t.pct == null ? '—' : t.pct + '%'}</b><span>Entered</span></div><div><b>${t.pendSubs + t.openCons}</b><span>Inbox</span></div></div>
       <div class="tac-card-a" style="margin:0 0 14px">${pend.length ? `<button type="button" class="tac-btn tac-btn-pri" onclick="tacRemind('${tacJs(t.id)}')">${tacIcon('bell', 15)}Send reminder</button><button type="button" class="tac-btn" onclick="tacWhatsApp('${tacJs(t.id)}')">${tacIcon('wa', 15)}WhatsApp</button>` : ''}<button type="button" class="tac-btn" onclick="tacFeedSet('all','all','${tacJs(t.id)}');tacCloseDrawer();tacSetTab('inbox')">${tacIcon('chat', 15)}Inbox items</button>${t.staff.phone ? `<a class="tac-btn" href="tel:${tacEsc(t.staff.phone)}">Call</a>` : ''}</div>
       <h4>Today</h4>
-      <p class="tac-line">${tacIcon('user', 14)} Own attendance: <b>${tacEsc(t.own)}</b> <small>(Morning ${tacEsc(t.ownM || 'not marked')}${tacModel.single ? '' : ' · Afternoon ' + tacEsc(t.ownA || (t.pmDue ? 'not marked' : 'not due yet'))})</small></p>
+      <p class="tac-line">${tacIcon('user', 14)} Own attendance: <b>${tacEsc(t.own)}</b> <small>(${t.worksM === false ? 'Afternoon-only teacher' : 'Morning ' + tacEsc(t.ownM || 'not marked')}${(tacModel.single || t.worksA === false) ? (t.worksA === false && !tacModel.single ? ' · works Morning only' : '') : ' · Afternoon ' + tacEsc(t.ownA || (t.pmDue ? 'not marked' : 'not due yet'))})</small></p>
       ${t.homeroom ? `<p class="tac-line">${tacIcon('home', 14)} Homeroom ${tacEsc(t.homeroom.cls)} ${tacEsc(t.homeroom.sec)}: <b>${tacEsc(t.homeroom.state === 'holiday' ? 'holiday' : t.homeroom.state === 'empty' ? 'no students' : tacHrSummary(t.homeroom))}</b></p>` : ''}
       <p class="tac-line">${tacIcon('book', 14)} Homework in ${tacRange} days: <b>${t.hwCount}</b></p>
       <p class="tac-line">${tacIcon('chat', 14)} Waiting: <b>${t.pendSubs}</b> submissions, <b>${t.openCons}</b> concerns</p>
