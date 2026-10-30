@@ -401,6 +401,13 @@ function renderBusPassTab(body){
           </select>
         </div>
         <div class="f-field">
+          <label for="bpPerSheet">Passes per A4 sheet</label>
+          <select id="bpPerSheet" onchange="busPassPerSheet=this.value; try{localStorage.setItem('erpBpSheet', this.value)}catch(e){} renderBusPassBody();">
+            <option value="0">Automatic (use passes per row above)</option>
+            ${[1, 2, 4, 6, 8, 9, 10, 12, 15, 16, 20].map(n => `<option value="${n}" ${String(busPassPerSheet) === String(n) ? 'selected' : ''}>${n} per sheet (${BUS_PASS_LAYOUTS[n][0]} across × ${BUS_PASS_LAYOUTS[n][1]} down)</option>`).join('')}
+          </select>
+        </div>
+        <div class="f-field">
           <label for="bpRoute">Route</label>
           <select id="bpRoute" onchange="busPassRouteFilter=this.value; renderBusPassBody();">
             <option value="">All routes</option>
@@ -423,6 +430,7 @@ function renderBusPassTab(body){
   document.getElementById('bpCols').value = String(BUS_PASS_TEMPLATES[busPassTemplate].cols);
   renderBusPassBody();
 }
+window.busPassPerSheet = (function(){ try { return localStorage.getItem('erpBpSheet') || '0'; } catch(e){ return '0'; } })();
 function trxBpPreview(list){
   const conf = BUS_PASS_TEMPLATES[busPassTemplate];
   const cols = conf.cols || 2;
@@ -433,9 +441,17 @@ function trxBpPreview(list){
   if(!picked) return `<aside class="sf-card trx-panel trx-preview"><div class="trx-panel-head"><h4>Preview</h4></div>${trxEmpty('Nothing to preview', 'No student matches the current filters.')}</aside>`;
   const info = busPassStudentInfo(picked);
   const card = busPassCardInner(busPassTemplate, info, schoolLogoSrc());
+  const perSheet = Number(window.busPassPerSheet) || 0, LAY = BUS_PASS_LAYOUTS[perSheet];
+  let cardBox = null, sheetNote = cols + ' per A4 row';
+  if(LAY){
+    const pgap = 4, cellW = (190 - (LAY[0] - 1) * pgap) / LAY[0], cellH = (277 - (LAY[1] - 1) * pgap) / LAY[1];
+    const sc = Math.min(cellW / conf.wMm, cellH / conf.hMm);
+    cardBox = `<div style="width:${Math.round(conf.wMm * sc * 10) / 10}mm;height:${Math.round(conf.hMm * sc * 10) / 10}mm;overflow:hidden"><div class="bp-card bp-tpl-${busPassTemplate}" style="width:${conf.wMm}mm;height:${conf.hMm}mm;transform:scale(${sc});transform-origin:0 0">${card}</div></div>`;
+    sheetNote = perSheet + ' per A4 sheet (' + LAY[0] + ' × ' + LAY[1] + ')';
+  }
   return `<aside class="sf-card trx-panel trx-preview">
-    <div class="trx-panel-head"><h4>Preview</h4><p>${conf.label} · ${cols} per A4 row · showing ${escapeHtml(info.name)}</p></div>
-    <div class="trx-prev-wrap"><div class="trx-prev"><div class="bp-card bp-tpl-${busPassTemplate}" style="width:${wMm}mm;height:${hMm}mm">${card}</div></div></div>
+    <div class="trx-panel-head"><h4>Preview</h4><p>${conf.label} · ${sheetNote} · showing ${escapeHtml(info.name)}</p></div>
+    <div class="trx-prev-wrap"><div class="trx-prev">${cardBox || `<div class="bp-card bp-tpl-${busPassTemplate}" style="width:${wMm}mm;height:${hMm}mm">${card}</div>`}</div></div>
     <p class="trx-hint">Printing opens a print dialog in a new tab. Allow pop-ups for this site if nothing appears.</p>
   </aside>`;
 }

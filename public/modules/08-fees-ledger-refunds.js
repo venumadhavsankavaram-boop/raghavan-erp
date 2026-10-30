@@ -983,9 +983,12 @@ let refundPaymentId = null;
     showToast('Late fee rule saved.', 'burst');
   }
   async function saveReceiptSettings(){
-    receiptSettings = { startNumber: Number(document.getElementById('rsStart').value) || 1 };
+    const dk = document.getElementById('rsDesk'), rc = document.getElementById('rsRcpt');
+    receiptSettings = Object.assign({}, receiptSettings || {}, { startNumber: Number(document.getElementById('rsStart').value) || 1 });
+    if(dk) receiptSettings.deskStyle = dk.value;
+    if(rc) receiptSettings.receiptStyle = rc.value;
     await storageSet(RECEIPT_SETTINGS_KEY, receiptSettings);
-    showToast('Receipt numbering updated.', 'burst');
+    showToast('Receipt settings saved.', 'burst');
   }
 
   /* --- Fee Defaulters --- */

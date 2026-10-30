@@ -210,7 +210,7 @@ function vrPaint(body){
         <option value="desc" ${vrState.order === 'desc' ? 'selected' : ''}>Newest number first ↓</option>
         <option value="asc" ${vrState.order === 'asc' ? 'selected' : ''}>Oldest number first ↑</option>
       </select>
-      <div class="iv-toolbar-actions">${sfBtn('soft', 'down', 'Excel', 'vrExport(false)')}${sfBtn('soft', 'down', 'PDF', 'vrExport(true)')}</div>
+      <div class="iv-toolbar-actions">${typeof hvBtn === 'function' ? hvBtn(vrBuildRows().filter(r => r.type === 'saved' && r.voided).length) : ''}${sfBtn('soft', 'down', 'Excel', 'vrExport(false)')}${sfBtn('soft', 'down', 'PDF', 'vrExport(true)')}</div>
     </div>
     <section class="sf-card">
       <div class="acx-tablehead"><b>${escapeHtml(d.label)} — ${escapeHtml(vrPeriodLabel(vrState.series, d.period))}</b><span id="vrCount"></span></div>
@@ -235,7 +235,7 @@ function vrPaintRows(){
   }
   tb.innerHTML = rows.map(r => {
     if(r.type === 'saved'){
-      return `<tr${r.voided ? ' class="acx-void"' : ''}>
+      return `<tr${r.voided ? ' class="acx-void hv-void"' : ''}>
         <td><b>${escapeHtml(r.number)}</b></td><td>${escapeHtml(r.date)}</td><td>${escapeHtml(r.who || '—')}</td><td>${escapeHtml(r.detail || '—')}</td>
         <td>${escapeHtml(r.mode || '—')}</td><td class="acx-r">${r.voided ? `<s>${fmtMoney(r.amount)}</s>` : `<b>${fmtMoney(r.amount)}</b>`}</td>
         <td>${escapeHtml(r.by || '—')}${r.voided ? ` <span class="sf-badge sf-badge--pending">${escapeHtml(r.voidNote)}</span>` : ''}</td></tr>`;

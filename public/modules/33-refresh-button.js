@@ -1,5 +1,5 @@
 /* ===== Refresh button =====
-   One "Refresh" button on every page. It fetches the latest data from the server again (what the
+   One "Refresh" button on the attendance, marks / results and fee pages. It fetches the latest data from the server again (what the
    assistants / teachers saved on other devices) and redraws the page you are on — no log-out, no
    page reload. Anything typed into an open form is left alone; unsaved attendance marks are kept. */
 (function(){
@@ -33,9 +33,16 @@
   btn.innerHTML = '<span class="rf-i" aria-hidden="true">↻</span><span class="rf-t">Refresh</span>';
   btn.addEventListener('click', refresh);
   document.body.appendChild(btn);
+  // Only the pages where people wait for data entered on other devices: attendance, marks / results and fees.
+  // Other pages refresh themselves or don't need it.
+  const SHOW_ON = ['attendance', 'staffattendance', 'exams', 'result', 'managefee'];
   function paint(){
-    try{ btn.style.display = (typeof currentUser !== 'undefined' && currentUser) ? 'inline-flex' : 'none'; }catch(e){ btn.style.display = 'none'; }
+    try{ const ov = document.getElementById('loginOverlay');
+      const onLogin = ov && getComputedStyle(ov).display !== 'none';
+      const onPage = SHOW_ON.indexOf(window.__erpView) >= 0;
+      btn.style.display = (!onLogin && onPage && typeof currentUser !== 'undefined' && currentUser) ? 'inline-flex' : 'none'; }catch(e){ btn.style.display = 'none'; }
   }
+  paint();
   setInterval(paint, 1500);
   async function refresh(){
     if(busy) return;

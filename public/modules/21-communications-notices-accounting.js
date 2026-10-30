@@ -482,6 +482,8 @@
     ticket:   { label: 'Ticket Stub',      wMm: 104, hMm: 46, cols: 2 },
     inksaver: { label: 'Ink Saver (B/W)',  wMm: 90, hMm: 58, cols: 2 },
   };
+  // How many passes fit on one A4 sheet: [columns, rows]. 0 = the old behaviour (columns set by the template, rows flow on).
+  const BUS_PASS_LAYOUTS = { 1:[1,1], 2:[1,2], 4:[2,2], 6:[2,3], 8:[2,4], 9:[3,3], 10:[2,5], 12:[3,4], 15:[3,5], 16:[4,4], 20:[4,5] };
   function busPassRiderPool(){
     // Only students actually on transport have a route/fare to print — same
     // population the Route Roster and fee-collection reports use.
@@ -585,6 +587,19 @@
     const logoSrc = schoolLogoSrc();
     const list = students.filter(s => ids.includes(s.id));
     const cardsHtml = list.map(s => `<div class="bp-card bp-tpl-${tpl}">${busPassCardInner(tpl, busPassStudentInfo(s), logoSrc)}</div>`).join('');
+    // Fixed number per A4 sheet: every pass is drawn at its normal size, then scaled to fit its cell, so the contents never get cut off.
+    const perSheet = Number(window.busPassPerSheet) || 0, LAY = BUS_PASS_LAYOUTS[perSheet];
+    let pagedHtml = '';
+    if(LAY){
+      const [pc, pr] = LAY, pgap = 4;
+      const cellW = (190 - (pc - 1) * pgap) / pc, cellH = (277 - (pr - 1) * pgap) / pr;
+      const sc = Math.min(cellW / conf.wMm, cellH / conf.hMm);
+      const cw = Math.round(conf.wMm * sc * 10) / 10, ch = Math.round(conf.hMm * sc * 10) / 10;
+      const cells = list.map(s => `<div class="bp-cell" style="width:${cw}mm;height:${ch}mm"><div class="bp-card bp-tpl-${tpl}" style="width:${conf.wMm}mm;height:${conf.hMm}mm;transform:scale(${sc});transform-origin:0 0">${busPassCardInner(tpl, busPassStudentInfo(s), logoSrc)}</div></div>`);
+      for(let i = 0; i < cells.length; i += perSheet){
+        pagedHtml += `<div class="bp-page" style="grid-template-columns:repeat(${pc}, ${cw}mm);grid-auto-rows:${ch}mm;gap:${pgap}mm;justify-content:center;align-content:start">${cells.slice(i, i + perSheet).join('')}</div>`;
+      }
+    }
     const w = window.open('', '_blank');
     w.document.write(`
       <html><head><title>Bus Passes — ${conf.label}</title>
@@ -593,6 +608,9 @@
         body{ font-family:Arial,Helvetica,sans-serif; color:#111; margin:0; }
         .bp-wrap{ display:flex; flex-wrap:wrap; gap:${gapMm}mm; }
         .bp-card{ width:${cardWMm}mm; height:${cardHMm}mm; box-sizing:border-box; page-break-inside:avoid; overflow:hidden; position:relative; }
+        .bp-page{ display:grid; page-break-after:always; break-after:page; height:277mm; }
+        .bp-page:last-child{ page-break-after:auto; break-after:auto; }
+        .bp-cell{ overflow:hidden; position:relative; }
         .bp-photo-img{ width:16mm; height:20mm; object-fit:cover; border-radius:1mm; flex-shrink:0; }
         .bp-photo-ph{ width:16mm; height:20mm; border:1px solid #9ca3af; border-radius:1mm; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:6px; color:#9ca3af; }
         .bp-row{ display:flex; gap:4px; font-size:7.5px; align-items:baseline; }
@@ -651,7 +669,7 @@
         .bp-ticket-sno b{ display:block; font-size:11px; color:#c0392b; }
       </style></head>
       <body onload="window.print()">
-        <div class="bp-wrap">${cardsHtml}</div>
+        ${LAY ? pagedHtml : `<div class="bp-wrap">${cardsHtml}</div>`}
       </body></html>
     `);
     w.document.close();

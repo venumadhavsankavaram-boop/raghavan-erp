@@ -37,7 +37,7 @@ const FEE_TYPES_KEY = "fee-types";
   let defaulterPage = 1, defaulterPageSize = 10;
   let defaulterFilters = { className:'', section:'', name:'', phone:'', status:'overdue' };
 
-  const MF_TAB_PERM_KEYS = { fees:'managefee_collection', structure:'managefee_structure', types:'managefee_types', discounts:'managefee_discounts', extra:'managefee_extra', late:'managefee_late', defaulters:'managefee_defaulters', refunds:'managefee_refunds', reports:'managefee_reports' };
+  const MF_TAB_PERM_KEYS = { fees:'managefee_collection', structure:'managefee_structure', types:'managefee_types', discounts:'managefee_discounts', extra:'managefee_extra', late:'managefee_late', receipt:'managefee_late', defaulters:'managefee_defaulters', refunds:'managefee_refunds', reports:'managefee_reports' };
   async function initManageFeeView(){
     await ensureDataLoaded('payments', loadPaymentsData);
     populateMfAyBadgeAndSelect();
@@ -73,7 +73,7 @@ const FEE_TYPES_KEY = "fee-types";
 
   function switchFeeTab(tab){
     feeTab = tab;
-    ['fees','structure','types','discounts','extra','late','defaulters','refunds','reports'].forEach(t => {
+    ['fees','structure','types','discounts','extra','late','receipt','defaulters','refunds','reports'].forEach(t => {
       const btn = document.getElementById('mftab-'+t);
       if(btn) btn.classList.toggle('active', t===tab);
     });
@@ -101,6 +101,7 @@ const FEE_TYPES_KEY = "fee-types";
     if(feeTab === 'discounts') return renderDiscountsTab(body);
     if(feeTab === 'extra') return renderExtraFeesTab(body);
     if(feeTab === 'late') return renderLateFeesTab(body);
+    if(feeTab === 'receipt') return renderReceiptTab(body);
     if(feeTab === 'defaulters') return renderDefaultersTab(body);
     if(feeTab === 'refunds') return renderRefundsTab(body);
     if(feeTab === 'reports') return renderReportsTab(body);

@@ -220,13 +220,6 @@ function renderLateFeesTab(body){
         <p class="ft-preview" id="lfPreview" aria-live="polite"></p>
         ${canEdit ? sfBtn('primary', 'check', 'Save late fee rule', 'saveLateFeeSettings()') : ''}
       </section>
-      <section class="sf-card ft-card">
-        ${ftCardHead('Receipt numbering', 'Switching over from another system? Set where receipt numbers should continue (if your last printed receipt was 001666, enter 1667).')}
-        <div class="ft-form">
-          <label class="ft-field"><span>Next receipt starts at</span><input type="number" min="1" class="input" id="rsStart" value="${Number(receiptSettings.startNumber) || 1}"></label>
-        </div>
-        ${canEdit ? sfBtn('primary', 'check', 'Save receipt numbering', 'saveReceiptSettings()') : ''}
-      </section>
     </div>`;
   ftLatePreview();
 }

@@ -1370,8 +1370,79 @@ async function enforceRecordLock(req, res, resource) {
   return false;
 }
 
+// ---------- Date lock on new entries ----------
+// Admin can switch OFF "allow changing the date" for fee receipts, vouchers, stationery / inventory bills and
+// attendance (kv 'date-lock-policy', e.g. {fees:false}; a missing area = still allowed, so nothing changes until
+// Admin switches one off). While an area is OFF, everyone except Admin can only save a new entry dated today.
+// Checked here on the server, so it cannot be got round with an old tab or browser tools.
+const DATE_LOCK_RESOURCES = { 'payments': 'fees', 'acct-income': 'vouchers', 'acct-expenses': 'vouchers', 'attendance': 'attendance', 'staff-attendance': 'attendance' };
+const DATE_LOCK_KV = { 'inventory-sales': 'inventory', 'acct-journal-vouchers': 'vouchers' };
+async function dateLockPolicy() {
+  try {
+    const r = await sql`SELECT value FROM kv_store WHERE \`key\` = 'date-lock-policy'`;
+    let v = r.length ? r[0].value : null; if (typeof v === 'string') { try { v = JSON.parse(v); } catch (_) { v = null; } }
+    return v && typeof v === 'object' ? v : {};
+  } catch (_) { return {}; }
+}
+function dateLockToday() {
+  const out = new Set([new Date().toISOString().slice(0, 10)]);
+  try { out.add(new Intl.DateTimeFormat('en-CA', { timeZone: SCHOOL_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())); } catch (_) {}
+  return out;
+}
+async function dateLockStoredDate(resource, id) {
+  if (!id) return null;
+  try {
+    let rows = [];
+    if (resource === 'payments') rows = await sql`SELECT date FROM payments WHERE id = ${id}`;
+    else if (resource === 'acct-income') rows = await sql`SELECT date FROM acct_income WHERE id = ${id}`;
+    else if (resource === 'acct-expenses') rows = await sql`SELECT date FROM acct_expenses WHERE id = ${id}`;
+    else if (resource === 'attendance') rows = await sql`SELECT date FROM attendance_records WHERE id = ${id}`;
+    else if (resource === 'staff-attendance') rows = await sql`SELECT date FROM staff_attendance_records WHERE id = ${id}`;
+    if (!rows.length) return null;
+    const d = rows[0].date; return d instanceof Date ? d.toISOString().slice(0, 10) : String(d || '').slice(0, 10);
+  } catch (_) { return null; }
+}
+// Returns true when the request was refused (response already sent).
+async function enforceDateLock(req, res, resource) {
+  const area = DATE_LOCK_RESOURCES[resource];
+  if (!area || !req.authUser || req.authUser.role === 'Admin') return false;
+  if (req.method !== 'POST' && req.method !== 'PUT') return false;
+  const policy = await dateLockPolicy();
+  if (policy[area] !== false) return false;
+  const items = Array.isArray(req.body) ? req.body : [req.body || {}];
+  const today = dateLockToday();
+  for (const it of items) {
+    const d = it && it.date ? String(it.date).slice(0, 10) : '';
+    if (!d || today.has(d)) continue;
+    if (req.method === 'PUT' && it.id) { const stored = await dateLockStoredDate(resource, it.id); if (stored && stored === d) continue; }
+    res.status(403).json({ error: 'The date for new entries is fixed to today by the Admin, so it cannot be changed here.', code: 'DATE_LOCKED' });
+    return true;
+  }
+  return false;
+}
+// Same rule for the lists stored as one block (inventory / stationery sales, journal vouchers): only rows that are new may not be back-dated.
+async function enforceDateLockKv(req, res, key) {
+  const area = DATE_LOCK_KV[key];
+  if (!area || !req.authUser || req.authUser.role === 'Admin' || req.method !== 'PUT') return false;
+  const policy = await dateLockPolicy();
+  if (policy[area] !== false) return false;
+  const next = Array.isArray(req.body) ? req.body : [];
+  let before = [];
+  try { const r = await sql`SELECT value FROM kv_store WHERE \`key\` = ${key}`; let v = r.length ? r[0].value : []; if (typeof v === 'string') v = JSON.parse(v); before = Array.isArray(v) ? v : []; } catch (_) {}
+  const known = new Set(before.map(x => x && x.id));
+  const today = dateLockToday();
+  for (const row of next) {
+    if (!row || known.has(row.id)) continue;
+    const d = row.date ? String(row.date).slice(0, 10) : '';
+    if (d && !today.has(d)) { res.status(403).json({ error: 'The date for new entries is fixed to today by the Admin, so it cannot be changed here.', code: 'DATE_LOCKED' }); return true; }
+  }
+  return false;
+}
+
 async function handleKv(req, res, key) {
   if (!key) return res.status(400).json({ error: 'Missing key.' });
+  if (key === 'date-lock-policy' && req.method === 'PUT' && (!req.authUser || req.authUser.role !== 'Admin')) return res.status(403).json({ error: 'Only the Admin can change this setting.' });
+  if (await enforceDateLockKv(req, res, key)) return;
   if (ADMIN_ONLY_KV_KEYS.includes(key) && (!req.authUser || req.authUser.role !== 'Admin')) {
     return res.status(403).json({ error: 'Admin access required.' });
   }
@@ -6826,6 +6897,7 @@ app.all('/api/:resource', async (req, res) => {
     // write here too rather than trusting every caller of this generic
     // resource endpoint to have applied that rule client-side first.
     if (await enforceRecordLock(req, res, resource)) return;
+    if (await enforceDateLock(req, res, resource)) return;
     if (resource === 'attendance' && (req.method === 'POST' || req.method === 'PUT')) {
       const dateStr = req.body && req.body.date;
       if (dateStr) {

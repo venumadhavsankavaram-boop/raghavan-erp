@@ -256,7 +256,7 @@ function fpPaintDayBook(host){
     const amt = g.recs.reduce((s, r) => s + (Number(r.amount) || 0), 0);
     const heads = g.recs.map(r => fpEsc(feeLabelFor(r))).join(', ');
     const det = fpRefDetail(g.recs[0]);
-    return `<tr${voided ? ' style="opacity:.55;"' : ''}>
+    return `<tr${voided ? ' class="hv-void" style="opacity:.55;"' : ''}>
       <td><b>${fpEsc(g.receiptNo)}</b><br><small>${fpEsc(g.date)}</small></td>
       <td>${fpEsc(g.studentName || '')}<br><small>${fpEsc(fpStudentClass(g.studentId))}</small></td>
       <td>${heads}</td>
@@ -279,7 +279,7 @@ function fpPaintDayBook(host){
       <select class="input" onchange="rpModeF=this.value;renderReportsTab(document.getElementById('feeBody'))">${modeOpts.map(m => `<option value="${m}" ${rpModeF === m ? 'selected' : ''}>${m === 'all' ? 'All modes' : m}</option>`).join('')}</select>
       <select class="input" onchange="rpCashierF=this.value;renderReportsTab(document.getElementById('feeBody'))"><option value="all">All cashiers</option>${cashiers.map(c => `<option value="${fpEsc(c)}" ${rpCashierF === c ? 'selected' : ''}>${fpEsc(c)}</option>`).join('')}</select>
       <select class="input" aria-label="Receipt order" title="Order of receipts" onchange="rpOrder=this.value;renderReportsTab(document.getElementById('feeBody'))"><option value="asc" ${rpOrder === 'asc' ? 'selected' : ''}>Oldest receipt first ↑</option><option value="desc" ${rpOrder === 'desc' ? 'selected' : ''}>Newest receipt first ↓</option></select>
-      <div class="iv-toolbar-actions">${fpCan('print') ? sfBtn('soft', 'down', 'Excel', 'fpExportDayBook(false)') + sfBtn('soft', 'down', 'PDF', 'fpExportDayBook(true)') : ''}</div>`) + `
+      <div class="iv-toolbar-actions">${typeof hvBtn === 'function' ? hvBtn(groups.filter(g => g.recs.every(r => r.voided)).length) : ''}${fpCan('print') ? sfBtn('soft', 'down', 'Excel', 'fpExportDayBook(false)') + sfBtn('soft', 'down', 'PDF', 'fpExportDayBook(true)') : ''}</div>`) + `
     <section class="sf-kpis">
       ${sfKpi('Collected', fmtMoney(total), 'good', groups.filter(g => !g.recs.every(r => r.voided)).length + ' receipt(s)')}
       ${sfKpi('Cash', fmtMoney(byMode['Cash'] || 0), 'plain')}

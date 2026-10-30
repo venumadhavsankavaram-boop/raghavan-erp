@@ -140,7 +140,7 @@ function fyhCardHTML(g, mode){
   }
   const canPrint = (typeof canSub === 'function') ? canSub('managefee_collection', 'managefee', 'print') : true;
   const sorted = g.payments.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
-  const rows = sorted.length ? sorted.map(p => `<tr${p.voided ? ' style="opacity:.55"' : ''}>
+  const rows = sorted.length ? sorted.map(p => `<tr${p.voided ? ' class="hv-void" style="opacity:.55"' : ''}>
       <td>${escapeHtml(p.date || '—')}</td><td><b>${escapeHtml(p.receiptNo || '—')}</b></td><td>${escapeHtml(feeLabelFor(p))}</td><td>${escapeHtml(p.mode || '—')}</td>
       <td>${p.voided ? '<s>' + fmtMoney(p.amount) + '</s>' : fmtMoney(p.amount)}</td>
       <td>${p.voided ? '<span class="fyh-badge fyh-old">' + (p.voidType === 'refund' ? 'Refunded' : 'Voided') + '</span>' : (canPrint && p.id ? `<button type="button" class="fyh-link" onclick="printReceipt('${String(p.id).replace(/'/g, "\\'")}')">Print receipt</button>` : '')}</td></tr>`).join('')
@@ -157,6 +157,7 @@ function fyhCardHTML(g, mode){
     </div>
     ${note}
     <details class="fyh-rec"><summary>${sorted.length} receipt${sorted.length === 1 ? '' : 's'}</summary>
+      ${typeof hvBtn === 'function' ? hvBtn(sorted.filter(p => p.voided).length) : ''}
       <div class="table-wrap" style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Receipt No</th><th>Fee</th><th>Mode</th><th>Amount</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
     </details>
   </article>`;

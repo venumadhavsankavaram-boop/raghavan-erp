@@ -138,13 +138,6 @@ async function renderLateFeesTab(body){
         <p class="ft-preview">Assessed so far: <b>${lateExtras.length}</b> · Outstanding <b>${fmtMoney(out)}</b> · Waived <b>${fpWaivers.length}</b></p>
         ${fpWaivers.length ? `<details><summary>Waiver log</summary><div class="table-wrap" style="max-height:200px;overflow:auto;"><table><thead><tr><th>Date</th><th>Student</th><th>Amount</th><th>By</th><th>Reason</th></tr></thead><tbody>${fpWaivers.slice().reverse().slice(0,100).map(w => { const st = students.find(x=>x.id===w.studentId); return `<tr><td>${w.date}</td><td>${st?escapeHtml(st.firstName+' '+st.lastName):'—'}</td><td>${fmtMoney(w.amount)}</td><td>${escapeHtml(w.by)}</td><td>${escapeHtml(w.reason)}</td></tr>`; }).join('')}</tbody></table></div></details>` : ''}
       </section>
-      <section class="sf-card ft-card">
-        ${ftCardHead('Receipt numbering', 'Switching over from another system? Set where receipt numbers should continue (if your last printed receipt was 001666, enter 1667).')}
-        <div class="ft-form">
-          <label class="ft-field"><span>Next receipt starts at</span><input type="number" min="1" class="input" id="rsStart" ${dis} value="${Number(receiptSettings.startNumber)||1}"></label>
-        </div>
-        ${canEdit ? sfBtn('primary', 'check', 'Save receipt numbering', 'saveReceiptSettings()') : ''}
-      </section>
     </div>`;
   ftLatePreview();
 }
