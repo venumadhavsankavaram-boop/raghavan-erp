@@ -22,6 +22,14 @@ function ttxStaffName(id){
 function ttxShortDay(d){ return String(d).slice(0, 3); }
 function ttxTeachingPeriods(){ return timetablePeriods.filter(p => !p.isBreak); }
 
+/* Shared-period subjects: Mass Drill (MD) is taken by one teacher with several classes together,
+   so the same teacher may be in more than one class at that time. Every other subject still
+   blocks double-booking. A teacher is only "double-booked" if some entry in that slot is NOT a shared subject. */
+function ttIsSharedSubject(name){
+  const k = String(name == null ? '' : name).toLowerCase().replace(/[^a-z]/g, '');
+  return k === 'md' || k.indexOf('massdrill') === 0;
+}
+function ttAllShared(list){ return list.length > 0 && list.every(e => ttIsSharedSubject(e.subject)); }
 /* How many entries share one teacher + day + period (>1 means a clash). */
 function ttxClashMap(){
   const m = {};
@@ -34,7 +42,7 @@ function ttxClashMap(){
 }
 function ttxIsClash(map, e){
   const l = map[`${e.day}|${e.period}|${e.staffId}`];
-  return !!(l && l.length > 1);
+  return !!(l && l.length > 1 && !ttAllShared(l));
 }
 function ttxTimeLabel(p){
   return `<b>${escapeHtml(p.label)}</b><span>${escapeHtml(p.start)}–${escapeHtml(p.end)}</span>`;
@@ -214,6 +222,10 @@ function renderTeacherGrid(){
     return `<tr>${ttxRowHead(p)}${days.map(day => {
       const list = timetableEntries.filter(e => e.staffId === ttTeacherId && e.day === day && e.period === p.id);
       if(!list.length) return `<td><div class="ttx-cell ttx-cell--free"><span class="ttx-dash">Free</span></div></td>`;
+      if(list.length > 1 && ttAllShared(list)){
+        const sub = list[0].subject;
+        return `<td><div class="ttx-cell ttx-t${ttxTone(sub)}"><b>${escapeHtml(sub)} · ${list.length} classes together</b><span>${list.map(e => escapeHtml(e.className) + ' ' + escapeHtml(e.section)).join(', ')}</span></div></td>`;
+      }
       const clash = list.length > 1;
       return `<td><div class="ttx-stack">${list.map(e => `<div class="ttx-cell ttx-t${ttxTone(e.className)}${clash ? ' is-clash' : ''}">
         <b>${escapeHtml(e.className)} · ${escapeHtml(e.section)}</b><span>${escapeHtml(e.subject)}</span>${clash ? `<em>${ttxWarnIcon()}Clash</em>` : ''}</div>`).join('')}</div></td>`;
@@ -223,7 +235,7 @@ function renderTeacherGrid(){
   const clashLines = [];
   days.forEach(d => timetablePeriods.forEach(p => {
     const l = timetableEntries.filter(e => e.staffId === ttTeacherId && e.day === d && e.period === p.id);
-    if(l.length > 1) clashLines.push(`<li><b>${escapeHtml(ttxShortDay(d))} · ${escapeHtml(p.label)}</b> booked in ${l.map(e => `${escapeHtml(e.className)} ${escapeHtml(e.section)} (${escapeHtml(e.subject)})`).join(' and ')}.</li>`);
+    if(l.length > 1 && !ttAllShared(l)) clashLines.push(`<li><b>${escapeHtml(ttxShortDay(d))} · ${escapeHtml(p.label)}</b> booked in ${l.map(e => `${escapeHtml(e.className)} ${escapeHtml(e.section)} (${escapeHtml(e.subject)})`).join(' and ')}.</li>`);
   }));
 
   return `

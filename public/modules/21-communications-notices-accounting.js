@@ -731,7 +731,11 @@
     document.getElementById('ttCellModalOverlay').classList.remove('open');
   }
   function findTtConflict(day, periodId, staffId, excludeClass, excludeSection){
-    return timetableEntries.find(e => e.day===day && e.period===periodId && e.staffId===staffId && !(e.className===excludeClass && e.section===excludeSection));
+    // Mass Drill (MD) may be taken by one teacher with several classes at the same time.
+    // It never excuses a clash with any other subject.
+    const sel = document.getElementById('ttCellSubject');
+    const newIsShared = typeof ttIsSharedSubject === 'function' && ttIsSharedSubject(sel ? sel.value : '');
+    return timetableEntries.find(e => e.day===day && e.period===periodId && e.staffId===staffId && !(e.className===excludeClass && e.section===excludeSection) && !(newIsShared && ttIsSharedSubject(e.subject)));
   }
   async function saveTtCell(){
     const subject = document.getElementById('ttCellSubject').value;
