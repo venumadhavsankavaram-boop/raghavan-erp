@@ -43,6 +43,8 @@
     b.dataset.state = 'busy';
     try{
       if(t.kind === 'receipt'){
+        // Receipt numbers are issued at Save, never when a form opens, so opening or cancelling a form leaves no gap.
+        return noNumber(b, t);
         if(typeof rcEnsure !== 'function' || typeof rcPool === 'undefined') return noNumber(b, t);
         const ok = await rcEnsure(want);
         if(token !== b._tok) return;
