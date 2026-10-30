@@ -1521,7 +1521,7 @@ const DOC_SERIES_PREFIX = {
 //   2. Otherwise the lowest unused number from earlier in the year is given before a new one is opened.
 // A number is only treated as unused after DOC_ORPHAN_GRACE_MIN minutes (so a slow save in progress is never
 // stolen) and never when the Admin has already written a reason for it in the Voucher Register.
-const DOC_ORPHAN_GRACE_MIN = Math.max(0, Number(process.env.DOC_ORPHAN_GRACE_MIN ?? 10) || 0);
+const DOC_ORPHAN_GRACE_MIN = Math.max(0, Number(process.env.DOC_ORPHAN_GRACE_MIN ?? 3) || 0);
 var _draftTableReady = null;
 function ensureDraftKeyTable() {
   if (!_draftTableReady) {

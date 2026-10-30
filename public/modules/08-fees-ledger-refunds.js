@@ -362,8 +362,8 @@ let refundPaymentId = null;
     renderDashboard();
     renderFeeBody();
     const totalPaid = studentIds.reduce((sum,sid) => sum + byStudent[sid].reduce((s,h)=>s+h.amount,0), 0);
-    showToast(results.length + ' receipt(s) generated for ' + results.length + ' student(s).', 'radial', totalPaid);
-    if(await showConfirmDialog('Payment(s) recorded. Print receipt(s) now?')){
+    showToast(results.length + ' receipt(s) generated for ' + results.length + ' student(s): ' + results.map(r => r.receiptNo).join(', ') + '.', 'radial', totalPaid);
+    if(await showConfirmDialog('Payment(s) recorded — Receipt No. ' + results.map(r => r.receiptNo).join(', ') + '. Print receipt(s) now?')){
       results.forEach(r => printReceiptByNo(r.receiptNo));
     }
   }

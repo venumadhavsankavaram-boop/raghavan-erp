@@ -210,11 +210,47 @@
       var _rfb = renderFeeBody, tmr = null;
       renderFeeBody = function(){
         var r = _rfb.apply(this, arguments);
-        clearTimeout(tmr); tmr = setTimeout(function(){ try{ acInjectButton(); acPaintBadge(); }catch(e){} }, 400);
+        clearTimeout(tmr); tmr = setTimeout(function(){ try{ acPaintReceiptStrip(); }catch(e){} try{ acInjectButton(); acPaintBadge(); }catch(e){} }, 400);
         return r;
       };
     }
   }
+
+  /* ---------- the latest receipt numbers, always visible on the fee page ---------- */
+  var acSeen = null, acSeenAt = 0;
+  function acRecNo(no){ var m = /(\d+)$/.exec(String(no || '')); return m ? parseInt(m[1], 10) : 0; }
+  function acPaintReceiptStrip(){
+    var host = document.getElementById('feeBody'); if(!host || !host.parentNode) return;
+    var bar = document.getElementById('acReceiptStrip');
+    if(!bar){
+      bar = document.createElement('div'); bar.id = 'acReceiptStrip';
+      bar.style.cssText = 'margin:8px 0 12px;padding:9px 12px;border-radius:10px;font-size:.86rem;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;border:1px solid #e3def7;background:#f6f3ff;color:#2b2150;';
+      host.parentNode.insertBefore(bar, host);
+    }
+    var list = (typeof payments !== 'undefined' && Array.isArray(payments)) ? payments : [];
+    var prefix = ''; try{ if(typeof receiptPrefix === 'function') prefix = receiptPrefix(); }catch(e){}
+    var by = new Map();
+    list.forEach(function(p){
+      if(!p || !p.receiptNo) return;
+      var no = String(p.receiptNo); if(prefix && no.indexOf(prefix) !== 0) return;
+      var n = acRecNo(no); if(!n) return;
+      var e = by.get(no); if(!e){ e = { no: no, n: n, who: p.studentName || '', amt: 0, live: false, date: p.date || '' }; by.set(no, e); }
+      if(!p.voided){ e.live = true; e.amt += Number(p.amount) || 0; e.who = p.studentName || e.who; e.date = p.date || e.date; }
+    });
+    var arr = Array.from(by.values()).sort(function(a, b){ return b.n - a.n; }).slice(0, 3);
+    if(!arr.length){ bar.style.display = 'none'; return; }
+    bar.style.display = 'flex';
+    if(acSeen && arr[0].no !== acSeen) acSeenAt = Date.now();
+    acSeen = arr[0].no;
+    var fresh = acSeenAt && (Date.now() - acSeenAt) < 90000;
+    bar.style.background = fresh ? '#e8f7ee' : '#f6f3ff'; bar.style.borderColor = fresh ? '#9fd8b4' : '#e3def7';
+    var money = function(v){ try{ return typeof fmtMoney === 'function' ? fmtMoney(v) : String(v); }catch(e){ return String(v); } };
+    var esc = function(t){ return String(t).replace(/[&<>"]/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]; }); };
+    bar.innerHTML = '<b>' + (fresh ? '✔ Receipt issued: ' : '🧾 Latest receipts: ') + '</b>' + arr.map(function(e, i){
+      return '<span' + (i === 0 ? ' style="font-weight:700"' : '') + '>' + esc(e.no) + (e.live ? '' : ' (void)') + ' <span style="opacity:.75">· ' + esc(e.who) + ' · ' + (e.live ? money(e.amt) : 'voided') + '</span></span>';
+    }).join('<span style="opacity:.4">|</span>');
+  }
+
   acHook();
   window.addEventListener('load', acHook);
   document.addEventListener('DOMContentLoaded', acHook);

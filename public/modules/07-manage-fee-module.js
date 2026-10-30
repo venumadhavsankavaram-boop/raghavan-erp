@@ -351,8 +351,8 @@ const FEE_TYPES_KEY = "fee-types";
     renderDashboard();
     renderFeeBody();
     if(lastId && !payments.some(p => p.id === lastId)) return; // duplicate refused by the server
-    showToast(entries.length > 1 ? `Receipt ${sharedReceiptNo} generated for ${entries.length} fee heads.` : 'Payment recorded.', 'radial', entries.reduce((s,e)=>s+e.amt,0));
-    if(lastId && await showConfirmDialog('Payment(s) recorded. Print receipt now?')){
+    showToast(entries.length > 1 ? `Receipt ${sharedReceiptNo} generated for ${entries.length} fee heads.` : `Payment recorded — Receipt ${sharedReceiptNo}.`, 'radial', entries.reduce((s,e)=>s+e.amt,0));
+    if(lastId && await showConfirmDialog(`Payment recorded — Receipt No. ${sharedReceiptNo}. Print receipt now?`)){
       printReceiptByNo(sharedReceiptNo);
     }
   }

@@ -247,7 +247,7 @@ function vrPaintRows(){
     const note = g.note
       ? `<span class="sf-badge sf-badge--paid">Explained</span> ${escapeHtml(g.note.reason)} <small>— ${escapeHtml(g.note.notedBy)}</small> <button type="button" class="sf-btn sf-btn--soft" onclick="vrEditNote(${r.seq})">Edit</button>`
       : (g.reusable
-        ? `<span class="sf-badge sf-badge--pending">Free to reuse</span> <small>The next receipt takes this number by itself (after about 10 minutes). Adding a reason instead keeps it unused for good.</small> <button type="button" class="sf-btn sf-btn--soft" onclick="vrEditNote(${r.seq})">Add reason</button>`
+        ? `<span class="sf-badge sf-badge--pending">Free to reuse</span> <small>The next receipt takes this number by itself (after about 3 minutes). Adding a reason instead keeps it unused for good.</small> <button type="button" class="sf-btn sf-btn--soft" onclick="vrEditNote(${r.seq})">Add reason</button>`
         : `<span class="sf-badge sf-badge--overdue">Unexplained</span> <button type="button" class="sf-btn sf-btn--soft" onclick="vrEditNote(${r.seq})">Add reason</button>`);
     return `<tr id="vrRow-${r.seq}" style="background:rgba(220,38,38,.07)">
       <td><b style="color:#b91c1c">${escapeHtml(r.number)}</b><br><span class="sf-badge sf-badge--overdue">MISSING</span></td>

@@ -88,8 +88,8 @@ function openPaymentModal(presetStudentId){
     if(document.getElementById('view-managefee').style.display !== 'none') renderFeeBody();
     // The server refuses an identical payment saved moments ago; the extra copy is removed from the list.
     if(!payments.includes(record)) return;
-    showToast('Payment recorded.', 'radial', record.amount);
-    if(await showConfirmDialog('Payment recorded. Print receipt now?')){
+    showToast('Payment recorded — Receipt ' + record.receiptNo + '.', 'radial', record.amount);
+    if(await showConfirmDialog('Payment recorded — Receipt No. ' + record.receiptNo + '. Print receipt now?')){
       printReceipt(record.id);
     }
     return false;

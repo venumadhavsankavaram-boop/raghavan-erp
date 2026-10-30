@@ -457,6 +457,29 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
         ? 'Each time you sign in you will also enter a 6-digit code. Recovery codes left: <b>' + st.recoveryLeft + '</b>.' + (st.recoveryLeft <= 2 ? ' <b style="color:var(--magenta)">Running low — turn it off and on again to get new codes.</b>' : '')
         : 'Adds a second check when you sign in, so a stolen password alone cannot open this account. Recommended for Admin and Principal.'}</p>`;
   }
+  // Shown when the school requires two-step sign-in and this Admin/Principal has not set it up yet.
+  function showForcedTwofaSetup(){
+    return new Promise(resolve => {
+      const old = document.getElementById('forcedTwofaOverlay'); if(old) old.remove();
+      const o = document.createElement('div');
+      o.id = 'forcedTwofaOverlay';
+      o.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,.78);display:flex;align-items:center;justify-content:center;padding:16px;';
+      o.innerHTML = `<div style="background:#fff;border-radius:14px;max-width:460px;width:100%;max-height:92vh;overflow:auto;padding:22px;display:grid;gap:12px;">
+        <h3 style="margin:0;">Set up two-step sign-in</h3>
+        <p style="margin:0;font-size:.85rem;color:#555;">Your school now requires a second check at sign-in for Admin and Principal accounts. It takes about a minute. You can use the app after this step.</p>
+        <div id="twofaCard"></div>
+        <div style="display:flex;gap:10px;justify-content:space-between;flex-wrap:wrap;">
+          <button type="button" class="btn btn-ghost" id="ftwSignOut">Sign out</button>
+          <button type="button" class="btn btn-primary" id="ftwContinue" disabled>I have saved my codes — continue</button>
+        </div></div>`;
+      document.body.appendChild(o);
+      loadTwofaCard();
+      const cont = o.querySelector('#ftwContinue');
+      const t = setInterval(() => { if(currentUser && currentUser.twofaEnabled) cont.disabled = false; }, 400);
+      cont.onclick = () => { clearInterval(t); o.remove(); resolve(true); };
+      o.querySelector('#ftwSignOut').onclick = () => { clearInterval(t); o.remove(); try{ logout(); }catch(e){ location.reload(); } };
+    });
+  }
   function toggleTwofa(turnOn){ renderTwofaCard({ step: turnOn ? 'choose' : 'off' }); }
   async function startTwofa(method){
     const password = (document.getElementById('twofaPw') || {}).value || '';
@@ -1509,12 +1532,23 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       const res = await fetch('/api/account/2fa/overview'); await throwIfNotOk(res);
       const d = await res.json();
       const name = { app:'Authenticator app', email:'Code by email' };
-      el.innerHTML = '<table style="width:100%; font-size:0.8rem;"><tbody>' + (d.users || []).map(u =>
+      let pol = null; try{ const pr = await fetch('/api/account/2fa/policy'); if(pr.ok) pol = await pr.json(); }catch(e){}
+      const polHtml = pol ? '<div style="margin:0 0 12px; padding:10px 12px; border:1px solid var(--line,#e5e7eb); border-radius:10px;"><label style="display:flex; gap:10px; align-items:flex-start; cursor:pointer;"><input type="checkbox" id="twofaRequireChk" ' + (pol.required ? 'checked' : '') + ' onchange="setTwofaRequired(this.checked)" style="width:18px; height:18px; margin-top:2px;"><span><b>Require two-step sign-in for all Admin and Principal accounts</b><br><span style="color:var(--ink-soft);">When this is ON, anyone in those roles who has not set it up is taken to a set-up screen at their next sign-in and cannot use the app until they finish. ' + pol.protectedCount + ' of ' + pol.total + ' accounts are protected now. Turn on your own first.</span></span></label></div>' : '';
+      el.innerHTML = polHtml + '<table style="width:100%; font-size:0.8rem;"><tbody>' + (d.users || []).map(u =>
         '<tr><td style="padding:5px 0;"><b>' + escapeHtml(u.name || u.username) + '</b> <span style="color:var(--ink-soft);">(' + escapeHtml(u.role) + ')</span></td>' +
         '<td style="color:' + (u.method ? '#0a8f6a' : '#b7791f') + ';"><b>' + (u.method ? 'ON · ' + name[u.method] : 'OFF') + '</b></td>' +
         '<td style="text-align:right;">' + (u.method ? '<button class="btn btn-sm" type="button" onclick="resetTwofaFor(\'' + escapeHtml(u.id) + '\', \'' + escapeHtml((u.name || u.username || '').replace(/'/g, '')) + '\')">Reset</button>' : '') + '</td></tr>').join('') +
         '</tbody></table>' + (d.emailAvailable ? '' : '<p style="margin:8px 0 0; color:var(--ink-soft);">Code by email is not available yet — the school\'s email sending is not set up. The authenticator app works now.</p>');
     }catch(e){ el.textContent = 'Could not load (' + e.message + ').'; }
+  }
+  async function setTwofaRequired(on){
+    try{
+      const r = await fetch('/api/account/2fa/policy', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ required: !!on }) });
+      const d = await r.json().catch(() => ({}));
+      if(!r.ok){ showToast(d.error || 'Could not save.'); }
+      else showToast(on ? 'Two-step sign-in is now required for Admin and Principal.' : 'Two-step sign-in is no longer required (people can still keep it on).');
+    }catch(e){ showToast('Could not reach the server.'); }
+    loadTwofaOverview();
   }
   async function resetTwofaFor(id, name){
     if(!confirm('Turn off two-step sign-in for ' + name + '? They will be able to sign in with just their password until they set it up again.')) return;
@@ -1936,6 +1970,8 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     if(loginNameEl && schoolInfo.name) loginNameEl.textContent = schoolInfo.name;
     const loginLogoEl = document.getElementById('loginLogoImg');
     if(loginLogoEl && schoolInfo.logo) loginLogoEl.src = schoolInfo.logo;
+    try{ if(schoolInfo.name && schoolInfo.name !== 'Your School Name') localStorage.setItem('rgv_brand', JSON.stringify({ name: schoolInfo.name, logo: schoolInfo.logo || '' })); }catch(e){}
+    document.documentElement.classList.remove('brand-pending');
   }
   function schoolLogoSrc(){
     return schoolLogoData || schoolInfo.logo || document.getElementById('sbLogoImg').src;
