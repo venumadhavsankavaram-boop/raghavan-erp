@@ -1,5 +1,5 @@
 /* ============================================================================
-   Timetable: "Mass Drill for a group" - give MD to many classes in one go.
+   Timetable: subjects taken by several classes at once (Mass Drill, Bala Vikas, ...) - editable school list + group tool.
    Pick day + period + teacher, tick the classes (or use the Primary / High school
    buttons), and every ticked class gets Mass Drill in that slot. A class that already
    has another subject there is skipped and listed. Needs an MD / Mass Drill subject in each class.
@@ -8,6 +8,13 @@
   const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
   const canEdit = () => { try { return ['Admin', 'Principal'].includes(currentUser.role); } catch(e){ return false; } };
   const shared = n => typeof ttIsSharedSubject === 'function' && ttIsSharedSubject(n);
+  const kindOf = n => typeof ttSharedKind === 'function' ? ttSharedKind(n) : '';
+  const KEY = 'timetable-shared-subjects';
+  try { OBJECT_BACKED_KEYS[KEY] = '/api/kv/' + KEY; } catch(e){}
+  const groups = () => ttSharedGroups();
+  const labelOf = k => { const g = groups().find(x => x.id === k); return g ? g.label : ''; };
+  const KIND_LABEL = new Proxy({}, { get: (_, k) => labelOf(String(k)) });
+  let curKind = '';
   const primaryIdx = () => { const i = CLASS_LEVELS.indexOf('5th Class'); return i < 0 ? 8 : i; };
   const isPrimary = cls => CLASS_LEVELS.indexOf(cls) <= primaryIdx();
 
@@ -15,7 +22,7 @@
   function targets(){
     const out = [];
     CLASS_LEVELS.forEach(cls => {
-      const subs = subjectsList.filter(s => s.className === cls && shared(s.name));
+      const subs = subjectsList.filter(s => s.className === cls && kindOf(s.name) === curKind);
       const secs = new Set(); subs.forEach(s => (s.sections || []).forEach(x => secs.add(x)));
       Array.from(secs).sort().forEach(sec => { const s = subs.find(x => (x.sections || []).includes(sec)); out.push({ cls, sec, subject: s.name }); });
     });
@@ -41,7 +48,7 @@
     if(typeof timetableTab !== 'undefined' && timetableTab !== 'class') return;
     if(!canEdit()) return;
     const bar = document.createElement('div'); bar.className = 'md-bar';
-    bar.innerHTML = `<span>🏃 <b>Mass Drill (MD)</b> for many classes in one go</span><button type="button" class="btn btn-ghost" onclick="openMdGroup()">Set Mass Drill for a group</button>`;
+    bar.innerHTML = `<span>🏃 <b>Subjects taken by several classes at once</b> (${esc(groups().map(g => g.label).join(', '))}) in one go</span><button type="button" class="btn btn-ghost" onclick="openMdGroup()">Set for a group of classes</button>`;
     body.prepend(bar);
   }
   if(typeof renderTimetableBody === 'function'){
@@ -59,19 +66,22 @@
   }
   window.closeMdGroup = function(){ const o = document.getElementById('mdGroupOverlay'); if(o) o.classList.remove('open'); };
 
-  window.openMdGroup = function(){
+  window.openMdGroup = function(kind){
+    const kinds = groups().map(g => g.id).filter(k => subjectsList.some(s => kindOf(s.name) === k));
+    curKind = (typeof kind === 'string' && kinds.includes(kind)) ? kind : (kinds.includes(curKind) ? curKind : (kinds[0] || (groups()[0] ? groups()[0].id : 'md')));
     const T = targets();
     const days = activeTimetableDays(), periods = timetablePeriods.filter(p => !p.isBreak);
-    const mdIds = new Set(); subjectsList.filter(s => shared(s.name)).forEach(s => (s.staffIds || []).forEach(i => mdIds.add(i)));
+    const mdIds = new Set(); subjectsList.filter(s => kindOf(s.name) === curKind).forEach(s => (s.staffIds || []).forEach(i => mdIds.add(i)));
     const act = staffList.filter(s => staffIsActive(s));
     const stOpt = s => `<option value="${s.id}">${esc(s.firstName)} ${esc(s.lastName)}</option>`;
     const boxes = T.map(t => `<label class="md-chk"><input type="checkbox" class="md-box" value="${esc(key(t))}" onchange="mdCheck()"> ${esc(t.cls)} ${esc(t.sec)}</label>`).join('');
     const missing = CLASS_LEVELS.filter(c => !T.some(t => t.cls === c));
+    const kindSel = kinds.length > 1 ? '<div class="f-field" style="margin-bottom:8px"><label>Subject</label><select onchange="openMdGroup(this.value)">' + kinds.map(k => '<option value="' + k + '"' + (k === curKind ? ' selected' : '') + '>' + esc(KIND_LABEL[k]) + '</option>').join('') + '</select></div>' : '';
     const mdStaff = act.filter(s => mdIds.has(s.id)), otherStaff = act.filter(s => !mdIds.has(s.id));
-    const staffOpts = '<option value="">Select teacher</option>' + (mdStaff.length ? '<optgroup label="Teaches Mass Drill">' + mdStaff.map(stOpt).join('') + '</optgroup>' : '') + '<optgroup label="Other staff">' + otherStaff.map(stOpt).join('') + '</optgroup>';
+    const staffOpts = '<option value="">Select teacher</option>' + (mdStaff.length ? '<optgroup label="Teaches ' + esc(KIND_LABEL[curKind] || 'this subject') + '">' + mdStaff.map(stOpt).join('') + '</optgroup>' : '') + '<optgroup label="Other staff">' + otherStaff.map(stOpt).join('') + '</optgroup>';
     const dayOpts = '<option value="*">Every day of the week</option>' + days.map(d => '<option>' + esc(d) + '</option>').join('');
     const perOpts = periods.map(p => '<option value="' + esc(p.id) + '">' + esc(p.label) + ' (' + esc(p.start) + '–' + esc(p.end) + ')</option>').join('');
-    const missNote = missing.length ? '<div class="md-note md-warn">No Mass Drill subject yet in: ' + missing.map(esc).join(', ') + '. Add an "MD" or "Mass Drill" subject in Manage Subjects to include them.</div>' : '';
+    const missNote = missing.length ? '<div class="md-note md-warn">No ' + esc(KIND_LABEL[curKind] || 'such') + ' subject yet in: ' + missing.map(esc).join(', ') + '. Add one in Manage Subjects to include them.</div>' : '';
     const form = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:8px">'
       + '<div class="f-field"><label>Day</label><select id="mdDay" onchange="mdCheck()">' + dayOpts + '</select></div>'
       + '<div class="f-field"><label>Period</label><select id="mdPer" onchange="mdCheck()">' + perOpts + '</select></div>'
@@ -80,10 +90,10 @@
       + '<button type="button" onclick="mdPick(\'high\')">High school (6th – ' + esc(CLASS_LEVELS[CLASS_LEVELS.length - 1]) + ')</button>'
       + '<button type="button" onclick="mdPick(\'all\')">All classes</button><button type="button" onclick="mdPick(\'none\')">Clear ticks</button></div>'
       + '<div class="md-grid">' + boxes + '</div>' + missNote + '<div id="mdPreview"></div>'
-      + '<div class="modal-actions"><button type="button" class="btn btn-ghost" onclick="closeMdGroup()">Cancel</button><button type="button" class="btn btn-primary" id="mdApplyBtn" onclick="applyMdGroup()" disabled>Set Mass Drill</button></div>';
-    const empty = '<div class="md-note md-warn">No class has a Mass Drill subject yet. In Manage Subjects, add a subject named "MD" or "Mass Drill" to the classes that take it, then come back here.</div>';
+      + '<div class="modal-actions"><button type="button" class="btn btn-ghost" onclick="closeMdGroup()">Cancel</button><button type="button" class="btn btn-primary" id="mdApplyBtn" onclick="applyMdGroup()" disabled>Set it</button></div>';
+    const empty = '<div class="md-note md-warn">None of your classes has a subject from the "taken by several classes at once" list yet (' + groups().map(g => esc(g.label)).join(', ') + '). Add the subject in Manage Subjects, or add other subject names to the list under Timetable > Periods Setup.</div>';
     overlay();
-    document.getElementById('mdGroupBody').innerHTML = '<h2>Mass Drill for a group</h2><p class="modal-sub">One teacher takes Mass Drill with several classes together in the same period.</p>' + (T.length ? form : empty);
+    document.getElementById('mdGroupBody').innerHTML = '<h2>' + esc(KIND_LABEL[curKind] || 'Mass Drill') + ' for a group</h2><p class="modal-sub">One teacher takes this subject with several classes together in the same period.</p>' + kindSel + (T.length ? form : empty);
     document.getElementById('mdGroupOverlay').classList.add('open');
     mdCheck();
   };
@@ -108,11 +118,11 @@
         const ex = timetableEntries.find(e => e.className === t.cls && e.section === t.sec && e.day === day && e.period === per);
         const label = t.cls + ' ' + t.sec + (dayList.length > 1 ? ' ' + String(day).slice(0, 3) : '');
         if(!ex) add.push({ t, day });
-        else if(shared(ex.subject)) (ex.staffId === staff ? same : add).push({ t, day });
+        else if(kindOf(ex.subject) === curKind) (ex.staffId === staff ? same : add).push({ t, day });
         else skip.push(label + ' (has ' + ex.subject + ')');
       });
-      // The teacher must not be teaching something that is not Mass Drill in this slot.
-      if(staff) timetableEntries.filter(e => e.day === day && e.period === per && e.staffId === staff && !shared(e.subject) && !T.some(t => t.cls === e.className && t.sec === e.section)).forEach(e => busy.push(e));
+      // The teacher must not be teaching something that is not this subject in this slot.
+      if(staff) timetableEntries.filter(e => e.day === day && e.period === per && e.staffId === staff && kindOf(e.subject) !== curKind && !T.some(t => t.cls === e.className && t.sec === e.section)).forEach(e => busy.push(e));
     });
     return { dayList, per, staff, T, add, same, skip, busy };
   }
@@ -120,11 +130,11 @@
     const pv = document.getElementById('mdPreview'), btn = document.getElementById('mdApplyBtn'); if(!pv) return;
     const p = plan(); let html = '', can = false;
     if(!p.staff) html = '<div class="md-note md-warn">Choose a teacher.</div>';
-    else if(!p.T.length) html = '<div class="md-note md-warn">Tick the classes that should have Mass Drill.</div>';
+    else if(!p.T.length) html = '<div class="md-note md-warn">Tick the classes that should have this subject.</div>';
     else if(p.busy.length) html = '<div class="md-note md-bad">⚠ This teacher is already teaching another subject at this time: ' + p.busy.map(e => esc(e.className) + ' ' + esc(e.section) + ' ' + esc(String(e.day).slice(0, 3)) + ' (' + esc(e.subject) + ')').join(', ') + '. Choose a different teacher or period.</div>';
     else {
       can = p.add.length > 0;
-      html = '<div class="md-note md-ok">Will set Mass Drill for <b>' + p.add.length + '</b> class-period' + (p.add.length === 1 ? '' : 's') + (p.dayList.length > 1 ? ' across ' + p.dayList.length + ' days' : '') + (p.same.length ? ' · ' + p.same.length + ' already set' : '') + '.</div>' +
+      html = '<div class="md-note md-ok">Will set ' + esc(KIND_LABEL[curKind] || 'it') + ' for <b>' + p.add.length + '</b> class-period' + (p.add.length === 1 ? '' : 's') + (p.dayList.length > 1 ? ' across ' + p.dayList.length + ' days' : '') + (p.same.length ? ' · ' + p.same.length + ' already set' : '') + '.</div>' +
         (p.skip.length ? '<div class="md-note md-warn"><b>' + p.skip.length + ' skipped</b>, they already have another subject in this period: ' + p.skip.map(esc).join('; ') + '. Clear that slot first if it should be Mass Drill.</div>' : '');
     }
     pv.innerHTML = html; if(btn) btn.disabled = !can;
@@ -140,7 +150,7 @@
     });
     await storageSet(TIMETABLE_KEY, timetableEntries);
     closeMdGroup(); renderTimetableBody();
-    showToast('Mass Drill set for ' + p.add.length + ' class-period' + (p.add.length === 1 ? '' : 's') + (p.skip.length ? ' (' + p.skip.length + ' skipped)' : '') + '.', 'burst');
+    showToast((KIND_LABEL[curKind] || 'Subject') + ' set for ' + p.add.length + ' class-period' + (p.add.length === 1 ? '' : 's') + (p.skip.length ? ' (' + p.skip.length + ' skipped)' : '') + '.', 'burst');
   };
 
   /* ---- Any subject: repeat the same period on every day of the week (class timetable cell) ---- */
@@ -168,12 +178,12 @@
       if(!rep || !subject || !staffId) return r;
       const here = timetableEntries.find(e => e.className === cls && e.section === sec && e.day === day0 && e.period === per && e.subject === subject && e.staffId === staffId);
       if(!here) return r;                       // the normal save was refused (teacher clash): nothing to repeat
-      const isMd = shared(subject);
+      const kind = kindOf(subject);
       let added = 0; const skipped = [];
       activeTimetableDays().filter(d => d !== day0).forEach((d, i) => {
         const ex = timetableEntries.find(e => e.className === cls && e.section === sec && e.day === d && e.period === per);
         if(ex && ex.subject !== subject) { skipped.push(String(d).slice(0, 3) + ' (has ' + ex.subject + ')'); return; }
-        const clash = timetableEntries.find(e => e.day === d && e.period === per && e.staffId === staffId && !(e.className === cls && e.section === sec) && !(isMd && shared(e.subject)));
+        const clash = timetableEntries.find(e => e.day === d && e.period === per && e.staffId === staffId && !(e.className === cls && e.section === sec) && !(kind && kindOf(e.subject) === kind));
         if(clash) { skipped.push(String(d).slice(0, 3) + ' (teacher busy in ' + clash.className + ' ' + clash.section + ')'); return; }
         const data = { className: cls, section: sec, day: d, period: per, subject, staffId };
         if(ex) Object.assign(ex, data); else timetableEntries.push({ id: 'tt_' + Date.now() + '_r' + i, ...data });
@@ -182,6 +192,93 @@
       await storageSet(TIMETABLE_KEY, timetableEntries);
       renderTimetableBody();
       showToast('Repeated on ' + added + ' more day' + (added === 1 ? '' : 's') + (skipped.length ? '. Skipped: ' + skipped.join(', ') : '.'), 'burst');
+      return r;
+    };
+  }
+
+  /* ---- The school's list: which subjects one teacher may take with several classes at once ---- */
+  const normName = n => (typeof ttNormName === 'function' ? ttNormName(n) : String(n || '').toLowerCase().replace(/[^a-z0-9]/g, ''));
+  const slug = n => normName(n) || ('g' + Date.now());
+  function cleanGroups(v){
+    if(!Array.isArray(v)) return null;
+    const out = [];
+    v.forEach(g => {
+      if(!g || !g.label) return;
+      const names = Array.from(new Set([g.label].concat(Array.isArray(g.names) ? g.names : []).map(x => String(x || '').trim()).filter(Boolean)));
+      if(names.length) out.push({ id: String(g.id || slug(g.label)), label: String(g.label).trim(), names });
+    });
+    return out;
+  }
+  let gLoaded = 0;
+  async function loadGroups(force){
+    try {
+      if(typeof currentUser === 'undefined' || !currentUser) return;
+      if(!force && Date.now() - gLoaded < 60000) return;
+      const v = await storageGet(KEY, null);
+      gLoaded = Date.now();
+      const g = cleanGroups(v);
+      window.ttSharedGroupsData = (g && g.length) || (Array.isArray(v) && !v.length) ? g : null;   // null = use the built-in default
+    } catch(e){}
+  }
+  if(typeof switchView === 'function'){
+    const o = switchView;
+    window.switchView = function(view){ const r = o.apply(this, arguments); if(view === 'timetable') loadGroups(false).then(() => { try { renderTimetableBody(); } catch(e){} }); return r; };
+  }
+  setTimeout(() => loadGroups(true), 3000);
+
+  async function saveGroups(list){
+    if(!(typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'Admin')){ showToast('Only the Admin can change this list.'); return false; }
+    const ok = await storageSet(KEY, list);
+    if(ok === false){ showToast('Could not save. Check the connection and try again.'); return false; }
+    window.ttSharedGroupsData = list; gLoaded = Date.now();
+    return true;
+  }
+  function paintCard(){
+    const box = document.getElementById('ttSharedCard'); if(!box) return;
+    const chips = groups().map((g, i) => `<span class="md-chip"><b>${esc(g.label)}</b>${g.names.length > 1 ? '<small> · ' + esc(g.names.join(', ')) + '</small>' : ''}<button type="button" aria-label="Remove ${esc(g.label)}" onclick="ttSharedRemove(${i})">×</button></span>`).join('') || '<span style="color:#5b6784">No subjects on the list. Every subject needs its own teacher in each period.</span>';
+    box.innerHTML = `<h4 style="margin:0 0 4px">Subjects taken by several classes at once</h4>
+      <p style="margin:0 0 10px;font-size:.82rem;color:#4a5878">One teacher may take these with many classes in the same period (for example a combined Mass Drill or Bala Vikas period). Every other subject still needs a different teacher in each class. This list only affects the timetable. It never changes subjects, exams, marks or results.</p>
+      <div class="md-chips">${chips}</div>
+      <div class="md-add"><input id="ttSharedInput" class="input" placeholder="Subject name, e.g. Yoga  (other spellings after commas)" onkeydown="if(event.key==='Enter'){ttSharedAdd()}"><button type="button" class="btn btn-primary" onclick="ttSharedAdd()">Add</button><button type="button" class="btn btn-ghost" onclick="ttSharedReset()">Reset to default</button></div>
+      <div id="ttSharedMsg" style="font-size:.8rem;margin-top:6px"></div>`;
+  }
+  const say = (t, bad) => { const m = document.getElementById('ttSharedMsg'); if(m){ m.textContent = t; m.style.color = bad ? '#8a0b4f' : '#14532d'; } };
+  window.ttSharedAdd = async function(){
+    const inp = document.getElementById('ttSharedInput'); const parts = (inp ? inp.value : '').split(',').map(x => x.trim()).filter(Boolean);
+    if(!parts.length){ say('Type the subject name first.', true); return; }
+    if(parts.some(p => normName(p).length < 2)){ say('That name is too short.', true); return; }
+    const taken = parts.find(p => ttSharedKind(p));
+    if(taken){ say('"' + taken + '" is already on the list.', true); return; }
+    const list = groups().map(g => ({ ...g, names: g.names.slice() }));
+    let id = slug(parts[0]); while(list.some(g => g.id === id)) id += 'x';
+    list.push({ id, label: parts[0], names: parts });
+    if(await saveGroups(list)){ paintCard(); say('Added "' + parts[0] + '".'); }
+  };
+  window.ttSharedRemove = async function(i){
+    const g = groups()[i]; if(!g) return;
+    const inUse = typeof timetableEntries !== 'undefined' ? timetableEntries.filter(e => ttSharedKind(e.subject) === g.id).length : 0;
+    if(!await showConfirmDialog('Remove "' + g.label + '" from the list?' + (inUse ? ' ' + inUse + ' timetable period' + (inUse === 1 ? ' uses' : 's use') + ' it now. They stay as they are, but if one teacher is in several classes in the same period it will show as a clash.' : ''))) return;
+    const list = groups().filter((_, k) => k !== i).map(x => ({ ...x }));
+    if(await saveGroups(list)){ paintCard(); say('Removed.'); }
+  };
+  window.ttSharedReset = async function(){
+    if(!await showConfirmDialog('Put the list back to the default (Mass Drill and Bala Vikas)?')) return;
+    const list = TT_SHARED_DEFAULT.map(g => ({ ...g, names: g.names.slice() }));
+    if(await saveGroups(list)){ paintCard(); say('List reset.'); }
+  };
+  const st2 = document.createElement('style');
+  st2.textContent = '.md-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}.md-chip{display:inline-flex;align-items:center;gap:6px;background:#eef1fb;border-radius:999px;padding:5px 6px 5px 12px;font-size:.84rem}.md-chip small{color:#5b6784}.md-chip button{border:0;background:#d9deee;border-radius:50%;width:22px;height:22px;cursor:pointer;line-height:1}.md-add{display:flex;gap:8px;flex-wrap:wrap}.md-add input{flex:1 1 260px}#ttSharedCard{margin-top:18px;padding:16px;border:1px solid #dde3ee;border-radius:14px;background:#fff}';
+  document.head.appendChild(st2);
+  if(typeof renderTimetablePeriodsTab === 'function'){
+    const origP = renderTimetablePeriodsTab;
+    window.renderTimetablePeriodsTab = function(body){
+      const r = origP.apply(this, arguments);
+      try {
+        if(body && currentUser && currentUser.role === 'Admin' && !document.getElementById('ttSharedCard')){
+          const card = document.createElement('div'); card.id = 'ttSharedCard'; body.appendChild(card);
+          loadGroups(true).then(paintCard); paintCard();
+        }
+      } catch(e){}
       return r;
     };
   }

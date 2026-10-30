@@ -22,14 +22,38 @@ function ttxStaffName(id){
 function ttxShortDay(d){ return String(d).slice(0, 3); }
 function ttxTeachingPeriods(){ return timetablePeriods.filter(p => !p.isBreak); }
 
-/* Shared-period subjects: Mass Drill (MD) is taken by one teacher with several classes together,
-   so the same teacher may be in more than one class at that time. Every other subject still
+/* Shared-period subjects: Mass Drill (MD) and Bala Vikas are taken by one teacher with several classes together,
+   so the same teacher may be in more than one class at that time (MD with MD, Bala Vikas with Bala Vikas). Every other subject still
    blocks double-booking. A teacher is only "double-booked" if some entry in that slot is NOT a shared subject. */
-function ttIsSharedSubject(name){
-  const k = String(name == null ? '' : name).toLowerCase().replace(/[^a-z]/g, '');
-  return k === 'md' || k.indexOf('massdrill') === 0;
+/* Subjects that one teacher takes with several classes at the same time (Mass Drill, Bala Vikas, Yoga ...).
+   The list belongs to the school (Timetable > Periods Setup, Admin only) and is used ONLY by the timetable:
+   clash check, Teacher View, group tool. It never touches subjects, exams, marks or results.
+   Each group = { id, label, names:[spellings] }; a subject belongs to a group when its name matches a spelling. */
+const TT_SHARED_DEFAULT = [
+  { id: 'md', label: 'Mass Drill (MD)', names: ['MD', 'Mass Drill'] },
+  { id: 'balavikas', label: 'Bala Vikas', names: ['Bala Vikas', 'Bal Vikas', 'Balavikas'] }
+];
+function ttNormName(n){ return String(n == null ? '' : n).toLowerCase().replace(/[^a-z0-9]/g, ''); }
+function ttSharedGroups(){ return (typeof window !== 'undefined' && Array.isArray(window.ttSharedGroupsData)) ? window.ttSharedGroupsData : TT_SHARED_DEFAULT; }
+function ttSharedKind(name){
+  const k = ttNormName(name);
+  if(!k) return '';
+  const groups = ttSharedGroups();
+  for(const g of groups){
+    for(const nm of (g.names || [])){
+      const a = ttNormName(nm);
+      if(a && (k === a || (a.length >= 5 && k.indexOf(a) === 0))) return g.id;
+    }
+  }
+  return '';
 }
-function ttAllShared(list){ return list.length > 0 && list.every(e => ttIsSharedSubject(e.subject)); }
+function ttIsSharedSubject(name){ return ttSharedKind(name) !== ''; }
+// every entry in the slot is the same shared subject (all Mass Drill, or all Bala Vikas)
+function ttAllShared(list){
+  if(!list.length) return false;
+  const k = ttSharedKind(list[0].subject);
+  return k !== '' && list.every(e => ttSharedKind(e.subject) === k);
+}
 /* How many entries share one teacher + day + period (>1 means a clash). */
 function ttxClashMap(){
   const m = {};

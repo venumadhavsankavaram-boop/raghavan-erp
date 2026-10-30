@@ -731,11 +731,11 @@
     document.getElementById('ttCellModalOverlay').classList.remove('open');
   }
   function findTtConflict(day, periodId, staffId, excludeClass, excludeSection){
-    // Mass Drill (MD) may be taken by one teacher with several classes at the same time.
-    // It never excuses a clash with any other subject.
+    // Mass Drill (MD) and Bala Vikas may each be taken by one teacher with several classes at once.
+    // It never excuses a clash with any other subject (MD and Bala Vikas do not excuse each other either).
     const sel = document.getElementById('ttCellSubject');
-    const newIsShared = typeof ttIsSharedSubject === 'function' && ttIsSharedSubject(sel ? sel.value : '');
-    return timetableEntries.find(e => e.day===day && e.period===periodId && e.staffId===staffId && !(e.className===excludeClass && e.section===excludeSection) && !(newIsShared && ttIsSharedSubject(e.subject)));
+    const newKind = typeof ttSharedKind === 'function' ? ttSharedKind(sel ? sel.value : '') : '';
+    return timetableEntries.find(e => e.day===day && e.period===periodId && e.staffId===staffId && !(e.className===excludeClass && e.section===excludeSection) && !(newKind && ttSharedKind(e.subject)===newKind));
   }
   async function saveTtCell(){
     const subject = document.getElementById('ttCellSubject').value;
