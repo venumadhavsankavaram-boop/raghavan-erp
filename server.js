@@ -1313,6 +1313,26 @@ async function recordLockGraceHours() {
   } catch (_) {}
   return 24;
 }
+// Teachers may still fix a student's / staff member's attendance for a short time after it was first marked
+// (a child can arrive after the register was taken). After that it locks. Default 10 minutes; the school
+// can change it in kv 'record-lock-policy' as {attendanceGraceMinutes: n} (0 = locks at once).
+async function attendanceGraceMinutes() {
+  try {
+    const r = await sql`SELECT value FROM kv_store WHERE \`key\` = 'record-lock-policy'`;
+    let v = r.length ? r[0].value : null; if (typeof v === 'string') { try { v = JSON.parse(v); } catch (_) { v = null; } }
+    const n = v && v.attendanceGraceMinutes !== undefined ? Number(v.attendanceGraceMinutes) : NaN;
+    if (Number.isFinite(n) && n >= 0) return n;
+  } catch (_) {}
+  return 10;
+}
+// Adds editLeftSec (seconds a teacher can still change the entry; 0 = locked) to attendance rows read from the DB.
+function addEditLeft(rows, appRows, graceMin) {
+  return appRows.map((o, i) => {
+    const age = Number(rows[i] && rows[i].age_sec);
+    o.editLeftSec = Number.isFinite(age) ? Math.max(0, Math.round(graceMin * 60 - age)) : 0;
+    return o;
+  });
+}
 async function findLockedRow(resource, id, body) {
   const b = body || {};
   const sess = b.session || null;
@@ -1337,9 +1357,9 @@ async function enforceRecordLock(req, res, resource) {
   const existing = await findLockedRow(resource, id, req.method === 'DELETE' ? null : req.body);
   if (!existing) return false; // a brand-new entry in an empty slot is always allowed
   const isAdmin = LOCK_OVERRIDE_ROLES.includes(req.authUser.role);
-  const graceMin = resource === 'exam-results' ? Math.round((await recordLockGraceHours()) * 60) : 0;
+  const graceMin = resource === 'exam-results' ? Math.round((await recordLockGraceHours()) * 60) : Math.round(await attendanceGraceMinutes());
   if (!isAdmin && Number(existing.age) >= graceMin) {
-    const what = resource === 'exam-results' ? 'This mark is locked' : 'This attendance is already marked and locked';
+    const what = resource === 'exam-results' ? 'This mark is locked' : 'This attendance is already marked and locked (the edit time after marking is over)';
     res.status(403).json({ error: what + '. Only an Admin or Principal can correct it.', code: 'RECORD_LOCKED' });
     return true;
   }
@@ -2362,6 +2382,10 @@ async function handleSimple(req, res, config, resourceName) {
     // added above did NOT stop ER_OUT_OF_SORTMEMORY on their own. Forcing
     // the index makes MySQL read rows already in created_at order straight
     // off the index, so no filesort — and no sort buffer — is ever needed.
+    if (table === 'attendance_records' || table === 'staff_attendance_records') {
+      const arows = await sql.query(`SELECT *, TIMESTAMPDIFF(SECOND, created_at, NOW()) AS age_sec FROM ${table} FORCE INDEX (idx_${table}_created_at) ORDER BY created_at ASC`);
+      return res.status(200).json(addEditLeft(arows, arows.map(r => simpleToAppShape(r, fields)), await attendanceGraceMinutes()));
+    }
     const rows = await sql.query(`SELECT * FROM ${table} FORCE INDEX (idx_${table}_created_at) ORDER BY created_at ASC`);
     return res.status(200).json(rows.map(r => simpleToAppShape(r, fields)));
   }
@@ -6680,8 +6704,8 @@ app.all('/api/:resource', async (req, res) => {
           const ids = studentRows.map(s => s.id);
           if (!ids.length) return res.status(200).json([]);
           const placeholders = ids.map((_, i) => `$${i + 1}`).join(', ');
-          const rows = await sql.query(`SELECT * FROM attendance_records WHERE student_id IN (${placeholders}) ORDER BY created_at ASC`, ids);
-          return res.status(200).json(rows.map(r => simpleToAppShape(r, SIMPLE_RESOURCES.attendance.fields)));
+          const rows = await sql.query(`SELECT *, TIMESTAMPDIFF(SECOND, created_at, NOW()) AS age_sec FROM attendance_records WHERE student_id IN (${placeholders}) ORDER BY created_at ASC`, ids);
+          return res.status(200).json(addEditLeft(rows, rows.map(r => simpleToAppShape(r, SIMPLE_RESOURCES.attendance.fields)), await attendanceGraceMinutes()));
         }
         if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
           let targetStudentId = (req.body || {}).studentId || null;

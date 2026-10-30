@@ -85,7 +85,7 @@ function renderAttRoster(body){
           <div class="at-row" data-id="${s.id}">
             <span class="at-roll">${escapeHtml(s.rollNo || '—')}</span>
             ${sfAvatar(s)}
-            <span class="at-name"><b>${escapeHtml(s.firstName)} ${escapeHtml(s.lastName)}</b><small>${escapeHtml(s.admissionNo || '')}${attIsLocked(s.id) ? ` · 🔒 locked · <a onclick="requestAttCorrection('${s.id}')" style="cursor:pointer;text-decoration:underline;">Request correction</a>` : ''}</small></span>
+            <span class="at-name"><b>${escapeHtml(s.firstName)} ${escapeHtml(s.lastName)}</b><small>${escapeHtml(s.admissionNo || '')}${attIsLocked(s.id) ? ` · 🔒 locked · <a onclick="requestAttCorrection('${s.id}')" style="cursor:pointer;text-decoration:underline;">Request correction</a>` : (attEditMinutesLeft(s.id) ? ` · ✏️ can change for ${attEditMinutesLeft(s.id)} more min` : '')}</small></span>
             <div class="at-btns" role="group" aria-label="Status for ${escapeHtml(s.firstName)}">${atStatusButtons(s.id)}</div>
           </div>`).join('')}
         ${list.length === 0 ? `<div class="empty-state"><b>No students here</b></div>` : ''}
@@ -96,9 +96,26 @@ function renderAttRoster(body){
       <button type="button" class="sf-btn sf-btn--primary sf-btn--lg" ${isHoliday ? 'disabled' : ''} onclick="saveAttendance()">Save attendance${attApplyBothSessions ? ' (Morning &amp; Afternoon)' : ' (' + attMarkSession + ')'}</button>
     </div>`;
   atPaintCounters();
+  atScheduleLockRefresh();
 }
 
 // Marking one student only touches that row and the counters.
+// When a teacher's edit time runs out, redraw the list so the buttons lock by themselves.
+let atLockTimer = null;
+function atScheduleLockRefresh(){
+  clearTimeout(atLockTimer);
+  try{
+    let soon = Infinity;
+    atRosterList().forEach(s => {
+      const rec = attendanceRecords.find(r => r.studentId === s.id && r.date === attMarkDate && (!r.session || r.session === attMarkSession));
+      const left = attEditLeftSec(rec, attLoadedAt);
+      if(left > 0) soon = Math.min(soon, left);
+    });
+    if(isFinite(soon) && !(currentUser && ['Admin','Principal'].includes(currentUser.role))){
+      atLockTimer = setTimeout(() => { try{ if(document.querySelector('.at-row')) renderAttendanceBody(); }catch(e){} }, Math.min(soon, 600) * 1000 + 800);
+    }
+  }catch(e){}
+}
 function setAttStatus(studentId, status){
   if(attIsLocked(studentId)) return;
   pendingMarks[studentId] = status;

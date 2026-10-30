@@ -66,6 +66,7 @@ const ATTENDANCE_KEY = "attendance-records";
   // ensureDataLoaded().
   async function loadAttendanceRecordsData(){
     attendanceRecords = await storageGet(ATTENDANCE_KEY, []);
+    attLoadedAt = Date.now();
   }
 
   let attTab = 'mark';
@@ -84,11 +85,29 @@ const ATTENDANCE_KEY = "attendance-records";
   let attApplyBothSessions = false;
   /* Tamper-proof register: once a student's / staff member's slot is marked, only Admin or Principal can change it
      (the server enforces the same rule — this just stops the buttons from offering it). */
+  // A teacher may still change an entry for a short time after it was first marked (the server sends
+  // editLeftSec = seconds left; the server enforces it too). Admin and Principal are never locked out.
+  let attLoadedAt = Date.now(), staffAttLoadedAt = Date.now();
+  function attEditLeftSec(rec, loadedAt){
+    if(!rec || typeof rec.editLeftSec !== 'number') return 0;
+    return rec.editLeftSec - (Date.now() - loadedAt) / 1000;
+  }
   function attIsLocked(studentId){
-    return !!currentUser && !['Admin','Principal'].includes(currentUser.role) && attendanceRecords.some(r => r.studentId === studentId && r.date === attMarkDate && (!r.session || r.session === attMarkSession));
+    if(!currentUser || ['Admin','Principal'].includes(currentUser.role)) return false;
+    const rec = attendanceRecords.find(r => r.studentId === studentId && r.date === attMarkDate && (!r.session || r.session === attMarkSession));
+    return !!rec && attEditLeftSec(rec, attLoadedAt) <= 0;
+  }
+  // Whole minutes a teacher can still change this student's mark (0 = not marked yet, locked, or not a teacher).
+  function attEditMinutesLeft(studentId){
+    if(!currentUser || ['Admin','Principal'].includes(currentUser.role)) return 0;
+    const rec = attendanceRecords.find(r => r.studentId === studentId && r.date === attMarkDate && (!r.session || r.session === attMarkSession));
+    const left = attEditLeftSec(rec, attLoadedAt);
+    return left > 0 ? Math.max(1, Math.ceil(left / 60)) : 0;
   }
   function staffAttIsLocked(staffId){
-    return !!currentUser && !['Admin','Principal'].includes(currentUser.role) && staffAttendanceRecords.some(r => r.staffId === staffId && r.date === staffAttMarkDate && (!r.session || r.session === staffAttMarkSession));
+    if(!currentUser || ['Admin','Principal'].includes(currentUser.role)) return false;
+    const rec = staffAttendanceRecords.find(r => r.staffId === staffId && r.date === staffAttMarkDate && (!r.session || r.session === staffAttMarkSession));
+    return !!rec && attEditLeftSec(rec, staffAttLoadedAt) <= 0;
   }
   function canUseBothSessionsShortcut(){
     return currentUser.role === 'Admin' || currentUser.role === 'Office Assistant';
@@ -192,6 +211,7 @@ const ATTENDANCE_KEY = "attendance-records";
   // See ensureDataLoaded().
   async function loadStaffAttendance(){
     staffAttendanceRecords = await storageGet(STAFF_ATTENDANCE_KEY, []);
+    staffAttLoadedAt = Date.now();
   }
   function initStaffAttendanceView(){
     document.getElementById('stattab-biometric').style.display = biometricAttendanceAvailable ? '' : 'none';
@@ -340,7 +360,8 @@ const ATTENDANCE_KEY = "attendance-records";
     });
     const stOk = await storageSet(STAFF_ATTENDANCE_KEY, staffAttendanceRecords);
     if(stOk === false){ await loadStaffAttendance(); staffPendingMarks = {}; renderStaffAttendanceContent(); return; }
-    showToast('Staff attendance saved for ' + staffAttMarkDate + ' (' + staffAttMarkSession + ').' + (staffLockedSkipped ? ' ' + staffLockedSkipped + ' already-marked entries are locked (only Admin or Principal can change them).' : ''));
+    await loadStaffAttendance(); staffPendingMarks = {}; renderStaffAttendanceContent();
+    showToast('Staff attendance saved for ' + staffAttMarkDate + ' (' + staffAttMarkSession + ').' + (staffLockedSkipped ? ' ' + staffLockedSkipped + ' entries are locked — the edit time after marking is over (only Admin or Principal can change them).' : ''));
   }
   /* Staff attendance is counted in DAYS (not sessions). Per staff + date:
      - a legacy sessionless row is one full day; if a date has legacy rows, session rows
@@ -553,7 +574,9 @@ const ATTENDANCE_KEY = "attendance-records";
     });
     const attOk = await storageSet(ATTENDANCE_KEY, attendanceRecords);
     if(attOk === false){ await loadAttendanceRecordsData(); pendingMarks = {}; renderAttendanceBody(); return; }
-    showToast('Attendance saved for ' + attMarkDate + ' (' + sessionsToSave.join(' & ') + ').' + (lockedSkipped ? ' ' + lockedSkipped + ' already-marked entries are locked (only Admin or Principal can change them).' : ''));
+    await loadAttendanceRecordsData(); pendingMarks = {};   // fresh copy: shows how long each mark can still be changed
+    renderAttendanceBody();
+    showToast('Attendance saved for ' + attMarkDate + ' (' + sessionsToSave.join(' & ') + ').' + (lockedSkipped ? ' ' + lockedSkipped + ' entries are locked — the edit time after marking is over (only Admin or Principal can change them).' : ''));
   }
 
   /* --- Stats --- */
