@@ -1469,6 +1469,23 @@ async function handleKv(req, res, key) {
     const rows = await sql`SELECT value FROM kv_store WHERE \`key\` = ${key}`;
     return res.status(200).json(await parentScopedKvValue(req, key, rows.length ? rows[0].value : {}));
   }
+  if (req.method === 'PUT' && key === 'syllabus-topics' && req.authUser && req.authUser.role === 'Teacher') {
+    // The topics are one list saved as a whole. Every topic a Teacher adds, changes or removes must be for a class,
+    // section and subject they teach; topics they did not touch are left exactly as they were.
+    const scope = await getTeacherScope(req.authUser.id);
+    const prevRows = await sql`SELECT value FROM kv_store WHERE \`key\` = 'syllabus-topics'`;
+    let prev = prevRows.length ? prevRows[0].value : []; if (typeof prev === 'string') { try { prev = JSON.parse(prev); } catch (_) { prev = []; } }
+    const next = Array.isArray(req.body) ? req.body : null;
+    if (!next || !Array.isArray(prev)) return res.status(400).json({ error: 'Invalid syllabus list.' });
+    const byId = (arr) => { const m = new Map(); arr.forEach(t => { if (t && t.id) m.set(t.id, t); }); return m; };
+    const a = byId(prev), b = byId(next);
+    const touched = [];
+    b.forEach((t, id) => { if (!a.has(id) || JSON.stringify(a.get(id)) !== JSON.stringify(t)) { touched.push(t); if (a.has(id)) touched.push(a.get(id)); } });
+    a.forEach((t, id) => { if (!b.has(id)) touched.push(t); });
+    for (const t of touched) {
+      if (!(await teacherMayTeach(scope, t))) return res.status(403).json({ error: 'You can only manage syllabus topics for a class and subject you are assigned to teach.' });
+    }
+  }
   if (req.method === 'PUT') {
     const value = req.body;
     const json = JSON.stringify(value === undefined ? {} : value);
@@ -5895,6 +5912,19 @@ async function getMyStaffFull(userId) {
   const rows = await sql`SELECT * FROM staff WHERE JSON_UNQUOTE(JSON_EXTRACT(extra, '$.linkedUserId')) = ${userId} LIMIT 1`;
   return rows.length ? rows[0] : null;
 }
+// Homework and syllabus: a Teacher may only add, change or remove items for a class + section + subject they are
+// assigned to teach. A blank section means "all sections", allowed only when they teach that subject in every section.
+async function teacherMayTeach(scope, item) {
+  if (!item) return false;
+  const subject = item.subject, className = item.className, section = item.section || '';
+  if (!subject || !className) return false;
+  const mine = (sec) => scope.subjectSections.some(ss => ss.subject === subject && ss.className === className && ss.section === sec);
+  if (section) return mine(section);
+  const rows = await sql`SELECT sections FROM subjects WHERE name = ${subject} AND class_name = ${className}`;
+  if (!rows.length) return false;
+  let secs = rows[0].sections; if (typeof secs === 'string') { try { secs = JSON.parse(secs); } catch (_) { secs = []; } }
+  return Array.isArray(secs) && secs.length > 0 && secs.every(mine);
+}
 async function getTeacherScope(userId) {
   const staff = await getMyStaffFull(userId);
   if (!staff) return { staffId: null, classTeacherOf: null, subjectSections: [] };
@@ -6791,6 +6821,19 @@ app.all('/api/:resource', async (req, res) => {
     // modules at all, not which class/subject. Admin/Principal never hit
     // this — MANAGEMENT_ROLES-only pages aside, checkModuleAccess already
     // lets them through everything unconditionally.
+    if (req.authUser && req.authUser.role === 'Teacher' && resource === 'homework-items' && ['POST', 'PUT', 'DELETE'].includes(req.method)) {
+      const scope = await getTeacherScope(req.authUser.id);
+      const b = req.body || {};
+      let ok = true;
+      if (req.method !== 'DELETE') ok = await teacherMayTeach(scope, { subject: b.subject, className: b.className, section: b.section });
+      if (ok && req.method !== 'POST') {
+        const id = req.method === 'DELETE' ? req.query.id : b.id;
+        const ex = id ? await sql`SELECT class_name, section, subject FROM homework_items WHERE id = ${id}` : [];
+        if (ex.length) ok = await teacherMayTeach(scope, { subject: ex[0].subject, className: ex[0].class_name, section: ex[0].section });
+        else if (req.method === 'DELETE') ok = false;
+      }
+      if (!ok) return res.status(403).json({ error: 'You can only manage homework for a class and subject you are assigned to teach.' });
+    }
     if (req.authUser && req.authUser.role === 'Teacher' && (resource === 'attendance' || resource === 'exam-results')) {
       const scope = await getTeacherScope(req.authUser.id);
       if (resource === 'attendance') {
