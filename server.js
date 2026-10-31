@@ -1467,7 +1467,7 @@ async function handleKv(req, res, key) {
   }
   if (req.method === 'GET') {
     const rows = await sql`SELECT value FROM kv_store WHERE \`key\` = ${key}`;
-    return res.status(200).json(rows.length ? rows[0].value : {});
+    return res.status(200).json(await parentScopedKvValue(req, key, rows.length ? rows[0].value : {}));
   }
   if (req.method === 'PUT') {
     const value = req.body;
@@ -1511,7 +1511,7 @@ app.get('/api/kv-batch', async (req, res) => {
       const rows = await sql`SELECT \`key\` AS k, value FROM kv_store WHERE \`key\` IN (${allowed})`;
       const byKey = {};
       rows.forEach(r => { byKey[r.k] = r.value; });
-      allowed.forEach(k => { out[k] = (k in byKey) ? byKey[k] : {}; });
+      for (const k of allowed) out[k] = await parentScopedKvValue(req, k, (k in byKey) ? byKey[k] : {});
     }
     return res.status(200).json(out);
   } catch (err) {
@@ -2722,6 +2722,7 @@ app.get('/api/staff-media/:id/:field', async (req, res) => {
     const role = req.authUser && req.authUser.role;
     const own = extra.linkedUserId && req.authUser && extra.linkedUserId === req.authUser.id;
     let allowed = MANAGEMENT_ROLES.includes(role) || own;
+    if (!allowed && req.authUser && PARENT_LOGIN_ROLES.includes(role) && field === 'photo') allowed = true;   // a teacher's photo, shown in the portal
     if (!allowed && req.authUser && !PARENT_LOGIN_ROLES.includes(role)) {
       const override = await getRoleOverride(role);
       const defaults = SERVER_ROLE_VIEWS[role] || [];
@@ -4981,7 +4982,7 @@ const PARENT_OWN_RECORD_RESOURCES = {
 // login has to be able to read homework (renderMySyllabusHomeworkTab) even
 // though their role has no 'syllabus' module permission — same reasoning as
 // fee-structure/exam-defs/subjects, nothing per-student to leak in a GET.
-const PARENT_SHARED_REFERENCE_RESOURCES = ['fee-structure', 'exam-defs', 'subjects', 'homework-items'];
+const PARENT_SHARED_REFERENCE_RESOURCES = ['fee-structure', 'exam-defs', 'subjects', 'homework-items', 'attendance-settings'];
 // Same idea, one level down, for the generic /api/kv/:key store — right now
 // just the late-fee policy (rate/grace period), which Fees needs to show an
 // accurate "Outstanding" figure instead of silently treating every family
@@ -4994,7 +4995,28 @@ const PARENT_SHARED_REFERENCE_RESOURCES = ['fee-structure', 'exam-defs', 'subjec
 // leaving the tab empty instead of erroring loudly.
 // 'fee-schedule' added so a parent's Fees tab shows the same term due dates the
 // office sees (it holds only dates and percentages, nothing per-student).
-const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings', 'syllabus-topics', 'fee-schedule', 'grading-scale', 'grading-schemes'];
+// The timetable's period times and working days are the same for everyone. 'timetable-entries' is also let through,
+// but only the student's OWN class and section is returned (see parentScopedKvValue), never the whole school's.
+const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings', 'syllabus-topics', 'fee-schedule', 'grading-scale', 'grading-schemes', 'timetable-periods', 'timetable-days', 'timetable-entries'];
+// Class and section of the student a Student/Parent login is linked to ({} when none).
+async function linkedStudentClass(userId) {
+  try {
+    const u = await sql`SELECT linked_student_id FROM users WHERE id = ${userId}`;
+    const sid = u.length ? u[0].linked_student_id : '';
+    if (!sid) return {};
+    const m = await studentClassMap([sid]);
+    return m[sid] || {};
+  } catch (_) { return {}; }
+}
+// A Student/Parent login only ever receives its own class's timetable rows.
+async function parentScopedKvValue(req, key, value) {
+  if (key !== 'timetable-entries' || !req.authUser || !PARENT_LOGIN_ROLES.includes(req.authUser.role)) return value;
+  let v = value; if (typeof v === 'string') { try { v = JSON.parse(v); } catch (_) { v = []; } }
+  if (!Array.isArray(v)) return [];
+  const cls = await linkedStudentClass(req.authUser.id);
+  if (!cls.className) return [];
+  return v.filter(e => e && e.className === cls.className && e.section === cls.section);
+}
 
 // Lets the login page show the "demo" banner and the demo logins. Reveals nothing when not a demo.
 app.get('/api/demo-info', (req, res) => {
@@ -6850,6 +6872,26 @@ app.all('/api/:resource', async (req, res) => {
         if (extra.classTeacherSection !== undefined) safeExtra.classTeacherSection = extra.classTeacherSection;
         if (extra.linkedUserId !== undefined) safeExtra.linkedUserId = extra.linkedUserId;
         return { ...shapedCore, ...safeExtra };
+      }));
+    }
+    // A Student/Parent login needs to know WHO the class teacher and the subject teachers are (name, designation,
+    // photo) to show "Class Teacher" / "Contact a Teacher" and the timetable. Without this the staff list came back
+    // 403, so the portal showed "not assigned" for everyone. Only that narrow subset goes out: no salary, address,
+    // ID numbers or personal fields. Phone and email go out only for the class teacher of the student's OWN section.
+    if (req.method === 'GET' && resource === 'staff' && req.authUser && PARENT_LOGIN_ROLES.includes(req.authUser.role)) {
+      const cls = await linkedStudentClass(req.authUser.id);
+      const rows = await sql`SELECT * FROM staff FORCE INDEX (idx_staff_created_at) ORDER BY created_at ASC`;
+      return res.status(200).json(rows.map(r => {
+        const shaped = {};
+        HYBRID_RESOURCES.staff.core.forEach(f => { shaped[f.app] = r[f.col]; });
+        const extra = r.extra || {};
+        const out = { id: shaped.id, firstName: shaped.firstName, lastName: shaped.lastName, designation: shaped.designation, department: shaped.department, status: shaped.status };
+        if (extra.classTeacherClass !== undefined) out.classTeacherClass = extra.classTeacherClass;
+        if (extra.classTeacherSection !== undefined) out.classTeacherSection = extra.classTeacherSection;
+        if (extra.photo) out.photo = extra.photo;
+        const mine = cls.className && extra.classTeacherClass === cls.className && extra.classTeacherSection === cls.section;
+        if (mine) { out.phone = extra.phone || ''; out.email = extra.email || ''; }
+        return staffMediaLight(out);
       }));
     }
     // Roles & Permissions enforcement (see the block above HYBRID_RESOURCES):
