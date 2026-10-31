@@ -1441,7 +1441,8 @@ async function enforceDateLockKv(req, res, key) {
 
 async function handleKv(req, res, key) {
   if (!key) return res.status(400).json({ error: 'Missing key.' });
-  if ((key === 'date-lock-policy' || key === 'timetable-shared-subjects') && req.method === 'PUT' && (!req.authUser || req.authUser.role !== 'Admin')) return res.status(403).json({ error: 'Only the Admin can change this setting.' });
+  if (key === 'date-lock-policy' && req.method === 'PUT' && (!req.authUser || req.authUser.role !== 'Admin')) return res.status(403).json({ error: 'Only the Admin can change this setting.' });
+  if (key === 'timetable-shared-subjects' && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change this setting.' });
   if (await enforceDateLockKv(req, res, key)) return;
   if (ADMIN_ONLY_KV_KEYS.includes(key) && (!req.authUser || req.authUser.role !== 'Admin')) {
     return res.status(403).json({ error: 'Admin access required.' });
