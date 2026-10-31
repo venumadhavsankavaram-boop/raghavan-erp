@@ -1235,7 +1235,9 @@ app.use(async (req, res, next) => {
     // Sliding renewal, capped at the absolute 12-hour ceiling from login —
     // fire-and-forget so a slow write here never delays the actual request.
     const newExpires = new Date(Math.min(now + SESSION_IDLE_MS, createdAt + SESSION_ABSOLUTE_MAX_MS));
-    sql`UPDATE sessions SET expires_at = ${newExpires.toISOString()}, last_seen_at = now() WHERE id = ${idHash}`.catch(() => {});
+    // Calls the app makes by itself (page hidden or untouched for a while) check the login but do not renew it,
+    // so an app left running in the background still signs out after the idle time.
+    if (req.headers['x-background'] !== '1') sql`UPDATE sessions SET expires_at = ${newExpires.toISOString()}, last_seen_at = now() WHERE id = ${idHash}`.catch(() => {});
     req.authUser = { id: session.user_id, role: session.role, name: session.name, impersonatedBy: session.impersonated_by || null };
     // After an Admin reset, the user must choose their own password before anything else works.
     if (session.must_change && !['/api/me', '/api/logout', '/api/account/password'].includes(req.path)) {
