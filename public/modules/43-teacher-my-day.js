@@ -133,6 +133,19 @@
     }, 150);
   };
 
+  function quick(scope){
+    let allowed = [];
+    try{ allowed = getRoleViews(currentUser.role) || []; }catch(e){}
+    const items = [
+      ['attendance', '📋 Attendance', !!scope.classTeacherOf],
+      ['exams', '📝 Enter Marks', true],
+      ['syllabus', '📚 Homework &amp; Syllabus', true],
+      ['timetable', '🗓 My Timetable', true],
+      ['result', '🏅 Results', true],
+      ['inbox', '✉️ Inbox', true],
+    ];
+    return items.filter(x => x[2] && allowed.includes(x[0])).map(x => `<button onclick="myDayGo('${x[0]}')">${x[1]}</button>`).join('');
+  }
   async function render(){
     if(!isTeacher() || busy) return;
     const el = $('view-myday'); if(!el) return;
@@ -194,12 +207,7 @@
         `<div class="md-card"><h3>Today's periods <span class="md-sm">${per.length} period${per.length === 1 ? '' : 's'}</span></h3>${perHtml}</div>` +
         `<div class="md-card"><h3>Needs your attention ${items.length + hw.length ? `<span class="md-pill">${items.length + hw.length}</span>` : ''}</h3>${todoHtml || '<div class="md-todo ok"><b>You are all caught up. 🎉</b></div>'}</div>` +
         classHtml +
-        `<div class="md-card"><h3>Quick actions</h3><div class="md-quick">
-          ${scope.classTeacherOf ? '<button onclick="myDayGo(\'attendance\')">📋 Attendance</button>' : ''}
-          <button onclick="myDayGo('syllabus')">📚 Homework &amp; Syllabus</button>
-          <button onclick="myDayGo('result')">📝 Marks &amp; Results</button>
-          <button onclick="myDayGo('timetable')">🗓 My Timetable</button>
-          <button onclick="myDayGo('inbox')">✉️ Inbox</button></div></div>`;
+        `<div class="md-card"><h3>Quick actions</h3><div class="md-quick">${quick(scope)}</div></div>`;
     }catch(err){
       console.error('my day', err);
       el.innerHTML = '<div class="md-card"><b>Could not load your day.</b><div class="md-sm">Please refresh the page and try again.</div></div>';
