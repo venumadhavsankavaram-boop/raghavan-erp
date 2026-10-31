@@ -6944,7 +6944,11 @@ app.all('/api/:resource', async (req, res) => {
     // (see above) skips this — there's nothing per-student to leak in a fee
     // schedule, an exam's dates, or the subject list, and the self-service
     // portal can't work correctly without being able to read them.
-    const parentSharedBypass = req.method === 'GET' && req.authUser && PARENT_LOGIN_ROLES.includes(req.authUser.role) && PARENT_SHARED_REFERENCE_RESOURCES.includes(resource);
+    // A Teacher always needs to READ the subject list (names, classes, sections, who teaches what): the app works out
+    // "the subjects I teach" from it for Attendance, Marks, Homework and Syllabus. It is shared reference data, so
+    // reading it does not depend on the Subjects module being switched on. Adding, changing or deleting subjects
+    // still follows the Subjects permission.
+    const parentSharedBypass = req.method === 'GET' && req.authUser && ((PARENT_LOGIN_ROLES.includes(req.authUser.role) && PARENT_SHARED_REFERENCE_RESOURCES.includes(resource)) || (req.authUser.role === 'Teacher' && resource === 'subjects'));
     if (RESOURCE_TO_MODULE[resource]) {
       // Plan gating (see checkPlanModuleAccess above) applies regardless of
       // role — including Admin and the parent/student shared-reference

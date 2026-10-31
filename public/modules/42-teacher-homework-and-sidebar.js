@@ -44,7 +44,14 @@
       if(!isTeacher()) return o.apply(this, arguments);
       const st = syllabusTopics, hw = homeworkItems;
       syllabusTopics = st.filter(itemOk); homeworkItems = hw.filter(itemOk);
-      try { return o.apply(this, arguments); } finally { syllabusTopics = st; homeworkItems = hw; }
+      let r;
+      try { r = o.apply(this, arguments); } finally { syllabusTopics = st; homeworkItems = hw; }
+      try {
+        const body = $('syllabusBody');
+        if(body && !ssAll().length && !(mine().unlinked)) body.innerHTML = '<div class="empty-state"><b>No subjects allotted to you yet</b>Homework and syllabus topics are added for the classes and subjects you teach. Ask the Admin to allot your subjects (Subjects, then choose your name under Staff).</div>';
+        else if(body && mine().unlinked) body.innerHTML = '<div class="empty-state"><b>Your login is not linked to a staff record</b>Ask the Admin to link your login to your staff profile.</div>';
+      } catch(e){}
+      return r;
     };
   }
   /* ---- add / edit forms for teachers ---- */

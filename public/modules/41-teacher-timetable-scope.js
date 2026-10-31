@@ -62,6 +62,20 @@
       return o.apply(this, arguments);
     };
   }
+  // A class teacher always sees their own class, even when the role's Class Timetable permission is switched off
+  // (that permission is about editing; this view is read-only and limited to their own class).
+  if(typeof renderTimetableBody === 'function'){
+    const o = renderTimetableBody;
+    window.renderTimetableBody = function(){
+      try {
+        if(isTeacher() && timetableTab === 'class'){
+          const sc = scope(), body = document.getElementById('timetableBody');
+          if(body && sc && sc.classTeacherOf && typeof getTimetableTabAccess === 'function' && !getTimetableTabAccess(currentUser.role, TIMETABLE_TAB_PERM_KEYS.class)) return renderClassTimetableTab(body);
+        }
+      } catch(e){}
+      return o.apply(this, arguments);
+    };
+  }
   // Teachers look, they do not edit.
   ['openTtCellModal', 'saveTtCell', 'openMdGroup'].forEach(n => {
     if(typeof window[n] === 'function'){
