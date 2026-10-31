@@ -1453,7 +1453,7 @@ async function handleKv(req, res, key) {
   // dispatcher's PARENT_SHARED_REFERENCE_RESOURCES: a Student/Parent login
   // reading shared reference data (right now, the late-fee policy) needs no
   // staff module permission — there's nothing per-student here to leak.
-  const parentSharedKvBypass = req.method === 'GET' && req.authUser && PARENT_LOGIN_ROLES.includes(req.authUser.role) && PARENT_SHARED_REFERENCE_KV_KEYS.includes(key);
+  const parentSharedKvBypass = req.method === 'GET' && req.authUser && ((PARENT_LOGIN_ROLES.includes(req.authUser.role) && PARENT_SHARED_REFERENCE_KV_KEYS.includes(key)) || teacherReadsTimetable(req, key));
   if (KV_KEY_TO_MODULE[key]) {
     // Plan gating applies regardless of role (including Admin, and the
     // parent/student shared-reference bypass below) — it's about what the
@@ -1516,7 +1516,7 @@ app.get('/api/kv-batch', async (req, res) => {
     const allowed = [];
     for (const key of keys) {
       if (ADMIN_ONLY_KV_KEYS.includes(key) && (!req.authUser || req.authUser.role !== 'Admin')) continue;
-      const parentShared = req.authUser && PARENT_LOGIN_ROLES.includes(req.authUser.role) && PARENT_SHARED_REFERENCE_KV_KEYS.includes(key);
+      const parentShared = req.authUser && ((PARENT_LOGIN_ROLES.includes(req.authUser.role) && PARENT_SHARED_REFERENCE_KV_KEYS.includes(key)) || teacherReadsTimetable(req, key));
       if (KV_KEY_TO_MODULE[key]) {
         if (!(await checkPlanModuleAccess(req, quiet, KV_KEY_TO_MODULE[key]))) continue;
         if (!parentShared && !(await checkModuleAccess(req, quiet, KV_KEY_TO_MODULE[key]))) continue;
@@ -5015,6 +5015,11 @@ const PARENT_SHARED_REFERENCE_RESOURCES = ['fee-structure', 'exam-defs', 'subjec
 // The timetable's period times and working days are the same for everyone. 'timetable-entries' is also let through,
 // but only the student's OWN class and section is returned (see parentScopedKvValue), never the whole school's.
 const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings', 'syllabus-topics', 'fee-schedule', 'grading-scale', 'grading-schemes', 'timetable-periods', 'timetable-days', 'timetable-entries'];
+// A Teacher can always READ the timetable (periods, working days and entries) so My Day and My Timetable can show their own
+// periods, even when the role's Roles & Permissions only switch on a timetable sub-tab. Writing still needs the Timetable permission.
+function teacherReadsTimetable(req, key) {
+  return req.method === 'GET' && !!req.authUser && req.authUser.role === 'Teacher' && ['timetable-periods', 'timetable-days', 'timetable-entries', 'timetable-shared-subjects'].includes(key);
+}
 // Class and section of the student a Student/Parent login is linked to ({} when none).
 async function linkedStudentClass(userId) {
   try {
