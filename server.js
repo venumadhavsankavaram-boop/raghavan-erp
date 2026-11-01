@@ -793,6 +793,19 @@ async function ensureSchema() {
     sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (student_id, kind, ref_key)
   )`;
+  await sql`CREATE TABLE IF NOT EXISTS study_material (
+    id VARCHAR(191) PRIMARY KEY, class_name VARCHAR(191) NOT NULL, section VARCHAR(191) NOT NULL DEFAULT '', subject VARCHAR(191), title TEXT, description TEXT,
+    file_name TEXT, mime VARCHAR(100), size_bytes INT, file_data LONGTEXT, staff_id VARCHAR(191), staff_name TEXT, visible_from DATE NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME NULL
+  )`;
+  await createIndexIfMissing('idx_study_material_class', 'study_material', 'class_name, section');
+  await sql`CREATE TABLE IF NOT EXISTS exam_plans (
+    id VARCHAR(191) PRIMARY KEY, exam_id VARCHAR(191), exam_name TEXT, class_name VARCHAR(191) NOT NULL, section VARCHAR(191) NOT NULL DEFAULT '', subject VARCHAR(191),
+    syllabus TEXT, max_marks INT, exam_date DATE NULL, start_time VARCHAR(10), duration_min INT NULL, instructions TEXT,
+    status VARCHAR(30) NOT NULL DEFAULT 'Submitted', staff_id VARCHAR(191), staff_name TEXT, created_by_user_id VARCHAR(191), review_note TEXT, reviewed_by TEXT,
+    reviewed_at DATETIME NULL, submitted_at DATETIME NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`;
+  await createIndexIfMissing('idx_exam_plans_class', 'exam_plans', 'class_name, section');
 
   // ---------- Indexes ----------
   // The tables above are all read by student_id / staff_id / username / date
@@ -1445,6 +1458,7 @@ async function handleKv(req, res, key) {
   if (!key) return res.status(400).json({ error: 'Missing key.' });
   if (key === 'date-lock-policy' && req.method === 'PUT' && (!req.authUser || req.authUser.role !== 'Admin')) return res.status(403).json({ error: 'Only the Admin can change this setting.' });
   if (key === 'exam-releases' && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can release marks to students.' });
+  if (key === 'portal-settings' && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change the parent portal settings.' });
   if (key === 'timetable-shared-subjects' && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change this setting.' });
   if (await enforceDateLockKv(req, res, key)) return;
   if (ADMIN_ONLY_KV_KEYS.includes(key) && (!req.authUser || req.authUser.role !== 'Admin')) {
@@ -2263,6 +2277,7 @@ const KV_KEY_TO_MODULE = {
   'timetable-periods': ['timetable'],
   'timetable-days': ['timetable'],
   'exam-releases': ['exams', 'result'],
+  'portal-settings': ['dashboard'],
   'syllabus-topics': ['syllabus'],
   // 'homework-items' removed — it's now a real resource (see
   // RESOURCE_TO_MODULE above) served from its own table, not this generic
@@ -4528,6 +4543,249 @@ app.get('/api/fee-reminders/preview', async (req, res) => {
   } catch (err) { console.error('reminder preview error:', err); return res.status(500).json({ error: 'Could not prepare the preview.' }); }
 });
 
+// ---------- Study material (teacher uploads, students VIEW only) ----------
+// Files are stored in the database (like homework attachments). Students/Parents get them only through the
+// authenticated /file route, shown inline (never as an attachment) with no-store caching; the portal draws PDFs/images
+// onto a watermarked canvas so there is no Download button or direct file to save. A determined person can still
+// photograph the screen — the watermark (name + admission no.) is what discourages sharing.
+const MATERIAL_MIMES = { 'application/pdf': 'pdf', 'image/png': 'image', 'image/jpeg': 'image', 'image/webp': 'image', 'video/mp4': 'video', 'video/webm': 'video' };
+const MATERIAL_MAX_BYTES = 8 * 1024 * 1024;
+function materialMagicOk(mime, buf) {
+  if (mime === 'application/pdf') return buf.slice(0, 5).toString('latin1') === '%PDF-';
+  if (mime === 'image/png') return buf.slice(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  if (mime === 'image/jpeg') return buf[0] === 0xff && buf[1] === 0xd8;
+  if (mime === 'image/webp') return buf.slice(0, 4).toString('latin1') === 'RIFF' && buf.slice(8, 12).toString('latin1') === 'WEBP';
+  if (mime === 'video/mp4') return buf.slice(4, 8).toString('latin1') === 'ftyp';
+  if (mime === 'video/webm') return buf.slice(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
+  return false;
+}
+const MATERIAL_MGR = ['Admin', 'Principal'];
+function materialDay(v) {
+  if (!v) return '';
+  if (v instanceof Date) return isNaN(v) ? '' : v.getFullYear() + '-' + String(v.getMonth() + 1).padStart(2, '0') + '-' + String(v.getDate()).padStart(2, '0');
+  return String(v).slice(0, 10);
+}
+function materialMeta(r) {
+  return { id: r.id, className: r.class_name, section: r.section || '', subject: r.subject || '', title: r.title, description: r.description || '',
+    fileName: r.file_name, mime: r.mime, kind: MATERIAL_MIMES[r.mime] || 'file', size: r.size_bytes, staffId: r.staff_id || '', staffName: r.staff_name || '',
+    visibleFrom: materialDay(r.visible_from), createdAt: r.created_at };
+}
+async function materialCanSee(req, r) {
+  const role = req.authUser && req.authUser.role;
+  if (MATERIAL_MGR.includes(role)) return true;
+  if (role === 'Teacher') { const sc = await getTeacherScope(req.authUser.id); return !!sc.staffId && r.staff_id === sc.staffId; }
+  if (PARENT_LOGIN_ROLES.includes(role)) {
+    const s = await getLinkedStudent(req.authUser.id); if (!s) return false;
+    if (s.class_name !== r.class_name || (r.section && s.section !== r.section)) return false;
+    const vf = materialDay(r.visible_from);
+    return !vf || vf <= todayInSchoolTz();
+  }
+  return false;
+}
+app.get('/api/study-material', async (req, res) => {
+  try {
+    const role = req.authUser && req.authUser.role; if (!role) return res.status(401).json({ error: 'Please sign in.' });
+    let rows;
+    if (MATERIAL_MGR.includes(role)) rows = await sql`SELECT id, class_name, section, subject, title, description, file_name, mime, size_bytes, staff_id, staff_name, visible_from, created_at FROM study_material WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 500`;
+    else if (role === 'Teacher') {
+      const sc = await getTeacherScope(req.authUser.id); if (!sc.staffId) return res.status(200).json([]);
+      rows = await sql`SELECT id, class_name, section, subject, title, description, file_name, mime, size_bytes, staff_id, staff_name, visible_from, created_at FROM study_material WHERE deleted_at IS NULL AND staff_id = ${sc.staffId} ORDER BY created_at DESC LIMIT 500`;
+    } else if (PARENT_LOGIN_ROLES.includes(role)) {
+      const s = await getLinkedStudent(req.authUser.id); if (!s) return res.status(200).json([]);
+      const today = todayInSchoolTz();
+      rows = await sql`SELECT id, class_name, section, subject, title, description, file_name, mime, size_bytes, staff_id, staff_name, visible_from, created_at FROM study_material WHERE deleted_at IS NULL AND class_name = ${s.class_name} AND (section = '' OR section IS NULL OR section = ${s.section}) AND (visible_from IS NULL OR visible_from <= ${today}) ORDER BY created_at DESC LIMIT 500`;
+    } else return res.status(403).json({ error: 'You do not have permission to access this.' });
+    return res.status(200).json(rows.map(materialMeta));
+  } catch (err) { console.error('study-material list error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/study-material', async (req, res) => {
+  try {
+    const role = req.authUser && req.authUser.role;
+    if (!role || !(MATERIAL_MGR.includes(role) || role === 'Teacher')) return res.status(403).json({ error: 'You do not have permission to upload study material.' });
+    const b = req.body || {};
+    const className = String(b.className || '').trim(), section = String(b.section || '').trim(), subject = String(b.subject || '').trim();
+    const title = String(b.title || '').trim().slice(0, 200);
+    if (!className || !subject || !title) return res.status(400).json({ error: 'Please choose the class, subject and give a title.' });
+    let staffId = null, staffName = req.authUser.name || req.authUser.username || '';
+    if (role === 'Teacher') {
+      const sc = await getTeacherScope(req.authUser.id);
+      if (!sc.staffId) return res.status(403).json({ error: 'Your login is not linked to a staff profile yet.' });
+      if (!sc.subjectSections.some(x => x.className === className && x.subject === subject && (!section || x.section === section))) return res.status(403).json({ error: 'You can only upload for the classes and subjects you teach.' });
+      staffId = sc.staffId;
+    }
+    const mime = String(b.mime || '').toLowerCase();
+    if (!MATERIAL_MIMES[mime]) return res.status(400).json({ error: 'Please upload a PDF, picture (PNG/JPG/WebP) or video (MP4/WebM). Convert Word or PowerPoint files to PDF first.' });
+    const m = /^data:[^;]+;base64,(.+)$/s.exec(String(b.dataUrl || ''));
+    if (!m) return res.status(400).json({ error: 'The file could not be read. Please try again.' });
+    const buf = Buffer.from(m[1], 'base64');
+    if (!buf.length || buf.length > MATERIAL_MAX_BYTES) return res.status(400).json({ error: 'File is too large. The limit is 8 MB — compress the PDF or video and try again.' });
+    if (!materialMagicOk(mime, buf)) return res.status(400).json({ error: 'This file does not look like a valid ' + MATERIAL_MIMES[mime] + '.' });
+    const vf = /^\d{4}-\d{2}-\d{2}$/.test(String(b.visibleFrom || '')) ? b.visibleFrom : null;
+    const id = 'sm_' + crypto.randomBytes(8).toString('hex');
+    await sql`INSERT INTO study_material (id, class_name, section, subject, title, description, file_name, mime, size_bytes, file_data, staff_id, staff_name, visible_from)
+      VALUES (${id}, ${className}, ${section}, ${subject}, ${title}, ${String(b.description || '').trim().slice(0, 1000)}, ${String(b.fileName || 'file').slice(0, 200)}, ${mime}, ${buf.length}, ${m[1]}, ${staffId}, ${staffName}, ${vf})`;
+    res.status(201).json({ id });
+    // tell the class (best effort, after replying)
+    (async () => {
+      try {
+        if (vf && vf > todayInSchoolTz()) return;
+        const kids = section ? await sql`SELECT id FROM students WHERE class_name = ${className} AND section = ${section} AND (status IS NULL OR LOWER(status) = 'active') AND deleted_at IS NULL`
+                              : await sql`SELECT id FROM students WHERE class_name = ${className} AND (status IS NULL OR LOWER(status) = 'active') AND deleted_at IS NULL`;
+        for (const k of kids) await sendPushToStudent(k.id, { title: 'New study material', body: `${subject}: ${title}`, tag: 'study-material', url: '/' });
+      } catch (e) { console.error('study-material notify failed', e); }
+    })();
+  } catch (err) { console.error('study-material upload error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.delete('/api/study-material/:id', async (req, res) => {
+  try {
+    const rows = await sql`SELECT id, staff_id FROM study_material WHERE id = ${req.params.id} AND deleted_at IS NULL`;
+    if (!rows.length) return res.status(404).json({ error: 'Not found.' });
+    const role = req.authUser && req.authUser.role;
+    let ok = MATERIAL_MGR.includes(role);
+    if (!ok && role === 'Teacher') { const sc = await getTeacherScope(req.authUser.id); ok = !!sc.staffId && rows[0].staff_id === sc.staffId; }
+    if (!ok) return res.status(403).json({ error: 'You do not have permission to remove this.' });
+    await sql`UPDATE study_material SET deleted_at = CURRENT_TIMESTAMP WHERE id = ${req.params.id}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) { console.error('study-material delete error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.get('/api/study-material/:id/file', async (req, res) => {
+  try {
+    const rows = await sql`SELECT * FROM study_material WHERE id = ${req.params.id} AND deleted_at IS NULL`;
+    if (!rows.length || !req.authUser || !(await materialCanSee(req, rows[0]))) return res.status(404).json({ error: 'Not found.' });
+    const r = rows[0]; const buf = Buffer.from(r.file_data, 'base64');
+    res.setHeader('Content-Type', r.mime);
+    res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    res.setHeader('Accept-Ranges', 'bytes');
+    const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+    if (range && (range[1] || range[2])) {
+      let start = range[1] ? parseInt(range[1], 10) : Math.max(buf.length - parseInt(range[2], 10), 0);
+      let end = range[1] && range[2] ? parseInt(range[2], 10) : buf.length - 1;
+      end = Math.min(end, buf.length - 1);
+      if (start > end || start >= buf.length) { res.setHeader('Content-Range', `bytes */${buf.length}`); return res.status(416).end(); }
+      res.status(206); res.setHeader('Content-Range', `bytes ${start}-${end}/${buf.length}`); res.setHeader('Content-Length', end - start + 1);
+      return res.end(buf.slice(start, end + 1));
+    }
+    res.setHeader('Content-Length', buf.length);
+    return res.status(200).end(buf);
+  } catch (err) { console.error('study-material file error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+
+// ---------- Exam plans: a teacher plans an exam for their own subject, the Principal/Admin approves ----------
+// Teacher -> Submitted -> (Approved | Returned with a note -> teacher edits and resubmits). Approved plans are
+// shown to the class (syllabus, date, marks, instructions); the Admin screen also writes the date/marks into the
+// exam schedule (see public/modules/48-exam-plans.js).
+async function planOwnerOk(req, row) {
+  const role = req.authUser && req.authUser.role;
+  if (MATERIAL_MGR.includes(role)) return true;
+  return role === 'Teacher' && row.created_by_user_id === req.authUser.id;
+}
+function planDay(v) { return materialDay(v); }
+function planMeta(r) {
+  return { id: r.id, examId: r.exam_id || '', examName: r.exam_name || '', className: r.class_name, section: r.section || '', subject: r.subject || '',
+    syllabus: r.syllabus || '', maxMarks: r.max_marks, examDate: planDay(r.exam_date), startTime: r.start_time || '', durationMin: r.duration_min,
+    instructions: r.instructions || '', status: r.status, staffName: r.staff_name || '', staffId: r.staff_id || '', reviewNote: r.review_note || '', reviewedBy: r.reviewed_by || '',
+    reviewedAt: r.reviewed_at, submittedAt: r.submitted_at, createdAt: r.created_at };
+}
+const PLAN_COLS = 'id, exam_id, exam_name, class_name, section, subject, syllabus, max_marks, exam_date, start_time, duration_min, instructions, status, staff_id, staff_name, review_note, reviewed_by, reviewed_at, submitted_at, created_at';
+async function validatePlanBody(req, b) {
+  const className = String(b.className || '').trim(), section = String(b.section || '').trim(), subject = String(b.subject || '').trim();
+  const syllabus = String(b.syllabus || '').trim().slice(0, 3000);
+  const maxMarks = parseInt(b.maxMarks, 10);
+  const examDate = /^\d{4}-\d{2}-\d{2}$/.test(String(b.examDate || '')) ? b.examDate : null;
+  if (!className || !section || !subject) return { error: 'Please choose the class, section and subject.' };
+  if (!syllabus) return { error: 'Please write the syllabus / chapters covered.' };
+  if (!(maxMarks > 0 && maxMarks <= 1000)) return { error: 'Please enter the maximum marks (1 to 1000).' };
+  if (!examDate) return { error: 'Please choose the exam date.' };
+  const startTime = /^\d{2}:\d{2}$/.test(String(b.startTime || '')) ? b.startTime : '';
+  const dur = parseInt(b.durationMin, 10); const durationMin = dur > 0 && dur <= 600 ? dur : null;
+  let staffId = null;
+  if (req.authUser.role === 'Teacher') {
+    const sc = await getTeacherScope(req.authUser.id);
+    if (!sc.staffId) return { error: 'Your login is not linked to a staff profile yet.', status: 403 };
+    if (!sc.subjectSections.some(x => x.className === className && x.section === section && x.subject === subject)) return { error: 'You can only plan exams for the classes and subjects you teach.', status: 403 };
+    staffId = sc.staffId;
+  }
+  return { v: { className, section, subject, syllabus, maxMarks, examDate, startTime, durationMin, staffId,
+    examId: String(b.examId || '').slice(0, 191), examName: String(b.examName || '').trim().slice(0, 200), instructions: String(b.instructions || '').trim().slice(0, 2000) } };
+}
+app.get('/api/exam-plans', async (req, res) => {
+  try {
+    const role = req.authUser && req.authUser.role; if (!role) return res.status(401).json({ error: 'Please sign in.' });
+    let rows;
+    if (MATERIAL_MGR.includes(role)) rows = await sql.query(`SELECT ${PLAN_COLS} FROM exam_plans ORDER BY (status = 'Submitted') DESC, created_at DESC LIMIT 500`, []);
+    else if (role === 'Teacher') rows = await sql.query(`SELECT ${PLAN_COLS} FROM exam_plans WHERE created_by_user_id = $1 ORDER BY created_at DESC LIMIT 500`, [req.authUser.id]);
+    else if (PARENT_LOGIN_ROLES.includes(role)) {
+      const s = await getLinkedStudent(req.authUser.id); if (!s) return res.status(200).json([]);
+      rows = await sql.query(`SELECT ${PLAN_COLS} FROM exam_plans WHERE status = 'Approved' AND class_name = $1 AND section = $2 ORDER BY exam_date ASC LIMIT 200`, [s.class_name, s.section]);
+    } else return res.status(403).json({ error: 'You do not have permission to access this.' });
+    return res.status(200).json(rows.map(planMeta));
+  } catch (err) { console.error('exam-plans list error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/exam-plans', async (req, res) => {
+  try {
+    const role = req.authUser && req.authUser.role;
+    if (!role || !(MATERIAL_MGR.includes(role) || role === 'Teacher')) return res.status(403).json({ error: 'You do not have permission to plan exams.' });
+    const r = await validatePlanBody(req, req.body || {}); if (r.error) return res.status(r.status || 400).json({ error: r.error });
+    const v = r.v; const id = 'ep_' + crypto.randomBytes(8).toString('hex');
+    const staffName = req.authUser.name || req.authUser.username || '';
+    await sql`INSERT INTO exam_plans (id, exam_id, exam_name, class_name, section, subject, syllabus, max_marks, exam_date, start_time, duration_min, instructions, status, staff_id, staff_name, created_by_user_id, submitted_at)
+      VALUES (${id}, ${v.examId}, ${v.examName}, ${v.className}, ${v.section}, ${v.subject}, ${v.syllabus}, ${v.maxMarks}, ${v.examDate}, ${v.startTime}, ${v.durationMin}, ${v.instructions}, 'Submitted', ${v.staffId}, ${staffName}, ${req.authUser.id}, CURRENT_TIMESTAMP)`;
+    res.status(201).json({ id });
+    notifyUsersByRole(['Admin', 'Principal'], { title: 'Exam plan to review', body: `${staffName}: ${v.subject} · ${v.className} ${v.section}${v.examName ? ' · ' + v.examName : ''}`, tag: 'approval', url: '/' }).catch(e => console.error('exam plan notify failed', e));
+  } catch (err) { console.error('exam-plan create error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.put('/api/exam-plans/:id', async (req, res) => {
+  try {
+    const rows = await sql`SELECT * FROM exam_plans WHERE id = ${req.params.id}`;
+    if (!rows.length) return res.status(404).json({ error: 'Not found.' });
+    if (!(await planOwnerOk(req, rows[0]))) return res.status(403).json({ error: 'You do not have permission to change this.' });
+    if (rows[0].status === 'Approved' && !MATERIAL_MGR.includes(req.authUser.role)) return res.status(409).json({ error: 'This plan is already approved. Ask the Principal to change it.' });
+    const r = await validatePlanBody(req, req.body || {}); if (r.error) return res.status(r.status || 400).json({ error: r.error });
+    const v = r.v;
+    await sql`UPDATE exam_plans SET exam_id = ${v.examId}, exam_name = ${v.examName}, class_name = ${v.className}, section = ${v.section}, subject = ${v.subject}, syllabus = ${v.syllabus}, max_marks = ${v.maxMarks}, exam_date = ${v.examDate}, start_time = ${v.startTime}, duration_min = ${v.durationMin}, instructions = ${v.instructions}, status = 'Submitted', review_note = '', submitted_at = CURRENT_TIMESTAMP WHERE id = ${req.params.id}`;
+    res.status(200).json({ ok: true });
+    notifyUsersByRole(['Admin', 'Principal'], { title: 'Exam plan resubmitted', body: `${rows[0].staff_name}: ${v.subject} · ${v.className} ${v.section}`, tag: 'approval', url: '/' }).catch(() => {});
+  } catch (err) { console.error('exam-plan update error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/exam-plans/:id/review', async (req, res) => {
+  try {
+    if (!req.authUser || !MATERIAL_MGR.includes(req.authUser.role)) return res.status(403).json({ error: 'Only the Admin or Principal can review exam plans.' });
+    const rows = await sql`SELECT * FROM exam_plans WHERE id = ${req.params.id}`;
+    if (!rows.length) return res.status(404).json({ error: 'Not found.' });
+    const p = rows[0]; const action = String((req.body || {}).action || ''); const note = String((req.body || {}).note || '').trim().slice(0, 1000);
+    if (action !== 'approve' && action !== 'return') return res.status(400).json({ error: 'Unknown action.' });
+    if (action === 'return' && !note) return res.status(400).json({ error: 'Please write a short note so the teacher knows what to change.' });
+    const reviewer = req.authUser.name || req.authUser.username || '';
+    await sql`UPDATE exam_plans SET status = ${action === 'approve' ? 'Approved' : 'Returned'}, review_note = ${note}, reviewed_by = ${reviewer}, reviewed_at = CURRENT_TIMESTAMP WHERE id = ${req.params.id}`;
+    res.status(200).json({ ok: true });
+    (async () => {
+      try {
+        if (p.created_by_user_id) await sendPushToUser(p.created_by_user_id, action === 'approve'
+          ? { title: 'Exam plan approved', body: `${p.subject} · ${p.class_name} ${p.section}`, tag: 'approval', url: '/' }
+          : { title: 'Exam plan sent back', body: `${p.subject} · ${p.class_name} ${p.section}: ${note}`, tag: 'approval', url: '/' });
+        if (action === 'approve') {
+          const kids = await sql`SELECT id FROM students WHERE class_name = ${p.class_name} AND section = ${p.section} AND (status IS NULL OR LOWER(status) = 'active') AND deleted_at IS NULL`;
+          const d = planDay(p.exam_date); const dmyd = d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4) : '';
+          for (const k of kids) await sendPushToStudent(k.id, { title: 'Exam planned', body: `${p.subject}${p.exam_name ? ' (' + p.exam_name + ')' : ''} on ${dmyd}. Syllabus is in the portal.`, tag: 'exam-plan', url: '/' });
+        }
+      } catch (e) { console.error('exam plan review notify failed', e); }
+    })();
+  } catch (err) { console.error('exam-plan review error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.delete('/api/exam-plans/:id', async (req, res) => {
+  try {
+    const rows = await sql`SELECT * FROM exam_plans WHERE id = ${req.params.id}`;
+    if (!rows.length) return res.status(404).json({ error: 'Not found.' });
+    if (!(await planOwnerOk(req, rows[0]))) return res.status(403).json({ error: 'You do not have permission to remove this.' });
+    if (rows[0].status === 'Approved' && !MATERIAL_MGR.includes(req.authUser.role)) return res.status(409).json({ error: 'An approved plan can only be removed by the Principal.' });
+    await sql`DELETE FROM exam_plans WHERE id = ${req.params.id}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) { console.error('exam-plan delete error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+
 // ---------- Push subscription endpoints ----------
 // Any signed-in login can call these (not just Parent/Student) so a Teacher
 // or Admin who wants their own notifications later isn't blocked by this
@@ -5016,7 +5274,7 @@ const PARENT_SHARED_REFERENCE_RESOURCES = ['fee-structure', 'exam-defs', 'subjec
 // office sees (it holds only dates and percentages, nothing per-student).
 // The timetable's period times and working days are the same for everyone. 'timetable-entries' is also let through,
 // but only the student's OWN class and section is returned (see parentScopedKvValue), never the whole school's.
-const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings', 'syllabus-topics', 'fee-schedule', 'grading-scale', 'grading-schemes', 'timetable-periods', 'timetable-days', 'timetable-entries', 'exam-releases'];
+const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings', 'syllabus-topics', 'fee-schedule', 'grading-scale', 'grading-schemes', 'timetable-periods', 'timetable-days', 'timetable-entries', 'exam-releases', 'portal-settings'];
 // A Teacher can always READ the timetable (periods, working days and entries) so My Day and My Timetable can show their own
 // periods, even when the role's Roles & Permissions only switch on a timetable sub-tab. Writing still needs the Timetable permission.
 function teacherReadsTimetable(req, key) {
