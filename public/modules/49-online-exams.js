@@ -73,6 +73,12 @@
       .oe-choice.sel{border-color:#2F80ED;background:#eaf2ff;} .oe-choice i{width:22px;height:22px;border-radius:50%;border:2px solid #9bb0d3;flex:none;} .oe-choice.sel i{background:#2F80ED;border-color:#2F80ED;box-shadow:inset 0 0 0 4px #eaf2ff;}
       #oeRun textarea{width:100%;min-height:140px;padding:12px;border:2px solid #dbe3f2;border-radius:14px;font:inherit;font-size:1.05rem;box-sizing:border-box;-webkit-user-select:text;user-select:text;}
       .oe-foot{display:flex;gap:10px;justify-content:space-between;padding:10px 14px;background:#fff;border-top:1px solid #e3e8f3;}
+      .oer-hero{background:linear-gradient(135deg,#14325c,#2F80ED);color:#fff;border-radius:20px;padding:18px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;}
+      .oer-ring{width:96px;height:96px;border-radius:50%;display:grid;place-items:center;flex:none;} .oer-ring>div{width:74px;height:74px;border-radius:50%;background:#14325c;display:grid;place-items:center;font-size:1.35rem;font-weight:800;}
+      .oer-hero .big{font-size:2rem;font-weight:800;line-height:1.1;} .oer-hero .msg{font-size:1.05rem;margin-top:4px;opacity:.95;}
+      .oer-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;} .oer-stats div{background:rgba(255,255,255,.14);border-radius:12px;padding:8px 10px;text-align:center;} .oer-stats b{display:block;font-size:1.1rem;} .oer-stats span{font-size:.74rem;opacity:.9;}
+      .oer-chips{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0;} .oer-chips span{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-weight:800;font-size:.9rem;color:#fff;} .oer-chips .g{background:#1d9b4d;} .oer-chips .a{background:#f0a000;} .oer-chips .r{background:#d93025;}
+      .oer-q{border-left:6px solid #cfd8ea;} .oer-q.g{border-left-color:#1d9b4d;} .oer-q.a{border-left-color:#f0a000;} .oer-q.r{border-left-color:#d93025;}
       .oe-modal{position:absolute;inset:0;background:rgba(10,20,40,.55);display:flex;align-items:center;justify-content:center;padding:20px;} .oe-modal>div{background:#fff;border-radius:18px;padding:22px;max-width:420px;width:100%;}
     `;
     document.head.appendChild(s);
@@ -98,12 +104,12 @@
   let exams = [], draft = null, noteFor = null, viewing = null, resData = null, marking = null;
   const targets = () => { const sc = (typeof myTeacherScope === 'function') ? myTeacherScope() : null; return (sc && sc.subjectSections) || []; };
   const blankQ = type => type === 'tf' ? { type: 'tf', text: '', answer: 0, marks: 1 } : type === 'short' ? { type: 'short', text: '', keyAnswer: '', marks: 5 } : { type: 'mcq', text: '', options: ['', '', '', ''], answer: 0, marks: 1 };
-  const newDraft = () => { const t = targets()[0] || {}; const now = Date.now(); const start = Math.ceil((now + 3600000) / 900000) * 900000; return { id: '', title: '', className: t.className || '', section: t.section || '', subject: t.subject || '', durationMin: 30, startMs: start, endMs: start + 3 * 3600000, instructions: '', questions: [blankQ('mcq')] }; };
+  const newDraft = () => { const t = targets()[0] || {}; const now = Date.now(); const start = Math.ceil((now + 3600000) / 900000) * 900000; return { id: '', title: '', className: t.className || '', section: t.section || '', subject: t.subject || '', durationMin: 30, startMs: start, endMs: start + 3 * 3600000, instructions: '', showKey: false, questions: [blankQ('mcq')] }; };
 
   function collect(){
     if(!draft || !$('oeTitle')) return;
     draft.title = $('oeTitle').value; draft.className = $('oeClass').value; draft.section = $('oeSection').value; draft.subject = $('oeSubject').value;
-    draft.durationMin = parseInt($('oeDur').value, 10) || 0; draft.instructions = $('oeInstr').value;
+    draft.durationMin = parseInt($('oeDur').value, 10) || 0; draft.instructions = $('oeInstr').value; draft.showKey = !!($('oeShowKey') && $('oeShowKey').checked);
     if($('oeStart').value) draft.startMs = new Date($('oeStart').value).getTime(); if($('oeEnd').value) draft.endMs = new Date($('oeEnd').value).getTime();
     draft.questions.forEach((q, i) => {
       const t = $('oeqt' + i); if(!t) return; q.text = t.value; q.marks = $('oeqm' + i).value;
@@ -118,12 +124,12 @@
       <button class="btn btn-ghost btn-sm" type="button" onclick="oeRemoveQ(${i})">Remove</button></div>`;
     let body = `<label class="l">Question</label><textarea id="oeqt${i}" rows="2" maxlength="2000">${esc(q.text)}</textarea>`;
     if(q.type === 'mcq'){
-      body += `<label class="l" style="margin-top:8px;">Options — tick the correct one</label>` + q.options.map((o, k) => `<div class="opt"><input type="radio" name="oeqa${i}" value="${k}" ${q.answer === k ? 'checked' : ''}><input type="text" id="oeqo${i}_${k}" maxlength="500" placeholder="Option ${String.fromCharCode(65 + k)}" value="${esc(o)}">${q.options.length > 2 ? `<button class="btn btn-ghost btn-sm" type="button" onclick="oeRemoveOpt(${i},${k})">✕</button>` : ''}</div>`).join('') +
+      body += `<label class="l" style="margin-top:8px;">Options — tick the correct one <b>(your answer key — students never see the ticks while writing)</b></label>` + q.options.map((o, k) => `<div class="opt"><input type="radio" name="oeqa${i}" value="${k}" ${q.answer === k ? 'checked' : ''}><input type="text" id="oeqo${i}_${k}" maxlength="500" placeholder="Option ${String.fromCharCode(65 + k)}" value="${esc(o)}">${q.options.length > 2 ? `<button class="btn btn-ghost btn-sm" type="button" onclick="oeRemoveOpt(${i},${k})">✕</button>` : ''}</div>`).join('') +
         (q.options.length < 6 ? `<button class="btn btn-ghost btn-sm" type="button" onclick="oeAddOpt(${i})">+ Add option</button>` : '');
     }else if(q.type === 'tf'){
-      body += `<label class="l" style="margin-top:8px;">Correct answer</label><div class="opt"><label><input type="radio" name="oeqa${i}" value="0" ${q.answer === 0 ? 'checked' : ''}> True</label> <label style="margin-left:14px"><input type="radio" name="oeqa${i}" value="1" ${q.answer === 1 ? 'checked' : ''}> False</label></div>`;
+      body += `<label class="l" style="margin-top:8px;">Correct answer <b>(answer key — hidden from students)</b></label><div class="opt"><label><input type="radio" name="oeqa${i}" value="0" ${q.answer === 0 ? 'checked' : ''}> True</label> <label style="margin-left:14px"><input type="radio" name="oeqa${i}" value="1" ${q.answer === 1 ? 'checked' : ''}> False</label></div>`;
     }else{
-      body += `<label class="l" style="margin-top:8px;">Model answer (only you and the Principal see this — helps while marking)</label><textarea id="oeqk${i}" rows="2" maxlength="2000">${esc(q.keyAnswer || '')}</textarea>`;
+      body += `<label class="l" style="margin-top:8px;">Answer key / model answer (hidden from students while they write — helps you while marking)</label><textarea id="oeqk${i}" rows="2" maxlength="2000">${esc(q.keyAnswer || '')}</textarea>`;
     }
     body += `<div style="max-width:140px;margin-top:8px;"><label class="l">Marks</label><input type="number" id="oeqm${i}" min="0.5" max="100" step="0.5" value="${esc(q.marks)}"></div>`;
     return `<div class="oe-q">${head}${body}</div>`;
@@ -143,6 +149,7 @@
       <div><label>Students can start from</label><input type="datetime-local" id="oeStart" value="${toLocalInput(d.startMs)}"></div>
       <div><label>Exam closes at</label><input type="datetime-local" id="oeEnd" value="${toLocalInput(d.endMs)}"></div>
       <div class="full oe-sm">Each student gets the full time allowed from the moment they press Start, but never beyond the closing time. Choose a closing time at least as long after the start as the time allowed.</div>
+      <div class="full"><label style="display:flex;gap:8px;align-items:center;font-size:.9rem;color:#334;"><input type="checkbox" id="oeShowKey" style="width:auto;" ${d.showKey ? 'checked' : ''}> Show the correct answers to students after results are released <span class="oe-sm">(leave unticked to keep your answer key private — students then see only their own answers and marks)</span></label></div>
       <div class="full"><label>Instructions for students (optional)</label><textarea id="oeInstr" rows="2" maxlength="2000" placeholder="e.g. Answer all questions. Do not leave the screen.">${esc(d.instructions)}</textarea></div>
     </div>
     <h3 style="margin:16px 0 8px;font-size:1rem;color:var(--navy,#14325c);">Questions <span class="oe-sm">· ${d.questions.length} question${d.questions.length === 1 ? '' : 's'} · ${total} marks in total</span></h3>
@@ -167,12 +174,12 @@
   window.oeEdit = async function(id){
     if(!id){ draft = newDraft(); return render(); }
     try{ const e = await api('GET', '/api/online-exams/' + encodeURIComponent(id));
-      draft = { id: e.id, title: e.title, className: e.className, section: e.section, subject: e.subject, durationMin: e.durationMin, startMs: e.startMs, endMs: e.endMs, instructions: e.instructions, questions: e.questions.map(q => ({ ...q })) };
+      draft = { id: e.id, title: e.title, className: e.className, section: e.section, subject: e.subject, durationMin: e.durationMin, startMs: e.startMs, endMs: e.endMs, instructions: e.instructions, showKey: !!e.showKey, questions: e.questions.map(q => ({ ...q })) };
       viewing = null; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }catch(er){ toast(er.message); }
   };
   window.oeSubmit = async function(){
     collect(); const d = draft; const btn = $('oeSave'); btn.disabled = true; $('oeMsg').textContent = 'Submitting…';
-    const body = { title: d.title, className: d.className, section: d.section, subject: d.subject, durationMin: d.durationMin, startMs: d.startMs, endMs: d.endMs, instructions: d.instructions,
+    const body = { title: d.title, className: d.className, section: d.section, subject: d.subject, durationMin: d.durationMin, startMs: d.startMs, endMs: d.endMs, instructions: d.instructions, showKey: d.showKey,
       questions: d.questions.map(q => ({ type: q.type, text: q.text, marks: q.marks, options: q.options, answer: q.answer, keyAnswer: q.keyAnswer })) };
     try{
       if(d.id) await api('PUT', '/api/online-exams/' + encodeURIComponent(d.id), body); else await api('POST', '/api/online-exams', body);
@@ -259,7 +266,7 @@
   async function render(keep){
     const el = $('view-onlineexams'); if(!el) return;
     if(viewing && resData){ el.innerHTML = `<div class="topbar"><div><h1>Online Exams</h1><p>Results and marking.</p></div></div>${resultsHtml()}`; return; }
-    if(!keep || !exams.length){ try{ exams = await api('GET', '/api/online-exams'); }catch(e){ exams = []; } }
+    if(!keep){ try{ exams = await api('GET', '/api/online-exams'); }catch(e){ exams = []; } }
     const mgr = isMgr(); const waiting = exams.filter(e => e.status === 'Submitted');
     if(mgr){
       el.innerHTML = `<div class="topbar"><div><h1>Online Exams</h1><p>Teachers set timed exams for their classes. Approve one and it goes live to the students at its opening time.</p></div></div>
@@ -305,6 +312,13 @@
 
   /* ====================================================================== STUDENT SIDE ===== */
   let run = null; // the exam being written
+  const band = pct => pct >= 90 ? ['#1d9b4d', L('Excellent! 🌟', 'అద్భుతం! 🌟')] : pct >= 75 ? ['#2F80ED', L('Very good 👏', 'చాలా బాగుంది 👏')] : pct >= 50 ? ['#f0a000', L('Good — keep practising 💪', 'బాగుంది — ఇంకా సాధన చేయండి 💪')] : ['#d93025', L('Needs more practice — please talk to your teacher', 'ఇంకా సాధన అవసరం — టీచర్‌తో మాట్లాడండి')];
+  function resultHero(title, subject, total, max, avg, high){
+    const pct = max ? Math.round(total / max * 100) : 0; const b = band(pct);
+    return `<div class="oer-hero"><div class="oer-ring" style="background:conic-gradient(${b[0] === '#d93025' ? '#ff8a80' : '#7CE0A1'} ${pct * 3.6}deg, rgba(255,255,255,.25) 0)"><div>${pct}%</div></div>
+      <div style="flex:1;min-width:150px;"><div class="oe-sm" style="color:#dbe7ff;margin:0;">${esc(subject)} · ${esc(title)}</div><div class="big">${esc(total)} <span style="font-size:1.1rem;font-weight:600;">/ ${esc(max)}</span></div><div class="msg">${esc(b[1])}</div></div>
+      ${avg != null ? `<div class="oer-stats" style="width:100%;"><div><b>${esc(total)}</b><span>${L('You', 'మీరు')}</span></div><div><b>${esc(avg)}</b><span>${L('Class average', 'తరగతి సగటు')}</span></div><div><b>${esc(high)}</b><span>${L('Highest', 'అత్యధికం')}</span></div></div>` : ''}</div>`;
+  }
 
   window.renderMyOnlineExamTab = async function(body, s){
     css(); body.innerHTML = '<div class="empty-state">…</div>';
@@ -318,7 +332,7 @@
       let status = '', btn = '', tone = '#2F80ED';
       if(m.state === 'InProgress' && now < m.deadlineMs){ status = L('You have started this exam. Continue now.', 'మీరు ఈ పరీక్ష మొదలుపెట్టారు. ఇప్పుడే కొనసాగించండి.'); btn = `<button class="oes-btn" onclick="oeStart('${esc(e.id)}')">${L('Continue exam', 'పరీక్ష కొనసాగించండి')}</button>`; tone = '#d93025'; }
       else if(m.state === 'InProgress' || m.state === 'Done'){
-        if(e.resultsReleased){ status = L('Your result is ready.', 'మీ ఫలితం సిద్ధంగా ఉంది.') + ' <b>' + esc(m.total) + ' / ' + esc(e.totalMarks) + '</b>'; btn = `<button class="oes-btn" onclick="oeShowResult('${esc(e.id)}')">${L('See my answers & result', 'నా సమాధానాలు & ఫలితం చూడండి')}</button>`; tone = '#1d9b4d'; }
+        if(e.resultsReleased){ status = '</b>' + resultHero(e.title, e.subject, m.total, e.totalMarks, m.classAverage, m.highest) + '<b style="display:none">'; btn = `<button class="oes-btn" onclick="oeShowResult('${esc(e.id)}')">${L('See my answers & result', 'నా సమాధానాలు & ఫలితం చూడండి')}</button>`; tone = '#1d9b4d'; }
         else { status = L('Submitted. Your result will appear after your teacher marks it.', 'సమర్పించారు. టీచర్ మార్కులు వేశాక ఫలితం కనిపిస్తుంది.'); tone = '#f0a000'; }
       }
       else if(now < e.startMs){ status = L('Opens on ', 'ప్రారంభం: ') + fmt(e.startMs); tone = '#f0a000'; }
@@ -366,7 +380,7 @@
       el.innerHTML = `<header><b>${esc(run.title)}</b></header><div id="oeRunBody"><div class="oe-qbox"><div class="qt">${esc(run.subject)} — ${esc(run.title)}</div>
         <p style="font-size:1.05rem;">${L('Time allowed', 'సమయం')}: <b>${mmss(remaining())}</b> · ${run.questions.length} ${L('questions', 'ప్రశ్నలు')} · ${esc(run.total)} ${L('marks', 'మార్కులు')}</p>
         ${run.instructions ? `<p style="white-space:pre-wrap;font-size:1.02rem;">${esc(run.instructions)}</p>` : ''}
-        <ul style="font-size:1rem;line-height:1.6;"><li>${L('The timer is running now and cannot be paused.', 'టైమర్ ఇప్పటి నుంచే నడుస్తోంది, ఆపలేరు.')}</li><li>${L('Your answers are saved as you go. When time is up the exam submits by itself.', 'సమాధానాలు ఆటోమేటిక్‌గా సేవ్ అవుతాయి. సమయం అయిపోగానే పరీక్ష తానే సమర్పించబడుతుంది.')}</li><li>${L('Please stay on this screen. Leaving it is recorded for your teacher.', 'దయచేసి ఈ స్క్రీన్‌లోనే ఉండండి. వదిలితే టీచర్‌కు తెలుస్తుంది.')}</li></ul>
+        <ul style="font-size:1rem;line-height:1.6;padding-left:22px;margin:12px 0;"><li>${L('The timer is running now and cannot be paused.', 'టైమర్ ఇప్పటి నుంచే నడుస్తోంది, ఆపలేరు.')}</li><li>${L('Your answers are saved as you go. When time is up the exam submits by itself.', 'సమాధానాలు ఆటోమేటిక్‌గా సేవ్ అవుతాయి. సమయం అయిపోగానే పరీక్ష తానే సమర్పించబడుతుంది.')}</li><li>${L('Please stay on this screen. Leaving it is recorded for your teacher.', 'దయచేసి ఈ స్క్రీన్‌లోనే ఉండండి. వదిలితే టీచర్‌కు తెలుస్తుంది.')}</li></ul>
         <button class="oes-btn" onclick="oeBegin()">${L('I understand — show questions', 'అర్థమైంది — ప్రశ్నలు చూపించండి')}</button></div></div>`; return; }
     const q = run.questions[run.idx]; const a = run.answers[q.id];
     const pal = run.questions.map((x, i) => `<button type="button" class="${run.answers[x.id] !== undefined && run.answers[x.id] !== '' ? 'done' : ''} ${i === run.idx ? 'cur' : ''}" onclick="oeGo(${i})">${i + 1}</button>`).join('');
@@ -411,10 +425,10 @@
     let el = $('oeRun'); if(el) el.remove(); el = document.createElement('div'); el.id = 'oeRun'; document.body.appendChild(el); document.body.classList.add('sm-open');
     const pct = r.totalMarks ? Math.round(r.total / r.totalMarks * 100) : 0;
     el.innerHTML = `<header><b>${esc(r.title)}</b><button class="btn btn-ghost btn-sm" style="background:#fff;color:#14325c;border:0;border-radius:10px;padding:8px 16px;font-weight:700;" onclick="oeCloseRun()">${L('Close', 'మూసివేయి')} ✕</button></header>
-      <div id="oeRunBody"><div class="oe-qbox" style="margin-bottom:12px;text-align:center;"><div style="font-size:2.4rem;font-weight:800;color:#14325c;">${esc(r.total)} / ${esc(r.totalMarks)}</div><div style="font-size:1.1rem;">${pct}% · ${esc(r.subject)}</div>
-        <div class="oe-sm">${L('Class average', 'తరగతి సగటు')}: ${esc(r.classAverage)} · ${L('Highest', 'అత్యధికం')}: ${esc(r.highest)}</div></div>
-        ${r.review.map((q, i) => `<div class="oe-qbox" style="margin-bottom:10px;"><div class="oe-sm" style="margin:0 0 4px;">${L('Question', 'ప్రశ్న')} ${i + 1} · ${esc(q.got)} / ${esc(q.marks)}</div><div class="qt" style="font-size:1.08rem;">${esc(q.text)}</div>
+      <div id="oeRunBody">${resultHero(r.title, r.subject, r.total, r.totalMarks, r.classAverage, r.highest)}
+        <div class="oer-chips">${r.review.map((q, i) => `<span class="${q.got >= q.marks ? 'g' : q.got > 0 ? 'a' : 'r'}" title="${esc(q.got)} / ${esc(q.marks)}">${i + 1}</span>`).join('')}</div>
+        ${r.review.map((q, i) => `<div class="oe-qbox oer-q ${q.got >= q.marks ? 'g' : q.got > 0 ? 'a' : 'r'}" style="margin-bottom:10px;"><div class="oe-sm" style="margin:0 0 4px;">${L('Question', 'ప్రశ్న')} ${i + 1} · ${esc(q.got)} / ${esc(q.marks)}</div><div class="qt" style="font-size:1.08rem;">${esc(q.text)}</div>
           ${q.type === 'short' ? `<div style="white-space:pre-wrap;background:#f4f7fd;border-radius:10px;padding:10px;"><b>${L('Your answer', 'మీ సమాధానం')}:</b> ${esc(q.yourAnswer || '—')}</div>${q.keyAnswer ? `<div class="oe-sm" style="margin-top:6px;">${L('Model answer', 'నమూనా సమాధానం')}: ${esc(q.keyAnswer)}</div>` : ''}`
-          : q.options.map((o, k) => `<div class="${k === q.correct ? 'oe-ans-ok' : (k === q.yourAnswer ? 'oe-ans-bad' : '')}" style="padding:4px 0;font-size:1.02rem;">${String.fromCharCode(65 + k)}. ${esc(o)}${k === q.correct ? ' ✓' : ''}${k === q.yourAnswer ? ' ← ' + L('your answer', 'మీ సమాధానం') : ''}</div>`).join('')}</div>`).join('')}</div>`;
+          : q.options.map((o, k) => { const hasKey = q.correct !== undefined; const cls = hasKey ? (k === q.correct ? 'oe-ans-ok' : (k === q.yourAnswer ? 'oe-ans-bad' : '')) : (k === q.yourAnswer ? (q.got > 0 ? 'oe-ans-ok' : 'oe-ans-bad') : ''); return `<div class="${cls}" style="padding:4px 0;font-size:1.02rem;">${String.fromCharCode(65 + k)}. ${esc(o)}${hasKey && k === q.correct ? ' ✓' : ''}${k === q.yourAnswer ? ' ← ' + L('your answer', 'మీ సమాధానం') + (hasKey ? '' : (q.got > 0 ? ' ✓' : ' ✗')) : ''}</div>`; }).join('')}</div>`).join('')}</div>`;
   };
 })();

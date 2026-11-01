@@ -818,6 +818,7 @@ async function ensureSchema() {
     submitted_ms BIGINT NULL, answers LONGTEXT, auto_score DOUBLE NOT NULL DEFAULT 0, manual_scores LONGTEXT, total DOUBLE NOT NULL DEFAULT 0,
     status VARCHAR(20) NOT NULL DEFAULT 'InProgress', leaves INT NOT NULL DEFAULT 0, UNIQUE (exam_id, student_id)
   )`;
+  await addColumnIfMissing('online_exams', 'show_key TINYINT NOT NULL DEFAULT 0');
 
   // ---------- Indexes ----------
   // The tables above are all read by student_id / staff_id / username / date
@@ -4812,7 +4813,7 @@ function oeShuffle(arr, rng) { const a = arr.slice(); for (let i = a.length - 1;
 function oeExamMeta(r, extra) {
   return Object.assign({ id: r.id, title: r.title || '', className: r.class_name, section: r.section || '', subject: r.subject || '', instructions: r.instructions || '',
     durationMin: r.duration_min, startMs: oeNum(r.start_ms), endMs: oeNum(r.end_ms), totalMarks: oeNum(r.total_marks), status: r.status, staffName: r.staff_name || '',
-    reviewNote: r.review_note || '', reviewedBy: r.reviewed_by || '', resultsReleased: !!r.results_released, createdAt: r.created_at,
+    reviewNote: r.review_note || '', reviewedBy: r.reviewed_by || '', resultsReleased: !!r.results_released, showKey: !!r.show_key, createdAt: r.created_at,
     questionCount: oeParse(r.questions, []).length }, extra || {});
 }
 function oeCleanQuestions(list) {
@@ -4854,7 +4855,7 @@ async function oeValidate(req, b) {
     if (!sc.subjectSections.some(x => x.className === className && x.section === section && x.subject === subject)) return { error: 'You can only set exams for the classes and subjects you teach.', status: 403 };
     staffId = sc.staffId;
   }
-  return { v: { title, className, section, subject, durationMin, startMs, endMs, instructions: String(b.instructions || '').trim().slice(0, 2000), questions: qs.questions, total: qs.total, staffId } };
+  return { v: { title, className, section, subject, durationMin, startMs, endMs, instructions: String(b.instructions || '').trim().slice(0, 2000), questions: qs.questions, total: qs.total, staffId, showKey: b.showKey ? 1 : 0 } };
 }
 async function oeOwnerOk(req, row) {
   const role = req.authUser && req.authUser.role;
@@ -4909,15 +4910,17 @@ app.get('/api/online-exams', async (req, res) => {
     const atts = await sql.query(`SELECT exam_id, status, started_ms, deadline_ms, total FROM online_attempts WHERE student_id = $1`, [s.id]);
     const am = {}; atts.forEach(a => { am[a.exam_id] = a; });
     const now = Date.now();
-    return res.status(200).json(rows.map(r => {
+    const out = [];
+    for (const r of rows) {
       const a = am[r.id]; let mine = { state: 'NotStarted' };
       if (a) {
         const expired = a.status === 'InProgress' && now > oeNum(a.deadline_ms) + OE_GRACE_MS;
         mine = { state: a.status === 'InProgress' && !expired ? 'InProgress' : 'Done', deadlineMs: oeNum(a.deadline_ms) };
-        if (r.results_released) mine.total = oeNum(a.total);
+        if (r.results_released) { mine.total = oeNum(a.total); const st = (await sql`SELECT AVG(total) AS av, MAX(total) AS mx FROM online_attempts WHERE exam_id = ${r.id} AND status <> 'InProgress'`)[0] || {}; mine.classAverage = Math.round(oeNum(st.av) * 100) / 100; mine.highest = oeNum(st.mx); }
       }
-      return oeExamMeta(r, { mine, questionCount: oeParse(r.questions, []).length });
-    }));
+      out.push(oeExamMeta(r, { mine, questionCount: oeParse(r.questions, []).length }));
+    }
+    return res.status(200).json(out);
   } catch (err) { console.error('online-exams list error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 app.get('/api/online-exams/:id', async (req, res) => {
@@ -4934,8 +4937,8 @@ app.post('/api/online-exams', async (req, res) => {
     if (!role || !(MATERIAL_MGR.includes(role) || role === 'Teacher')) return res.status(403).json({ error: 'You do not have permission to set exams.' });
     const r = await oeValidate(req, req.body || {}); if (r.error) return res.status(r.status || 400).json({ error: r.error });
     const v = r.v; const id = 'oe_' + crypto.randomBytes(8).toString('hex'); const staffName = req.authUser.name || req.authUser.username || '';
-    await sql`INSERT INTO online_exams (id, title, class_name, section, subject, instructions, duration_min, start_ms, end_ms, total_marks, questions, status, staff_id, staff_name, created_by_user_id)
-      VALUES (${id}, ${v.title}, ${v.className}, ${v.section}, ${v.subject}, ${v.instructions}, ${v.durationMin}, ${v.startMs}, ${v.endMs}, ${v.total}, ${JSON.stringify(v.questions)}, 'Submitted', ${v.staffId}, ${staffName}, ${req.authUser.id})`;
+    await sql`INSERT INTO online_exams (id, title, class_name, section, subject, instructions, duration_min, start_ms, end_ms, total_marks, questions, status, staff_id, staff_name, created_by_user_id, show_key)
+      VALUES (${id}, ${v.title}, ${v.className}, ${v.section}, ${v.subject}, ${v.instructions}, ${v.durationMin}, ${v.startMs}, ${v.endMs}, ${v.total}, ${JSON.stringify(v.questions)}, 'Submitted', ${v.staffId}, ${staffName}, ${req.authUser.id}, ${v.showKey})`;
     res.status(201).json({ id });
     notifyUsersByRole(['Admin', 'Principal'], { title: 'Online exam to review', body: `${staffName}: ${v.title} · ${v.className} ${v.section}`, tag: 'approval', url: '/' }).catch(e => console.error('online exam notify failed', e));
   } catch (err) { console.error('online-exam create error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
@@ -4950,7 +4953,7 @@ app.put('/api/online-exams/:id', async (req, res) => {
     if (rows[0].status === 'Approved' && !MATERIAL_MGR.includes(req.authUser.role)) return res.status(409).json({ error: 'This exam is already approved. Ask the Principal to change it.' });
     const r = await oeValidate(req, req.body || {}); if (r.error) return res.status(r.status || 400).json({ error: r.error });
     const v = r.v;
-    await sql`UPDATE online_exams SET title = ${v.title}, class_name = ${v.className}, section = ${v.section}, subject = ${v.subject}, instructions = ${v.instructions}, duration_min = ${v.durationMin}, start_ms = ${v.startMs}, end_ms = ${v.endMs}, total_marks = ${v.total}, questions = ${JSON.stringify(v.questions)}, status = 'Submitted', review_note = '' WHERE id = ${req.params.id}`;
+    await sql`UPDATE online_exams SET title = ${v.title}, class_name = ${v.className}, section = ${v.section}, subject = ${v.subject}, instructions = ${v.instructions}, duration_min = ${v.durationMin}, start_ms = ${v.startMs}, end_ms = ${v.endMs}, total_marks = ${v.total}, questions = ${JSON.stringify(v.questions)}, show_key = ${v.showKey}, status = 'Submitted', review_note = '' WHERE id = ${req.params.id}`;
     res.status(200).json({ ok: true });
     notifyUsersByRole(['Admin', 'Principal'], { title: 'Online exam resubmitted', body: `${rows[0].staff_name}: ${v.title} · ${v.className} ${v.section}`, tag: 'approval', url: '/' }).catch(() => {});
   } catch (err) { console.error('online-exam update error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
@@ -5073,11 +5076,11 @@ app.get('/api/online-exams/:id/my-result', async (req, res) => {
     const totals = all.map(a => oeNum(a.total));
     const review = qs.map(q => {
       const mine = ans[q.id]; const r = { id: q.id, type: q.type, text: q.text, marks: q.marks };
-      if (q.type === 'short') { r.yourAnswer = typeof mine === 'string' ? mine : ''; r.keyAnswer = q.keyAnswer || ''; r.got = man[q.id] === undefined ? 0 : oeNum(man[q.id]); }
-      else { r.options = q.options; r.yourAnswer = mine === undefined ? null : mine; r.correct = q.answer; r.got = mine !== undefined && parseInt(mine, 10) === q.answer ? q.marks : 0; }
+      if (q.type === 'short') { r.yourAnswer = typeof mine === 'string' ? mine : ''; if (c.ex.show_key) r.keyAnswer = q.keyAnswer || ''; r.got = man[q.id] === undefined ? 0 : oeNum(man[q.id]); }
+      else { r.options = q.options; r.yourAnswer = mine === undefined ? null : mine; if (c.ex.show_key) r.correct = q.answer; r.got = mine !== undefined && parseInt(mine, 10) === q.answer ? q.marks : 0; }
       return r;
     });
-    return res.status(200).json({ state: 'Released', title: c.ex.title, subject: c.ex.subject, total: oeNum(att.total), totalMarks: oeNum(c.ex.total_marks),
+    return res.status(200).json({ state: 'Released', showKey: !!c.ex.show_key, title: c.ex.title, subject: c.ex.subject, total: oeNum(att.total), totalMarks: oeNum(c.ex.total_marks),
       classAverage: totals.length ? Math.round(totals.reduce((x, y) => x + y, 0) / totals.length * 100) / 100 : 0, highest: totals.length ? Math.max.apply(null, totals) : 0, review });
   } catch (err) { console.error('online-exam my-result error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
