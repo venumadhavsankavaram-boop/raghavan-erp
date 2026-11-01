@@ -808,10 +808,13 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     // be reused even if it were somehow still sitting in the browser. Not
     // awaited: there's nothing useful to do differently if this fails, and
     // the local sign-out above already happened.
-    fetch('/api/logout', { method:'POST' }).catch(()=>{});
+    // Start the next sign-in from a clean page: otherwise marks, fees, etc. loaded for the
+    // previous user (e.g. a teacher's limited list) stay in memory and the next user sees them.
+    const _lo = fetch('/api/logout', { method:'POST' }).catch(()=>{});
     document.getElementById('loginUsername').value = '';
     document.getElementById('loginPassword').value = '';
     showLoginScreen();
+    Promise.race([_lo, new Promise(r => setTimeout(r, 1500))]).then(() => { try{ location.reload(); }catch(e){} });
   }
 
   // ---------- Idle auto-logout ----------
