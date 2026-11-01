@@ -1444,6 +1444,7 @@ async function enforceDateLockKv(req, res, key) {
 async function handleKv(req, res, key) {
   if (!key) return res.status(400).json({ error: 'Missing key.' });
   if (key === 'date-lock-policy' && req.method === 'PUT' && (!req.authUser || req.authUser.role !== 'Admin')) return res.status(403).json({ error: 'Only the Admin can change this setting.' });
+  if (key === 'exam-releases' && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can release marks to students.' });
   if (key === 'timetable-shared-subjects' && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change this setting.' });
   if (await enforceDateLockKv(req, res, key)) return;
   if (ADMIN_ONLY_KV_KEYS.includes(key) && (!req.authUser || req.authUser.role !== 'Admin')) {
@@ -2261,6 +2262,7 @@ const KV_KEY_TO_MODULE = {
   'timetable-entries': ['timetable'],
   'timetable-periods': ['timetable'],
   'timetable-days': ['timetable'],
+  'exam-releases': ['exams', 'result'],
   'syllabus-topics': ['syllabus'],
   // 'homework-items' removed — it's now a real resource (see
   // RESOURCE_TO_MODULE above) served from its own table, not this generic
@@ -5014,11 +5016,27 @@ const PARENT_SHARED_REFERENCE_RESOURCES = ['fee-structure', 'exam-defs', 'subjec
 // office sees (it holds only dates and percentages, nothing per-student).
 // The timetable's period times and working days are the same for everyone. 'timetable-entries' is also let through,
 // but only the student's OWN class and section is returned (see parentScopedKvValue), never the whole school's.
-const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings', 'syllabus-topics', 'fee-schedule', 'grading-scale', 'grading-schemes', 'timetable-periods', 'timetable-days', 'timetable-entries'];
+const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings', 'syllabus-topics', 'fee-schedule', 'grading-scale', 'grading-schemes', 'timetable-periods', 'timetable-days', 'timetable-entries', 'exam-releases'];
 // A Teacher can always READ the timetable (periods, working days and entries) so My Day and My Timetable can show their own
 // periods, even when the role's Roles & Permissions only switch on a timetable sub-tab. Writing still needs the Timetable permission.
 function teacherReadsTimetable(req, key) {
   return req.method === 'GET' && !!req.authUser && req.authUser.role === 'Teacher' && ['timetable-periods', 'timetable-days', 'timetable-entries', 'timetable-shared-subjects'].includes(key);
+}
+// ---- Releasing marks to students and parents ----
+// kv 'exam-releases' = { legacy:[examIds], released:{ 'examId|Class':{at,by} }, revised:{ 'examId|Class': iso } }.
+// Marks of an exam stay hidden from Student/Parent logins until the Admin or Principal releases that exam for the class.
+// Exams that already existed when this was switched on (legacy) stay visible. Until the list has been set up, nothing is hidden.
+async function readExamReleases() {
+  try {
+    const r = await sql`SELECT value FROM kv_store WHERE \`key\` = 'exam-releases'`;
+    let v = r.length ? r[0].value : null; if (typeof v === 'string') { try { v = JSON.parse(v); } catch (_) { v = null; } }
+    return (v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length) ? v : null;
+  } catch (_) { return null; }
+}
+function examIsReleased(rel, examId, className) {
+  if (!rel) return true;
+  if (Array.isArray(rel.legacy) && rel.legacy.includes(examId)) return true;
+  return !!(rel.released && rel.released[examId + '|' + className]);
 }
 // Class and section of the student a Student/Parent login is linked to ({} when none).
 async function linkedStudentClass(userId) {
@@ -6619,6 +6637,17 @@ app.all('/api/correction-requests', async (req, res) => {
         await sql`UPDATE exam_results SET marks = ${total}, absent = false, written_marks = ${keepSplit ? written : null}, internal_marks = ${keepSplit ? internal : null} WHERE id = ${existing.id}`;
       }
       await sql`UPDATE correction_requests SET status = 'Approved', decided_by = ${u.name}, decided_note = ${note}, decided_at = now() WHERE id = ${id}`;
+      if (r.kind === 'marks') {
+        try {
+          const rel = await readExamReleases();
+          const er = (await sql`SELECT exam_id, student_id FROM exam_results WHERE id = ${existing.id}`)[0];
+          const cn = er ? ((await studentClassMap([er.student_id]))[er.student_id] || {}).className : '';
+          if (rel && er && cn && examIsReleased(rel, er.exam_id, cn)) {
+            rel.revised = rel.revised || {}; rel.revised[er.exam_id + '|' + cn] = new Date().toISOString();
+            await sql`INSERT INTO kv_store (\`key\`, value) VALUES ('exam-releases', ${JSON.stringify(rel)}) ON DUPLICATE KEY UPDATE value = VALUES(value)`;
+          }
+        } catch (e) { console.error('revised mark note failed:', e.message); }
+      }
       auditNote(u.name, u.role, 'CORRECTION', r.kind === 'marks' ? 'exam-results' : r.kind, existing.id, 'approved correction requested by ' + r.requested_by + ': ' + r.old_value + ' -> ' + r.new_value + ' (' + String(r.reason).slice(0, 150) + ')', null);
       return res.status(200).json({ ok: true });
     }
@@ -6782,7 +6811,12 @@ app.all('/api/:resource', async (req, res) => {
       const student = await getLinkedStudent(req.authUser.id);
       if (!student) return res.status(200).json([]);
       const { table, fields } = PARENT_OWN_RECORD_RESOURCES[resource];
-      const rows = await sql.query(`SELECT * FROM ${table} WHERE student_id = $1 ORDER BY created_at ASC`, [student.id]);
+      let rows = await sql.query(`SELECT * FROM ${table} WHERE student_id = $1 ORDER BY created_at ASC`, [student.id]);
+      if (resource === 'exam-results') {
+        const rel = await readExamReleases();
+        const cn = student.class_name || (student.core && student.core.class_name) || (await linkedStudentClass(req.authUser.id)).className || '';
+        rows = rows.filter(r => examIsReleased(rel, r.exam_id, cn));
+      }
       return res.status(200).json(rows.map(r => simpleToAppShape(r, fields())));
     }
     // A Teacher's access to the student roster ('admissions') can be turned
