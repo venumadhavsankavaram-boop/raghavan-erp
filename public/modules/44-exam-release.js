@@ -27,8 +27,9 @@
     try{
       await load();
       if(rel.legacy === null){
-        await ensureDataLoaded('exams', loadExams);
-        rel.legacy = examDefs.map(e => e.id);
+        await Promise.all([ensureDataLoaded('exams', loadExams), ensureDataLoaded('examResults', loadExamResultsData)]);
+        const withMarks = new Set(examResults.map(r => r.examId));
+        rel.legacy = examDefs.filter(e => withMarks.has(e.id)).map(e => e.id);
         await save();
       }
     }catch(e){ initDone = false; console.error('exam release setup', e); }
@@ -65,10 +66,10 @@
       const info = (rel.released || {})[exam.id + '|' + cls], rv = (rel.revised || {})[exam.id + '|' + cls];
       const pct = Math.round(100 * c.entered / c.expected);
       const status = done
-        ? `<span class="pill" style="background:rgba(24,143,134,0.15); color:#0f6a63;">Released</span>${legacy ? '<div class="sf-sub" style="font-size:0.75rem;">Was already visible</div>' : info ? `<div style="font-size:0.75rem;">${fmt(info.at)} · ${esc(info.by || '')}</div>` : ''}${rv ? `<div style="font-size:0.75rem; color:#8a5a00;">Revised ${fmt(rv)}</div>` : ''}`
+        ? `<span class="pill" style="background:rgba(24,143,134,0.15); color:#0f6a63;">Released</span>${legacy || (info && !info.at) ? '<div class="sf-sub" style="font-size:0.75rem;">Was already visible</div>' : info ? `<div style="font-size:0.75rem;">${fmt(info.at)} · ${esc(info.by || '')}</div>` : ''}${rv ? `<div style="font-size:0.75rem; color:#8a5a00;">Revised ${fmt(rv)}</div>` : ''}`
         : '<span class="balance-tag due">Hidden from students</span>';
       const btn = done
-        ? (legacy ? '' : `<button class="btn btn-ghost btn-sm" onclick="examRelHide('${esc(exam.id)}','${esc(cls)}')">Hide again</button>`)
+        ? `<button class="btn btn-ghost btn-sm" onclick="examRelHide('${esc(exam.id)}','${esc(cls)}')">Hide again</button>`
         : `<button class="btn btn-primary btn-sm" onclick="examRelRelease('${esc(exam.id)}','${esc(cls)}')">Release to students</button>`;
       return `<tr><td><b>${esc(cls)}</b></td><td>${c.entered} of ${c.expected} <span style="color:var(--ink-soft);">(${pct}%)</span>${c.missing.length ? `<details style="margin-top:4px;"><summary style="cursor:pointer; font-size:0.78rem; color:#8a5a00;">Missing marks</summary><div style="font-size:0.78rem;">${c.missing.slice(0, 12).map(esc).join('<br>')}${c.missing.length > 12 ? '<br>and ' + (c.missing.length - 12) + ' more' : ''}</div></details>` : ''}</td><td>${status}</td><td>${btn}</td></tr>`;
     }).join('');
@@ -99,7 +100,14 @@
   window.examRelHide = async function(examId, cls){
     if(busy) return; busy = true;
     try{
-      await load(); delete rel.released[examId + '|' + cls]; delete rel.revised[examId + '|' + cls];
+      await load();
+      if((rel.legacy || []).includes(examId)){
+        // this exam was visible before the Release step existed: keep every other class visible, hide only this one
+        const exam = examDefs.find(e => e.id === examId);
+        classLevelsForExamType(exam && exam.examType).forEach(c => { if(c !== cls && !rel.released[examId + '|' + c]) rel.released[examId + '|' + c] = { at: '', by: 'Already visible' }; });
+        rel.legacy = rel.legacy.filter(x => x !== examId);
+      }
+      delete rel.released[examId + '|' + cls]; delete rel.revised[examId + '|' + cls];
       await save(); showToast('Marks hidden from ' + cls + ' students again.');
     }catch(e){ showToast('Could not hide: ' + (e && e.message || 'try again')); }
     finally{ busy = false; examRelRedraw(); }
