@@ -905,13 +905,21 @@ let myProfileTab = 'notifications';
     if(!template){ showToast('No report template is set up yet — ask the office to create one under Result → Report Templates.'); return; }
     const logoEl = document.querySelector('.sb-brand img');
     const logoSrc = logoEl ? logoEl.src : '';
-    const w = window.open('', '_blank');
-    w.document.write(`
-      <html><head><title>Marks Card - ${s.firstName} ${s.lastName}</title>
+    // Shown inside the page (not a pop-up window): phones and many browsers block pop-ups, which left parents with a button that did nothing.
+    const docHtml = `<html><head><title>Marks Card - ${s.firstName} ${s.lastName}</title>
       <style>${reportCardPrintCss()}</style></head>
-      <body onload="window.print()">${reportCardPageHtml(s, exam, logoSrc, template)}</body></html>
-    `);
-    w.document.close();
+      <body>${reportCardPageHtml(s, exam, logoSrc, template)}</body></html>`;
+    const old = document.getElementById('myCardOverlay'); if(old) old.remove();
+    const ov = document.createElement('div'); ov.id = 'myCardOverlay';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(15,20,35,.72);display:flex;flex-direction:column;';
+    ov.innerHTML = `<div style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 14px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.2);">
+        <b style="font-size:.95rem;">${exam.name} — Marks Card</b>
+        <span><button class="btn btn-primary btn-sm" id="myCardPrint">🖨️ Print / Save as PDF</button> <button class="btn btn-ghost btn-sm" id="myCardClose">✕ Close</button></span>
+      </div><iframe id="myCardFrame" style="flex:1;border:0;background:#fff;width:100%;"></iframe>`;
+    document.body.appendChild(ov);
+    const fr = document.getElementById('myCardFrame'); fr.srcdoc = docHtml;
+    document.getElementById('myCardClose').onclick = () => ov.remove();
+    document.getElementById('myCardPrint').onclick = () => { try{ fr.contentWindow.focus(); fr.contentWindow.print(); }catch(e){ showToast('Printing is not available in this browser.'); } };
   }
 
   /* --- Notices tab: same feed the public website shows, read-only (no
