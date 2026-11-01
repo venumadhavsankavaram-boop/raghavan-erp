@@ -115,7 +115,8 @@
 
   /* ---- the tab, for Admin and Principal only ---- */
   function ensureTab(){
-    if(!isMgr() || document.getElementById('extab-release')) return;
+    if(!isMgr()){ const old = document.getElementById('extab-release'); if(old) old.remove(); return; }
+    if(document.getElementById('extab-release')) return;
     const anchor = document.getElementById('extab-entrystatus'); if(!anchor) return;
     const b = document.createElement('button'); b.type = 'button'; b.className = 'mf-tab'; b.id = 'extab-release'; b.textContent = 'Release';
     b.setAttribute('onclick', "switchExamTab('release')"); anchor.insertAdjacentElement('afterend', b);
@@ -141,7 +142,7 @@
   }
   if(typeof applyRolePermissions === 'function'){
     const o = applyRolePermissions;
-    window.applyRolePermissions = function(){ const r = o.apply(this, arguments); try{ initIfNeeded(); }catch(e){} return r; };
+    window.applyRolePermissions = function(){ const r = o.apply(this, arguments); try{ ensureTab(); initIfNeeded(); }catch(e){} return r; };
   }
 
   /* ---- student / parent Marks tab: show "Revised" when a released mark was corrected ---- */

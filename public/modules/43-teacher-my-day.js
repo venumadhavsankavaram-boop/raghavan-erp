@@ -207,7 +207,9 @@
         `<div class="md-card"><h3>Today's periods <span class="md-sm">${per.length} period${per.length === 1 ? '' : 's'}</span></h3>${perHtml}</div>` +
         `<div class="md-card"><h3>Needs your attention ${items.length + hw.length ? `<span class="md-pill">${items.length + hw.length}</span>` : ''}</h3>${todoHtml || '<div class="md-todo ok"><b>You are all caught up. 🎉</b></div>'}</div>` +
         classHtml +
+        `<div id="myDayFeeSlot"></div>` +
         `<div class="md-card"><h3>Quick actions</h3><div class="md-quick">${quick(scope)}</div></div>`;
+      try{ if(window.myDayAfterRender) await window.myDayAfterRender(el, scope); }catch(e){ console.error('my day extra', e); }
     }catch(err){
       console.error('my day', err);
       el.innerHTML = '<div class="md-card"><b>Could not load your day.</b><div class="md-sm">Please refresh the page and try again.</div></div>';
