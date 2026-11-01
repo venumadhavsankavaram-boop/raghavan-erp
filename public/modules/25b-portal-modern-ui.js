@@ -183,9 +183,22 @@ function pmRecipients(s){
   out.push({ v: 'management::::', name: 'Management', role: 'Admin / Principal' });
   return out;
 }
+// One person who teaches several subjects (e.g. PET and MD) shows as ONE card; the other subjects ride along in data-alt
+// so picking a homework for either subject still highlights (and routes to) that card.
+function pmChipGroups(rcps){
+  const out = [], byStaff = {};
+  rcps.forEach(r => {
+    const p = String(r.v).split('::');
+    if(p[0] !== 'subject_teacher' || !p[1]) { out.push({ ...r, alt: [r.v], subjects: null }); return; }
+    const g = byStaff[p[1]];
+    if(g){ g.alt.push(r.v); g.subjects.push(p[2]); g.role = g.subjects.join(' \u00b7 ') + ' teacher'; return; }
+    const n = { ...r, alt: [r.v], subjects: [p[2]] }; byStaff[p[1]] = n; out.push(n);
+  });
+  return out;
+}
 function pmPickRecipient(v){
   const sel = document.getElementById(pmContactMode === 'message' ? 'concernRecipientSel' : 'submissionRecipientSel'); if(sel) sel.value = v;
-  document.querySelectorAll('.pm-rcp').forEach(b => { const on = b.dataset.v === v; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+  document.querySelectorAll('.pm-rcp').forEach(b => { const on = b.dataset.v === v || (b.dataset.alt || '').split('|').indexOf(v) !== -1; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
   if(pmContactMode === 'work') pmFixSubmitBtn();
 }
 function pmFixSubmitBtn(){ /* placeholder for future validation hooks */ }
@@ -228,7 +241,7 @@ function renderMyContactTab(body, s){
   const sel = pmDraft.recip && rcps.some(r => r.v === pmDraft.recip && !r.off) ? pmDraft.recip : first.v;
   const optionsHtml = `<option value="">Select recipient</option>` + rcps.filter(r => !r.off).map(r => `<option value="${pmEsc(r.v)}">${pmEsc(r.name)}</option>`).join('');
   const hws = homeworkItems.filter(h => h.className === s.className && (!h.section || h.section === s.section));
-  const chips = rcps.map(r => `<button type="button" class="pm-rcp ${r.v === sel ? 'on' : ''}" data-v="${pmEsc(r.v)}" ${r.off ? 'disabled' : ''} aria-pressed="${r.v === sel}" onclick="pmPickRecipient('${pmJs(r.v)}')">${pmAvatar(r.name, r.photo, 30)}<span><b>${pmEsc(r.name)}</b><small>${pmEsc(r.role)}</small></span></button>`).join('');
+  const chips = pmChipGroups(rcps).map(r => `<button type="button" class="pm-rcp ${r.alt.indexOf(sel) !== -1 ? 'on' : ''}" data-v="${pmEsc(r.v)}" data-alt="${pmEsc(r.alt.join('|'))}" ${r.off ? 'disabled' : ''} aria-pressed="${r.v === sel}" onclick="pmPickRecipient('${pmJs(r.v)}')">${pmAvatar(r.name, r.photo, 30)}<span><b>${pmEsc(r.name)}</b><small>${pmEsc(r.role)}</small></span></button>`).join('');
   const isMsg = pmContactMode === 'message';
   const compose = isMsg ? `
     <label class="pm-l" for="concernMessageInput">Your message</label>
