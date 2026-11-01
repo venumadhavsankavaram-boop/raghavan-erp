@@ -21,6 +21,7 @@
     ['marks',      '📝', 'Marks',                'మార్కులు'],
     ['syllabushw', '📔', 'Homework & Syllabus',  'హోంవర్క్'],
     ['classinfo',  '🗓️', 'Class & Timetable',    'టైమ్‌టేబుల్'],
+    ['onlineexam', '⏱️', 'Online Exams',         'ఆన్‌లైన్ పరీక్షలు'],
     ['material',   '📚', 'Study Material',       'స్టడీ మెటీరియల్'],
     ['contact',    '💬', 'Messages',             'సందేశాలు'],
     ['notices',    '📌', 'Notices',              'ప్రకటనలు'],
@@ -41,6 +42,7 @@
     exam: ['Next exam', 'తదుపరి పరీక్ష'], noExam: ['No exam scheduled', 'పరీక్షలు ఏవీ లేవు'],
     notice: ['Latest notice', 'తాజా ప్రకటన'], noNotice: ['No notices', 'ప్రకటనలు లేవు'], seeNotice: ['All notices', 'అన్ని ప్రకటనలు'],
     talk: ['Talk to a teacher', 'టీచర్‌తో మాట్లాడండి'], material: ['Study material', 'స్టడీ మెటీరియల్'], seeMaterial: ['Open', 'తెరవండి'],
+    oeOpen: ['Exam open now', 'పరీక్ష ఇప్పుడు ఓపెన్‌గా ఉంది'], oeCont: ['Exam in progress', 'పరీక్ష జరుగుతోంది'], oeSoon: ['Next online exam', 'తదుపరి ఆన్‌లైన్ పరీక్ష'], oeRes: ['Online exam result', 'ఆన్‌లైన్ పరీక్ష ఫలితం'], oeStart: ['Start exam', 'పరీక్ష ప్రారంభించండి'], oeContinue: ['Continue exam', 'పరీక్ష కొనసాగించండి'], oeSee: ['See details', 'వివరాలు'], oeTab: ['Online exams', 'ఆన్‌లైన్ పరీక్షలు'],
     classTeacher: ['Class teacher', 'క్లాస్ టీచర్'], section: ['Section', 'సెక్షన్'],
     lang: ['తెలుగు', 'English'], history: ['View history', 'వివరాలు'], plan: ['Exam plan & syllabus', 'పరీక్ష ప్లాన్ & సిలబస్'], marksWord: ['marks', 'మార్కులు'], syllabusWord: ['Syllabus', 'సిలబస్'],
   };
@@ -116,17 +118,18 @@
   /* ---------- Home ---------- */
   const dmy = iso => /^\d{4}-\d{2}-\d{2}/.test(iso || '') ? iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4) : (iso || '');
   const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-  const card = (tone, icon, title, big, sub, btn, tab) => `<section class="sh-card ${tone}"><div class="sh-h"><i>${icon}</i>${esc(title)}</div>${big ? `<div class="sh-big">${big}</div>` : ''}${sub ? `<div class="sh-sub">${sub}</div>` : ''}${btn ? `<button type="button" class="sh-btn" onclick="switchMyProfileTab('${tab}')">${esc(btn)}</button>` : ''}</section>`;
+  const card = (tone, icon, title, big, sub, btn, tab) => `<section class="sh-card ${tone}"><div class="sh-h"><i>${icon}</i>${esc(title)}</div>${big ? `<div class="sh-big">${big}</div>` : ''}${sub ? `<div class="sh-sub">${sub}</div>` : ''}${btn ? `<button type="button" class="sh-btn" onclick="${String(tab).indexOf('js:') === 0 ? esc(String(tab).slice(3)) : "switchMyProfileTab('" + tab + "')"}">${esc(btn)}</button>` : ''}</section>`;
 
   async function renderHome(body, s){
     css(); body.innerHTML = '<div class="empty-state">…</div>';
     try{ await Promise.all([ensureDataLoaded('payments', loadPaymentsData), ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData), ensureDataLoaded('examResults', loadExamResultsData)]); }catch(e){}
-    let soonNames = [], examPlans = [];
+    let soonNames = [], examPlans = [], onlineExams = [];
     try{
       const r = await fetch('/api/my-exam-status', { credentials: 'include' });
       if(r.ok){ const j = await r.json(); soonNames = (j || []).map(x => (examDefs.find(e => e.id === x.examId) || {}).name).filter(Boolean); }
     }catch(e){}
     try{ const r = await fetch('/api/exam-plans', { credentials: 'include' }); if(r.ok) examPlans = await r.json(); }catch(e){}
+    try{ const r = await fetch('/api/online-exams', { credentials: 'include' }); if(r.ok) onlineExams = await r.json(); }catch(e){}
     if(typeof myProfileTab !== 'undefined' && myProfileTab !== 'home') return;
     const today = localDateStr(new Date());
     const cards = [];
@@ -194,6 +197,19 @@
     const upcoming = (examPlans || []).filter(p => p.examDate && p.examDate >= today).sort((a, b) => a.examDate.localeCompare(b.examDate)).slice(0, 4);
     if(upcoming.length) cards.push(`<section class="sh-card warn"><div class="sh-h"><i>📝</i>${esc(tr('plan'))}</div>${upcoming.map(p => `<details style="margin:4px 0;"><summary style="cursor:pointer;font-weight:700;font-size:1.02rem;">${esc(p.subject)} · ${esc(dmy(p.examDate))}${p.startTime ? ' ' + esc(p.startTime) : ''} · ${esc(p.maxMarks)} ${esc(tr('marksWord'))}</summary><div class="sh-sub" style="margin-top:6px;white-space:pre-wrap;"><b>${esc(tr('syllabusWord'))}:</b> ${esc(p.syllabus)}${p.instructions ? '<br>' + esc(p.instructions) : ''}</div></details>`).join('')}</section>`);
 
+    // online exams: open now / in progress / next / latest result
+    if(tabOn('onlineexam') && onlineExams.length){
+      const nowMs = Date.now(); const when = ms => { const d = new Date(ms); return dmy(localDateStr(d)) + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+      const cont = onlineExams.find(e => e.mine && e.mine.state === 'InProgress' && nowMs < e.mine.deadlineMs);
+      const open = onlineExams.find(e => e.mine && e.mine.state === 'NotStarted' && nowMs >= e.startMs && nowMs < e.endMs - 30000);
+      const soon = onlineExams.filter(e => e.mine && e.mine.state === 'NotStarted' && nowMs < e.startMs).sort((a, b) => a.startMs - b.startMs)[0];
+      const res = onlineExams.find(e => e.mine && e.mine.state === 'Done' && e.resultsReleased);
+      if(cont) cards.unshift(card('bad', '⏱️', tr('oeCont'), esc(cont.title), esc(cont.subject), tr('oeContinue'), 'js:oeStart(\'' + cont.id + '\')'));
+      else if(open) cards.unshift(card('warn', '⏱️', tr('oeOpen'), esc(open.title), esc(open.subject + ' · ' + open.durationMin + ' min'), tr('oeStart'), 'js:oeStart(\'' + open.id + '\')'));
+      else if(soon) cards.push(card('info', '⏱️', tr('oeSoon'), esc(soon.title), esc(soon.subject + ' · ' + when(soon.startMs)), tr('oeSee'), 'onlineexam'));
+      if(res && !cont && !open) cards.push(card('ok', '🏆', tr('oeRes'), esc(res.mine.total + ' / ' + res.totalMarks), esc(res.title + ' · ' + res.subject), tr('oeSee'), 'onlineexam'));
+    }
+
     // latest notice
     let notes = [];
     try{ notes = commsMessages.filter(m => nbxVisibleToStudent(m, s)).slice().sort((a, b) => String(b.id).localeCompare(String(a.id))); }catch(e){}
@@ -204,6 +220,7 @@
     const ct = staffList.find(st => st.classTeacherClass === s.className && st.classTeacherSection === s.section && staffIsActive(st));
     const quick = [];
     if(tabOn('contact')) quick.push(`<button type="button" class="sh-btn" onclick="switchMyProfileTab('contact')">💬 ${esc(tr('talk'))}</button>`);
+    if(tabOn('onlineexam')) quick.push(`<button type="button" class="sh-btn ghost" onclick="switchMyProfileTab('onlineexam')">⏱️ ${esc(tr('oeTab'))}</button>`);
     if(tabOn('material')) quick.push(`<button type="button" class="sh-btn ghost" onclick="switchMyProfileTab('material')">📚 ${esc(tr('material'))}</button>`);
 
     body.innerHTML = `<div class="sh-wrap">
@@ -225,7 +242,7 @@
     window.switchMyProfileTab = function(tab){
       if(!isParent()) return o.apply(this, arguments);
       if(!tabOn(tab)) tab = 'home';
-      if(tab === 'home' || tab === 'material'){ myProfileTab = tab; setActive(tab); return renderMyProfileBody(); }
+      if(tab === 'home' || tab === 'material' || tab === 'onlineexam'){ myProfileTab = tab; setActive(tab); return renderMyProfileBody(); }
       const r = o.apply(this, arguments); setActive(tab); return r;
     };
   }
@@ -242,10 +259,12 @@
         await renderHome(body, s);
       }else if(myProfileTab === 'material' && s && body && typeof window.renderMyMaterialTab === 'function'){
         await window.renderMyMaterialTab(body, s);
+      }else if(myProfileTab === 'onlineexam' && s && body && typeof window.renderMyOnlineExamTab === 'function'){
+        await window.renderMyOnlineExamTab(body, s);
       }else{
         r = await o.apply(this, arguments);
       }
-      const hero = $('pmHero'); if(hero) hero.style.display = (myProfileTab === 'home' || myProfileTab === 'material') ? 'none' : '';
+      const hero = $('pmHero'); if(hero) hero.style.display = (myProfileTab === 'home' || myProfileTab === 'material' || myProfileTab === 'onlineexam') ? 'none' : '';
       setActive(myProfileTab);
       return r;
     };

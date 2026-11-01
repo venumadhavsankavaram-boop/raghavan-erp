@@ -806,6 +806,18 @@ async function ensureSchema() {
     reviewed_at DATETIME NULL, submitted_at DATETIME NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await createIndexIfMissing('idx_exam_plans_class', 'exam_plans', 'class_name, section');
+  await sql`CREATE TABLE IF NOT EXISTS online_exams (
+    id VARCHAR(191) PRIMARY KEY, title TEXT, class_name VARCHAR(191) NOT NULL, section VARCHAR(191) NOT NULL DEFAULT '', subject VARCHAR(191), instructions TEXT,
+    duration_min INT NOT NULL DEFAULT 30, start_ms BIGINT NOT NULL DEFAULT 0, end_ms BIGINT NOT NULL DEFAULT 0, total_marks DOUBLE NOT NULL DEFAULT 0, questions LONGTEXT,
+    status VARCHAR(30) NOT NULL DEFAULT 'Submitted', staff_id VARCHAR(191), staff_name TEXT, created_by_user_id VARCHAR(191), review_note TEXT, reviewed_by TEXT,
+    reviewed_at DATETIME NULL, results_released TINYINT NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`;
+  await createIndexIfMissing('idx_online_exams_class', 'online_exams', 'class_name, section');
+  await sql`CREATE TABLE IF NOT EXISTS online_attempts (
+    id VARCHAR(191) PRIMARY KEY, exam_id VARCHAR(191) NOT NULL, student_id VARCHAR(191) NOT NULL, started_ms BIGINT NOT NULL DEFAULT 0, deadline_ms BIGINT NOT NULL DEFAULT 0,
+    submitted_ms BIGINT NULL, answers LONGTEXT, auto_score DOUBLE NOT NULL DEFAULT 0, manual_scores LONGTEXT, total DOUBLE NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'InProgress', leaves INT NOT NULL DEFAULT 0, UNIQUE (exam_id, student_id)
+  )`;
 
   // ---------- Indexes ----------
   // The tables above are all read by student_id / staff_id / username / date
@@ -4784,6 +4796,366 @@ app.delete('/api/exam-plans/:id', async (req, res) => {
     await sql`DELETE FROM exam_plans WHERE id = ${req.params.id}`;
     return res.status(200).json({ ok: true });
   } catch (err) { console.error('exam-plan delete error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+
+// ---------- Online exams: timed papers students take in the portal ----------
+// Teacher (or Admin/Principal) builds a paper -> Submitted -> Admin/Principal approves (or returns with a note) -> students in that
+// class/section can start it inside the exam window; the clock is kept by the SERVER (deadline = start + duration, never later than
+// the window end), answers autosave, the paper auto-submits at the deadline. MCQ / True-False are marked automatically; short
+// answers are marked by the teacher. Results are kept apart from the report-card marks and shown to the student only after release.
+// Correct answers are never sent to a student until results are released. (public/modules/49-online-exams.js)
+const OE_GRACE_MS = 20000;
+function oeNum(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
+function oeParse(s, fallback) { try { const v = JSON.parse(s || ''); return v == null ? fallback : v; } catch (e) { return fallback; } }
+function oeSeedRng(seedStr) { let h = 2166136261; for (let i = 0; i < seedStr.length; i++) { h ^= seedStr.charCodeAt(i); h = Math.imul(h, 16777619); } return function () { h += 0x6D2B79F5; let t = Math.imul(h ^ (h >>> 15), 1 | h); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function oeShuffle(arr, rng) { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
+function oeExamMeta(r, extra) {
+  return Object.assign({ id: r.id, title: r.title || '', className: r.class_name, section: r.section || '', subject: r.subject || '', instructions: r.instructions || '',
+    durationMin: r.duration_min, startMs: oeNum(r.start_ms), endMs: oeNum(r.end_ms), totalMarks: oeNum(r.total_marks), status: r.status, staffName: r.staff_name || '',
+    reviewNote: r.review_note || '', reviewedBy: r.reviewed_by || '', resultsReleased: !!r.results_released, createdAt: r.created_at,
+    questionCount: oeParse(r.questions, []).length }, extra || {});
+}
+function oeCleanQuestions(list) {
+  if (!Array.isArray(list) || !list.length) return { error: 'Please add at least one question.' };
+  if (list.length > 100) return { error: 'An online exam can have up to 100 questions.' };
+  const out = []; let total = 0;
+  for (let i = 0; i < list.length; i++) {
+    const q = list[i] || {}; const n = i + 1;
+    const type = q.type === 'short' ? 'short' : (q.type === 'tf' ? 'tf' : 'mcq');
+    const text = String(q.text || '').trim().slice(0, 2000); if (!text) return { error: `Question ${n} has no text.` };
+    const marks = Math.round(oeNum(q.marks) * 100) / 100; if (!(marks > 0 && marks <= 100)) return { error: `Question ${n}: marks must be between 0.5 and 100.` };
+    const item = { id: 'q' + n, type, text, marks };
+    if (type === 'tf') { item.options = ['True', 'False']; const a = parseInt(q.answer, 10); if (a !== 0 && a !== 1) return { error: `Question ${n}: choose True or False as the correct answer.` }; item.answer = a; }
+    else if (type === 'mcq') {
+      const opts = (Array.isArray(q.options) ? q.options : []).map(o => String(o == null ? '' : o).trim().slice(0, 500));
+      if (opts.length < 2 || opts.length > 6 || opts.some(o => !o)) return { error: `Question ${n}: give 2 to 6 options and fill each one.` };
+      const a = parseInt(q.answer, 10); if (!(a >= 0 && a < opts.length)) return { error: `Question ${n}: choose the correct option.` };
+      item.options = opts; item.answer = a;
+    } else { item.keyAnswer = String(q.keyAnswer || '').trim().slice(0, 2000); }
+    total += marks; out.push(item);
+  }
+  return { questions: out, total: Math.round(total * 100) / 100 };
+}
+async function oeValidate(req, b) {
+  const className = String(b.className || '').trim(), section = String(b.section || '').trim(), subject = String(b.subject || '').trim();
+  const title = String(b.title || '').trim().slice(0, 200);
+  if (!title) return { error: 'Please give the exam a title.' };
+  if (!className || !section || !subject) return { error: 'Please choose the class, section and subject.' };
+  const durationMin = parseInt(b.durationMin, 10); if (!(durationMin >= 1 && durationMin <= 300)) return { error: 'Time allowed must be between 1 and 300 minutes.' };
+  const startMs = oeNum(b.startMs), endMs = oeNum(b.endMs);
+  if (!(startMs > 0) || !(endMs > 0)) return { error: 'Please choose when students can start and when the exam closes.' };
+  if (endMs <= startMs) return { error: 'The closing time must be after the opening time.' };
+  if (endMs - startMs < durationMin * 60000) return { error: 'The window between opening and closing must be at least as long as the time allowed.' };
+  const qs = oeCleanQuestions(b.questions); if (qs.error) return { error: qs.error };
+  let staffId = null;
+  if (req.authUser.role === 'Teacher') {
+    const sc = await getTeacherScope(req.authUser.id);
+    if (!sc.staffId) return { error: 'Your login is not linked to a staff profile yet.', status: 403 };
+    if (!sc.subjectSections.some(x => x.className === className && x.section === section && x.subject === subject)) return { error: 'You can only set exams for the classes and subjects you teach.', status: 403 };
+    staffId = sc.staffId;
+  }
+  return { v: { title, className, section, subject, durationMin, startMs, endMs, instructions: String(b.instructions || '').trim().slice(0, 2000), questions: qs.questions, total: qs.total, staffId } };
+}
+async function oeOwnerOk(req, row) {
+  const role = req.authUser && req.authUser.role;
+  if (MATERIAL_MGR.includes(role)) return true;
+  return role === 'Teacher' && row.created_by_user_id === req.authUser.id;
+}
+function oeGradeAuto(questions, answers) {
+  let auto = 0, pendingManual = false;
+  for (const q of questions) {
+    const a = answers ? answers[q.id] : undefined;
+    if (q.type === 'short') { if (typeof a === 'string' && a.trim()) pendingManual = true; }
+    else if (a !== undefined && a !== null && parseInt(a, 10) === q.answer) auto += q.marks;
+  }
+  return { auto: Math.round(auto * 100) / 100, pendingManual };
+}
+function oeTotal(auto, manual) { let m = 0; for (const k of Object.keys(manual || {})) m += oeNum(manual[k]); return Math.round((auto + m) * 100) / 100; }
+async function oeFinalize(att, exam, answersOverride, leaves) {
+  const questions = oeParse(exam.questions, []);
+  const answers = answersOverride || oeParse(att.answers, {});
+  const g = oeGradeAuto(questions, answers);
+  const manual = oeParse(att.manual_scores, {});
+  const needs = g.pendingManual && questions.some(q => q.type === 'short' && typeof answers[q.id] === 'string' && answers[q.id].trim() && manual[q.id] === undefined);
+  const status = needs ? 'Submitted' : 'Graded';
+  const total = oeTotal(g.auto, manual);
+  const lv = Math.max(oeNum(att.leaves), oeNum(leaves));
+  const sub = Math.min(Date.now(), oeNum(att.deadline_ms));
+  await sql`UPDATE online_attempts SET answers = ${JSON.stringify(answers)}, auto_score = ${g.auto}, total = ${total}, status = ${status}, submitted_ms = ${sub}, leaves = ${lv} WHERE id = ${att.id} AND status = 'InProgress'`;
+  return { auto: g.auto, total, status };
+}
+async function oeSweepExpired(examRow) {
+  const rows = await sql`SELECT * FROM online_attempts WHERE exam_id = ${examRow.id} AND status = 'InProgress'`;
+  const now = Date.now();
+  for (const a of rows) if (now > oeNum(a.deadline_ms) + OE_GRACE_MS) await oeFinalize(a, examRow, null, 0);
+}
+async function oeStudentOf(req) {
+  const role = req.authUser && req.authUser.role; if (!role || !PARENT_LOGIN_ROLES.includes(role)) return null;
+  return await getLinkedStudent(req.authUser.id);
+}
+app.get('/api/online-exams', async (req, res) => {
+  try {
+    const role = req.authUser && req.authUser.role; if (!role) return res.status(401).json({ error: 'Please sign in.' });
+    if (MATERIAL_MGR.includes(role) || role === 'Teacher') {
+      const rows = MATERIAL_MGR.includes(role)
+        ? await sql.query(`SELECT * FROM online_exams ORDER BY (status = 'Submitted') DESC, created_at DESC LIMIT 300`, [])
+        : await sql.query(`SELECT * FROM online_exams WHERE created_by_user_id = $1 ORDER BY created_at DESC LIMIT 300`, [req.authUser.id]);
+      const counts = await sql.query(`SELECT exam_id, COUNT(*) AS n, SUM(status <> 'InProgress') AS done FROM online_attempts GROUP BY exam_id`, []);
+      const cm = {}; counts.forEach(c => { cm[c.exam_id] = { attempts: oeNum(c.n), finished: oeNum(c.done) }; });
+      return res.status(200).json(rows.map(r => oeExamMeta(r, cm[r.id] || { attempts: 0, finished: 0 })));
+    }
+    const s = await oeStudentOf(req); if (!s) return res.status(200).json([]);
+    const rows = await sql.query(`SELECT * FROM online_exams WHERE status = 'Approved' AND class_name = $1 AND section = $2 ORDER BY start_ms DESC LIMIT 100`, [s.class_name, s.section]);
+    const atts = await sql.query(`SELECT exam_id, status, started_ms, deadline_ms, total FROM online_attempts WHERE student_id = $1`, [s.id]);
+    const am = {}; atts.forEach(a => { am[a.exam_id] = a; });
+    const now = Date.now();
+    return res.status(200).json(rows.map(r => {
+      const a = am[r.id]; let mine = { state: 'NotStarted' };
+      if (a) {
+        const expired = a.status === 'InProgress' && now > oeNum(a.deadline_ms) + OE_GRACE_MS;
+        mine = { state: a.status === 'InProgress' && !expired ? 'InProgress' : 'Done', deadlineMs: oeNum(a.deadline_ms) };
+        if (r.results_released) mine.total = oeNum(a.total);
+      }
+      return oeExamMeta(r, { mine, questionCount: oeParse(r.questions, []).length });
+    }));
+  } catch (err) { console.error('online-exams list error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.get('/api/online-exams/:id', async (req, res) => {
+  try {
+    const rows = await sql`SELECT * FROM online_exams WHERE id = ${req.params.id}`;
+    if (!rows.length) return res.status(404).json({ error: 'Not found.' });
+    if (!(await oeOwnerOk(req, rows[0]))) return res.status(403).json({ error: 'You do not have permission to open this.' });
+    return res.status(200).json(Object.assign(oeExamMeta(rows[0]), { questions: oeParse(rows[0].questions, []) }));
+  } catch (err) { console.error('online-exam get error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/online-exams', async (req, res) => {
+  try {
+    const role = req.authUser && req.authUser.role;
+    if (!role || !(MATERIAL_MGR.includes(role) || role === 'Teacher')) return res.status(403).json({ error: 'You do not have permission to set exams.' });
+    const r = await oeValidate(req, req.body || {}); if (r.error) return res.status(r.status || 400).json({ error: r.error });
+    const v = r.v; const id = 'oe_' + crypto.randomBytes(8).toString('hex'); const staffName = req.authUser.name || req.authUser.username || '';
+    await sql`INSERT INTO online_exams (id, title, class_name, section, subject, instructions, duration_min, start_ms, end_ms, total_marks, questions, status, staff_id, staff_name, created_by_user_id)
+      VALUES (${id}, ${v.title}, ${v.className}, ${v.section}, ${v.subject}, ${v.instructions}, ${v.durationMin}, ${v.startMs}, ${v.endMs}, ${v.total}, ${JSON.stringify(v.questions)}, 'Submitted', ${v.staffId}, ${staffName}, ${req.authUser.id})`;
+    res.status(201).json({ id });
+    notifyUsersByRole(['Admin', 'Principal'], { title: 'Online exam to review', body: `${staffName}: ${v.title} · ${v.className} ${v.section}`, tag: 'approval', url: '/' }).catch(e => console.error('online exam notify failed', e));
+  } catch (err) { console.error('online-exam create error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.put('/api/online-exams/:id', async (req, res) => {
+  try {
+    const rows = await sql`SELECT * FROM online_exams WHERE id = ${req.params.id}`;
+    if (!rows.length) return res.status(404).json({ error: 'Not found.' });
+    if (!(await oeOwnerOk(req, rows[0]))) return res.status(403).json({ error: 'You do not have permission to change this.' });
+    const cnt = await sql`SELECT COUNT(*) AS n FROM online_attempts WHERE exam_id = ${req.params.id}`;
+    if (oeNum(cnt[0].n) > 0) return res.status(409).json({ error: 'Students have already started this exam, so it can no longer be edited.' });
+    if (rows[0].status === 'Approved' && !MATERIAL_MGR.includes(req.authUser.role)) return res.status(409).json({ error: 'This exam is already approved. Ask the Principal to change it.' });
+    const r = await oeValidate(req, req.body || {}); if (r.error) return res.status(r.status || 400).json({ error: r.error });
+    const v = r.v;
+    await sql`UPDATE online_exams SET title = ${v.title}, class_name = ${v.className}, section = ${v.section}, subject = ${v.subject}, instructions = ${v.instructions}, duration_min = ${v.durationMin}, start_ms = ${v.startMs}, end_ms = ${v.endMs}, total_marks = ${v.total}, questions = ${JSON.stringify(v.questions)}, status = 'Submitted', review_note = '' WHERE id = ${req.params.id}`;
+    res.status(200).json({ ok: true });
+    notifyUsersByRole(['Admin', 'Principal'], { title: 'Online exam resubmitted', body: `${rows[0].staff_name}: ${v.title} · ${v.className} ${v.section}`, tag: 'approval', url: '/' }).catch(() => {});
+  } catch (err) { console.error('online-exam update error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/online-exams/:id/review', async (req, res) => {
+  try {
+    if (!req.authUser || !MATERIAL_MGR.includes(req.authUser.role)) return res.status(403).json({ error: 'Only the Admin or Principal can approve online exams.' });
+    const rows = await sql`SELECT * FROM online_exams WHERE id = ${req.params.id}`;
+    if (!rows.length) return res.status(404).json({ error: 'Not found.' });
+    const e = rows[0]; const action = String((req.body || {}).action || ''); const note = String((req.body || {}).note || '').trim().slice(0, 1000);
+    if (action !== 'approve' && action !== 'return') return res.status(400).json({ error: 'Unknown action.' });
+    if (action === 'return' && !note) return res.status(400).json({ error: 'Please write a short note so the teacher knows what to change.' });
+    if (action === 'approve' && oeNum(e.end_ms) <= Date.now()) return res.status(409).json({ error: 'The closing time has already passed. Ask the teacher to set new times.' });
+    const reviewer = req.authUser.name || req.authUser.username || '';
+    await sql`UPDATE online_exams SET status = ${action === 'approve' ? 'Approved' : 'Returned'}, review_note = ${note}, reviewed_by = ${reviewer}, reviewed_at = CURRENT_TIMESTAMP WHERE id = ${req.params.id}`;
+    res.status(200).json({ ok: true });
+    (async () => {
+      try {
+        if (e.created_by_user_id && e.created_by_user_id !== req.authUser.id) await sendPushToUser(e.created_by_user_id, action === 'approve'
+          ? { title: 'Online exam approved', body: `${e.title} · ${e.class_name} ${e.section}`, tag: 'approval', url: '/' }
+          : { title: 'Online exam sent back', body: `${e.title}: ${note}`, tag: 'approval', url: '/' });
+        if (action === 'approve') {
+          const kids = await sql`SELECT id FROM students WHERE class_name = ${e.class_name} AND section = ${e.section} AND (status IS NULL OR LOWER(status) = 'active') AND deleted_at IS NULL`;
+          for (const k of kids) await sendPushToStudent(k.id, { title: 'Online exam scheduled', body: `${e.subject}: ${e.title} — ${e.duration_min} minutes. Open the portal to take it.`, tag: 'online-exam', url: '/' });
+        }
+      } catch (er) { console.error('online exam review notify failed', er); }
+    })();
+  } catch (err) { console.error('online-exam review error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.delete('/api/online-exams/:id', async (req, res) => {
+  try {
+    const rows = await sql`SELECT * FROM online_exams WHERE id = ${req.params.id}`;
+    if (!rows.length) return res.status(404).json({ error: 'Not found.' });
+    if (!(await oeOwnerOk(req, rows[0]))) return res.status(403).json({ error: 'You do not have permission to remove this.' });
+    const cnt = await sql`SELECT COUNT(*) AS n FROM online_attempts WHERE exam_id = ${req.params.id}`;
+    const n = oeNum(cnt[0].n);
+    if (n > 0 && !MATERIAL_MGR.includes(req.authUser.role)) return res.status(409).json({ error: 'Students have already taken this exam. Only the Principal can remove it.' });
+    if (rows[0].status === 'Approved' && !MATERIAL_MGR.includes(req.authUser.role)) return res.status(409).json({ error: 'An approved exam can only be removed by the Principal.' });
+    await sql`DELETE FROM online_attempts WHERE exam_id = ${req.params.id}`;
+    await sql`DELETE FROM online_exams WHERE id = ${req.params.id}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) { console.error('online-exam delete error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+function oePaperFor(exam, attId) {
+  const rng = oeSeedRng(attId); const qs = oeParse(exam.questions, []);
+  return oeShuffle(qs, rng).map(q => {
+    const o = { id: q.id, type: q.type, text: q.text, marks: q.marks };
+    if (q.type !== 'short') { o.options = q.type === 'tf' ? q.options.map((t, i) => ({ i, t })) : oeShuffle(q.options.map((t, i) => ({ i, t })), rng); }
+    return o;
+  });
+}
+function oeCleanAnswers(exam, body) {
+  const qs = oeParse(exam.questions, []); const raw = (body && body.answers) || {}; const out = {};
+  for (const q of qs) {
+    const a = raw[q.id]; if (a === undefined || a === null || a === '') continue;
+    if (q.type === 'short') out[q.id] = String(a).slice(0, 4000);
+    else { const i = parseInt(a, 10); if (i >= 0 && i < q.options.length) out[q.id] = i; }
+  }
+  return out;
+}
+app.post('/api/online-exams/:id/start', async (req, res) => {
+  try {
+    const s = await oeStudentOf(req); if (!s) return res.status(403).json({ error: 'Only students can take an exam.' });
+    const rows = await sql`SELECT * FROM online_exams WHERE id = ${req.params.id}`;
+    if (!rows.length || rows[0].status !== 'Approved' || rows[0].class_name !== s.class_name || rows[0].section !== s.section) return res.status(404).json({ error: 'This exam is not available.' });
+    const e = rows[0]; const now = Date.now();
+    let att = (await sql`SELECT * FROM online_attempts WHERE exam_id = ${e.id} AND student_id = ${s.id}`)[0];
+    if (att && att.status !== 'InProgress') return res.status(409).json({ error: 'You have already submitted this exam.' });
+    if (att && now > oeNum(att.deadline_ms) + OE_GRACE_MS) { await oeFinalize(att, e, null, 0); return res.status(409).json({ error: 'Your time for this exam is over. Your answers were submitted.' }); }
+    if (!att) {
+      if (now < oeNum(e.start_ms)) return res.status(409).json({ error: 'This exam has not opened yet.' });
+      if (now > oeNum(e.end_ms) - 30000) return res.status(409).json({ error: 'This exam is closed.' });
+      const id = 'oa_' + crypto.randomBytes(8).toString('hex');
+      const deadline = Math.min(now + e.duration_min * 60000, oeNum(e.end_ms));
+      try { await sql`INSERT INTO online_attempts (id, exam_id, student_id, started_ms, deadline_ms, answers, status) VALUES (${id}, ${e.id}, ${s.id}, ${now}, ${deadline}, '{}', 'InProgress')`; }
+      catch (er) { /* a second tab started at the same moment: fall through and read the one that won */ }
+      att = (await sql`SELECT * FROM online_attempts WHERE exam_id = ${e.id} AND student_id = ${s.id}`)[0];
+    }
+    return res.status(200).json({ attemptId: att.id, title: e.title, subject: e.subject, instructions: e.instructions || '', totalMarks: oeNum(e.total_marks), durationMin: e.duration_min,
+      deadlineMs: oeNum(att.deadline_ms), serverNowMs: now, answers: oeParse(att.answers, {}), questions: oePaperFor(e, att.id) });
+  } catch (err) { console.error('online-exam start error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+async function oeLoadAttempt(req, res) {
+  const s = await oeStudentOf(req); if (!s) { res.status(403).json({ error: 'Only students can take an exam.' }); return null; }
+  const ex = (await sql`SELECT * FROM online_exams WHERE id = ${req.params.id}`)[0];
+  const att = ex ? (await sql`SELECT * FROM online_attempts WHERE exam_id = ${ex.id} AND student_id = ${s.id}`)[0] : null;
+  if (!ex || !att) { res.status(404).json({ error: 'Start the exam first.' }); return null; }
+  return { s, ex, att };
+}
+app.post('/api/online-exams/:id/save', async (req, res) => {
+  try {
+    const c = await oeLoadAttempt(req, res); if (!c) return;
+    const now = Date.now();
+    if (c.att.status !== 'InProgress') return res.status(200).json({ done: true });
+    if (now > oeNum(c.att.deadline_ms) + OE_GRACE_MS) { await oeFinalize(c.att, c.ex, null, req.body && req.body.leaves); return res.status(200).json({ done: true }); }
+    const answers = oeCleanAnswers(c.ex, req.body); const lv = Math.max(oeNum(c.att.leaves), oeNum(req.body && req.body.leaves));
+    await sql`UPDATE online_attempts SET answers = ${JSON.stringify(answers)}, leaves = ${lv} WHERE id = ${c.att.id} AND status = 'InProgress'`;
+    return res.status(200).json({ ok: true, serverNowMs: now, deadlineMs: oeNum(c.att.deadline_ms) });
+  } catch (err) { console.error('online-exam save error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/online-exams/:id/finish', async (req, res) => {
+  try {
+    const c = await oeLoadAttempt(req, res); if (!c) return;
+    if (c.att.status !== 'InProgress') return res.status(200).json({ done: true });
+    const late = Date.now() > oeNum(c.att.deadline_ms) + OE_GRACE_MS;
+    const answers = late ? null : oeCleanAnswers(c.ex, req.body);
+    await oeFinalize(c.att, c.ex, answers, req.body && req.body.leaves);
+    return res.status(200).json({ done: true, late });
+  } catch (err) { console.error('online-exam finish error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.get('/api/online-exams/:id/my-result', async (req, res) => {
+  try {
+    const c = await oeLoadAttempt(req, res); if (!c) return;
+    let att = c.att;
+    if (att.status === 'InProgress' && Date.now() > oeNum(att.deadline_ms) + OE_GRACE_MS) { await oeFinalize(att, c.ex, null, 0); att = (await sql`SELECT * FROM online_attempts WHERE id = ${att.id}`)[0]; }
+    if (att.status === 'InProgress') return res.status(200).json({ state: 'InProgress' });
+    if (!c.ex.results_released) return res.status(200).json({ state: 'Waiting', title: c.ex.title });
+    const qs = oeParse(c.ex.questions, []); const ans = oeParse(att.answers, {}); const man = oeParse(att.manual_scores, {});
+    const all = await sql`SELECT total FROM online_attempts WHERE exam_id = ${c.ex.id} AND status <> 'InProgress'`;
+    const totals = all.map(a => oeNum(a.total));
+    const review = qs.map(q => {
+      const mine = ans[q.id]; const r = { id: q.id, type: q.type, text: q.text, marks: q.marks };
+      if (q.type === 'short') { r.yourAnswer = typeof mine === 'string' ? mine : ''; r.keyAnswer = q.keyAnswer || ''; r.got = man[q.id] === undefined ? 0 : oeNum(man[q.id]); }
+      else { r.options = q.options; r.yourAnswer = mine === undefined ? null : mine; r.correct = q.answer; r.got = mine !== undefined && parseInt(mine, 10) === q.answer ? q.marks : 0; }
+      return r;
+    });
+    return res.status(200).json({ state: 'Released', title: c.ex.title, subject: c.ex.subject, total: oeNum(att.total), totalMarks: oeNum(c.ex.total_marks),
+      classAverage: totals.length ? Math.round(totals.reduce((x, y) => x + y, 0) / totals.length * 100) / 100 : 0, highest: totals.length ? Math.max.apply(null, totals) : 0, review });
+  } catch (err) { console.error('online-exam my-result error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.get('/api/online-exams/:id/results', async (req, res) => {
+  try {
+    const ex = (await sql`SELECT * FROM online_exams WHERE id = ${req.params.id}`)[0];
+    if (!ex) return res.status(404).json({ error: 'Not found.' });
+    if (!(await oeOwnerOk(req, ex))) return res.status(403).json({ error: 'You do not have permission to open this.' });
+    await oeSweepExpired(ex);
+    const kids = await sql`SELECT id, first_name, last_name, admission_no FROM students WHERE class_name = ${ex.class_name} AND section = ${ex.section} AND (status IS NULL OR LOWER(status) = 'active') AND deleted_at IS NULL ORDER BY first_name, last_name`;
+    const atts = await sql`SELECT * FROM online_attempts WHERE exam_id = ${ex.id}`;
+    const am = {}; atts.forEach(a => { am[a.student_id] = a; });
+    const qs = oeParse(ex.questions, []);
+    const rows = kids.map(k => { const a = am[k.id]; return { studentId: k.id, name: ((k.first_name || '') + ' ' + (k.last_name || '')).trim(), admissionNo: k.admission_no || '',
+      state: !a ? 'NotAttempted' : a.status, autoScore: a ? oeNum(a.auto_score) : 0, total: a ? oeNum(a.total) : 0, leaves: a ? oeNum(a.leaves) : 0, attemptId: a ? a.id : '',
+      startedMs: a ? oeNum(a.started_ms) : 0, submittedMs: a && a.submitted_ms ? oeNum(a.submitted_ms) : 0 }; });
+    const fin = atts.filter(a => a.status !== 'InProgress');
+    const stats = { students: kids.length, attempted: atts.length, finished: fin.length, pendingMarking: fin.filter(a => a.status === 'Submitted').length,
+      average: fin.length ? Math.round(fin.reduce((x, a) => x + oeNum(a.total), 0) / fin.length * 100) / 100 : 0, highest: fin.length ? Math.max.apply(null, fin.map(a => oeNum(a.total))) : 0, lowest: fin.length ? Math.min.apply(null, fin.map(a => oeNum(a.total))) : 0 };
+    const perQ = qs.map(q => { let right = 0, tried = 0; fin.forEach(a => { const ans = oeParse(a.answers, {}); if (ans[q.id] !== undefined && ans[q.id] !== '') tried++; if (q.type !== 'short' && ans[q.id] !== undefined && parseInt(ans[q.id], 10) === q.answer) right++; }); return { id: q.id, type: q.type, text: q.text, marks: q.marks, tried, right, pct: q.type === 'short' || !fin.length ? null : Math.round(right / fin.length * 100) }; });
+    return res.status(200).json({ exam: oeExamMeta(ex), rows, stats, perQuestion: perQ });
+  } catch (err) { console.error('online-exam results error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.get('/api/online-exams/:id/attempt/:attemptId', async (req, res) => {
+  try {
+    const ex = (await sql`SELECT * FROM online_exams WHERE id = ${req.params.id}`)[0];
+    if (!ex) return res.status(404).json({ error: 'Not found.' });
+    if (!(await oeOwnerOk(req, ex))) return res.status(403).json({ error: 'You do not have permission to open this.' });
+    const att = (await sql`SELECT * FROM online_attempts WHERE id = ${req.params.attemptId} AND exam_id = ${ex.id}`)[0];
+    if (!att) return res.status(404).json({ error: 'Not found.' });
+    const st = (await sql`SELECT first_name, last_name FROM students WHERE id = ${att.student_id}`)[0];
+    const ans = oeParse(att.answers, {}); const man = oeParse(att.manual_scores, {});
+    const questions = oeParse(ex.questions, []).map(q => { const a = ans[q.id]; const o = { id: q.id, type: q.type, text: q.text, marks: q.marks, yourAnswer: a === undefined ? null : a };
+      if (q.type === 'short') { o.keyAnswer = q.keyAnswer || ''; o.given = man[q.id] === undefined ? null : oeNum(man[q.id]); } else { o.options = q.options; o.correct = q.answer; o.got = a !== undefined && parseInt(a, 10) === q.answer ? q.marks : 0; }
+      return o; });
+    return res.status(200).json({ studentName: st ? ((st.first_name || '') + ' ' + (st.last_name || '')).trim() : '', status: att.status, autoScore: oeNum(att.auto_score), total: oeNum(att.total), leaves: oeNum(att.leaves), questions });
+  } catch (err) { console.error('online-exam attempt error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/online-exams/:id/grade', async (req, res) => {
+  try {
+    const ex = (await sql`SELECT * FROM online_exams WHERE id = ${req.params.id}`)[0];
+    if (!ex) return res.status(404).json({ error: 'Not found.' });
+    if (!(await oeOwnerOk(req, ex))) return res.status(403).json({ error: 'You do not have permission to mark this.' });
+    const b = req.body || {}; const att = (await sql`SELECT * FROM online_attempts WHERE id = ${String(b.attemptId || '')} AND exam_id = ${ex.id}`)[0];
+    if (!att) return res.status(404).json({ error: 'Not found.' });
+    if (att.status === 'InProgress') return res.status(409).json({ error: 'This student is still writing the exam.' });
+    const qs = oeParse(ex.questions, []); const man = oeParse(att.manual_scores, {}); const ans = oeParse(att.answers, {}); const given = b.scores || {};
+    for (const q of qs) {
+      if (q.type !== 'short' || given[q.id] === undefined || given[q.id] === null || given[q.id] === '') continue;
+      const m = Math.round(oeNum(given[q.id]) * 100) / 100;
+      if (m < 0 || m > q.marks) return res.status(400).json({ error: `Marks for ${q.id.replace('q', 'Question ')} must be between 0 and ${q.marks}.` });
+      man[q.id] = m;
+    }
+    const pending = qs.some(q => q.type === 'short' && typeof ans[q.id] === 'string' && ans[q.id].trim() && man[q.id] === undefined);
+    const total = oeTotal(oeNum(att.auto_score), man);
+    await sql`UPDATE online_attempts SET manual_scores = ${JSON.stringify(man)}, total = ${total}, status = ${pending ? 'Submitted' : 'Graded'} WHERE id = ${att.id}`;
+    return res.status(200).json({ ok: true, total, status: pending ? 'Submitted' : 'Graded' });
+  } catch (err) { console.error('online-exam grade error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/online-exams/:id/release', async (req, res) => {
+  try {
+    const ex = (await sql`SELECT * FROM online_exams WHERE id = ${req.params.id}`)[0];
+    if (!ex) return res.status(404).json({ error: 'Not found.' });
+    if (!(await oeOwnerOk(req, ex))) return res.status(403).json({ error: 'You do not have permission to release results.' });
+    const release = (req.body || {}).release !== false;
+    if (release) {
+      if (Date.now() < oeNum(ex.end_ms)) return res.status(409).json({ error: 'Results can be released after the exam closes.' });
+      await oeSweepExpired(ex);
+      const pend = await sql`SELECT COUNT(*) AS n FROM online_attempts WHERE exam_id = ${ex.id} AND status = 'Submitted'`;
+      if (oeNum(pend[0].n) > 0) return res.status(409).json({ error: `${oeNum(pend[0].n)} paper(s) still need marking for the written answers.` });
+    }
+    await sql`UPDATE online_exams SET results_released = ${release ? 1 : 0} WHERE id = ${ex.id}`;
+    res.status(200).json({ ok: true, released: release });
+    if (release) (async () => { try {
+      const rows = await sql`SELECT student_id FROM online_attempts WHERE exam_id = ${ex.id}`;
+      for (const r of rows) await sendPushToStudent(r.student_id, { title: 'Exam result ready', body: `${ex.subject}: ${ex.title}`, tag: 'online-exam', url: '/' });
+    } catch (e) { console.error('online exam release notify failed', e); } })();
+  } catch (err) { console.error('online-exam release error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 
 // ---------- Push subscription endpoints ----------
