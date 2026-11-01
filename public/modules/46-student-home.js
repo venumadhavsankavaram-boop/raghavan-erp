@@ -285,5 +285,10 @@
       };
     };
     draw();
+    /* Admin Tools re-renders itself after loading; keep our card on top */
+    if(host._psObs) host._psObs.disconnect();
+    const keep = () => { if(!card.isConnected || card.parentNode !== host || host.firstChild !== card){ obs.disconnect(); host.insertBefore(card, host.firstChild); obs.observe(host, {childList:true}); } };
+    const obs = new MutationObserver(keep); host._psObs = obs; obs.observe(host, {childList:true});
+    setTimeout(() => { try{ obs.disconnect(); }catch(e){} }, 15000);
   }
 })();
