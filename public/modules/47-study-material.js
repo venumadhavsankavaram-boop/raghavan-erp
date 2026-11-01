@@ -215,7 +215,7 @@
 
   const origSwitch = window.switchView;
   window.switchView = function(view){
-    if(!isStaff()) return origSwitch.apply(this, arguments);
+    if(!isStaff()){ const sv = $('view-material'); if(sv) sv.style.display = 'none'; const sn = $('navMaterial'); if(sn) sn.remove(); return origSwitch.apply(this, arguments); }
     ensureShell();
     if(view !== 'material'){
       const r = origSwitch.apply(this, arguments);
@@ -236,6 +236,7 @@
     const o = applyRolePermissions;
     window.applyRolePermissions = function(){
       const r = o.apply(this, arguments);
+      if(!isStaff()){ const sv = $('view-material'); if(sv) sv.style.display = 'none'; const sn = $('navMaterial'); if(sn) sn.remove(); return r; }
       try{ ensureShell(); if(typeof updateSbSectionVisibility === 'function') updateSbSectionVisibility(); }catch(e){}
       return r;
     };

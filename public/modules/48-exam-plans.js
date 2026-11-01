@@ -190,7 +190,7 @@
 
   const prev = window.switchView;
   window.switchView = function(view){
-    if(!isStaff()) return prev.apply(this, arguments);
+    if(!isStaff()){ const sv = $('view-examplans'); if(sv) sv.style.display = 'none'; const sn = $('navExamPlans'); if(sn) sn.remove(); return prev.apply(this, arguments); }
     ensureShell();
     if(view !== 'examplans'){
       const r = prev.apply(this, arguments);
@@ -211,6 +211,7 @@
     const o = applyRolePermissions;
     window.applyRolePermissions = function(){
       const r = o.apply(this, arguments);
+      if(!isStaff()){ const sv = $('view-examplans'); if(sv) sv.style.display = 'none'; const sn = $('navExamPlans'); if(sn) sn.remove(); return r; }
       try{ ensureShell(); if(typeof updateSbSectionVisibility === 'function') updateSbSectionVisibility(); }catch(e){}
       return r;
     };
