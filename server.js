@@ -5038,6 +5038,21 @@ function examIsReleased(rel, examId, className) {
   if (Array.isArray(rel.legacy) && rel.legacy.includes(examId)) return true;
   return !!(rel.released && rel.released[examId + '|' + className]);
 }
+// Which exams teachers have started entering marks for but that are not released yet, for the signed-in student's class.
+// Only exam ids are returned (never any marks) so the portal can say "marks coming soon".
+app.get('/api/my-exam-status', async (req, res) => {
+  try {
+    if (!req.authUser || !PARENT_LOGIN_ROLES.includes(req.authUser.role)) return res.status(403).json({ error: 'You do not have permission to access this.' });
+    const student = await getLinkedStudent(req.authUser.id);
+    if (!student) return res.status(200).json([]);
+    const rel = await readExamReleases();
+    const rows = await sql`SELECT DISTINCT r.exam_id AS exam_id FROM exam_results r JOIN students s ON s.id = r.student_id WHERE s.class_name = ${student.class_name} AND s.section = ${student.section}`;
+    return res.status(200).json(rows.filter(r => !examIsReleased(rel, r.exam_id, student.class_name)).map(r => ({ examId: r.exam_id, state: 'entering' })));
+  } catch (err) {
+    console.error('my-exam-status error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
 // Class and section of the student a Student/Parent login is linked to ({} when none).
 async function linkedStudentClass(userId) {
   try {

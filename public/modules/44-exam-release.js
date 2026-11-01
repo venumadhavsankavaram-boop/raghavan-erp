@@ -165,4 +165,59 @@
       return r;
     };
   }
+
+  /* ---- "Marks coming soon": once teachers have started entering marks for an exam that is not released yet, the student and parent
+          see a short notice (Notifications and Marks tabs) instead of nothing. The server only says WHICH exams are in progress, never any marks. ---- */
+  let pendingExams = null, pendingAt = 0, pendingBusy = false;
+  const isParentLogin = () => { try { return !!currentUser && ['Student','Parent'].includes(currentUser.role); } catch(e){ return false; } };
+  async function refreshPending(){
+    if(pendingBusy) return false; pendingBusy = true;
+    try{
+      const r = await fetch('/api/my-exam-status', { credentials: 'include' });
+      const list = r.ok ? await r.json() : [];
+      const next = Array.isArray(list) ? list.map(x => x.examId).sort() : [];
+      const changed = JSON.stringify(next) !== JSON.stringify(pendingExams);
+      pendingExams = next; pendingAt = Date.now(); return changed;
+    }catch(e){ pendingExams = pendingExams || []; return false; }
+    finally{ pendingBusy = false; }
+  }
+  const examName = id => { const e = (typeof examDefs !== 'undefined' ? examDefs : []).find(x => x.id === id); return e ? e.name : ''; };
+  if(typeof computeMyNotifications === 'function'){
+    const o = computeMyNotifications;
+    window.computeMyNotifications = function(s){
+      const items = o.apply(this, arguments);
+      if(isParentLogin() && Array.isArray(pendingExams)){
+        const today = new Date().toISOString().slice(0, 10);
+        pendingExams.forEach(id => { const n = examName(id); if(n) items.push({ icon:'⏳', tag:'Results', date: today, title: 'Marks coming soon: ' + n, detail: 'Teachers are entering the marks. They will appear in the Marks tab once the school publishes them.' }); });
+        items.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      }
+      return items;
+    };
+  }
+  if(typeof renderMyNotificationsTab === 'function'){
+    const o = renderMyNotificationsTab;
+    window.renderMyNotificationsTab = function(body, s){
+      const r = o.apply(this, arguments);
+      if(isParentLogin() && (pendingExams === null || Date.now() - pendingAt > 60000)) refreshPending().then(ch => { if(ch && body.isConnected) o.call(this, body, s); });
+      return r;
+    };
+  }
+  if(typeof renderMyMarksTab === 'function'){
+    const o = renderMyMarksTab;
+    const addCards = body => {
+      if(!Array.isArray(pendingExams) || !pendingExams.length) return;
+      body.querySelectorAll('.md-soon').forEach(x => x.remove());
+      const empty = body.querySelector('.empty-state'); if(empty) empty.remove();
+      const html = pendingExams.map(id => ({ id, n: examName(id) })).filter(x => x.n).map(x => `<div class="profile-card md-soon" style="margin-bottom:14px;"><h4 style="margin:0 0 4px;">${esc(x.n)}</h4><p style="font-size:0.85rem; color:var(--ink-soft); margin:0;">⏳ Teachers are entering the marks. They will be published here soon.</p></div>`).join('');
+      body.insertAdjacentHTML('afterbegin', html);
+    };
+    window.renderMyMarksTab = function(body, s){
+      const r = o.apply(this, arguments);
+      if(isParentLogin()){
+        addCards(body);
+        if(pendingExams === null || Date.now() - pendingAt > 60000) refreshPending().then(ch => { if(ch && body.isConnected){ o.call(this, body, s); addCards(body); } });
+      }
+      return r;
+    };
+  }
 })();
