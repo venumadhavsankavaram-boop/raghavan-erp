@@ -2939,10 +2939,12 @@ async function handleHybrid(req, res, config) {
       );
       return res.status(201).json({ ok: true });
     } else {
-      const setClause = cols.filter(c => c !== 'id').map((c, i) => `${c} = $${i + 2}`).join(', ');
+      // Some tables (rooms, exam-hall-tickets, exam-room-config) have no real columns besides id — then SET is just extra.
+      const setParts = cols.filter(c => c !== 'id').map((c, i) => `${c} = $${i + 2}`);
       const nonIdVals = core.filter(f => f.col !== 'id').map(f => coreVals[f.app]);
+      setParts.push(`extra = $${nonIdVals.length + 2}::jsonb`);
       await sql.query(
-        `UPDATE ${table} SET ${setClause}, extra = $${nonIdVals.length + 2}::jsonb WHERE id = $1`,
+        `UPDATE ${table} SET ${setParts.join(', ')} WHERE id = $1`,
         [body.id, ...nonIdVals, JSON.stringify(extra)]
       );
       return res.status(200).json({ ok: true });
