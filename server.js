@@ -3747,8 +3747,11 @@ async function handleAttendanceSettings(req, res) {
 // DEMO_MODE=true: a showcase install with sample data. Nothing leaves the server —
 // no WhatsApp, no push notifications, no online payments.
 const DEMO_MODE = process.env.DEMO_MODE === 'true';
+// TEST_MODE=true: a private test copy (the preview) running on its OWN database. Nothing leaves the server
+// (no WhatsApp, push or online payments) and an orange "TEST COPY" ribbon is shown, so it can never be mistaken for the live school.
+const TEST_MODE = process.env.TEST_MODE === 'true';
 function razorpayConfigured() {
-  if (DEMO_MODE) return false;
+  if (DEMO_MODE || TEST_MODE) return false;
   return !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);
 }
 // ---- Online payments: how it is kept safe ----
@@ -4067,7 +4070,7 @@ app.get('/api/payments/status', (req, res) => {
 // every notify* function below silently no-ops on the push side — nothing
 // breaks, parents just don't get a browser/PWA notification yet.
 function webPushConfigured() {
-  if (DEMO_MODE) return false;
+  if (DEMO_MODE || TEST_MODE) return false;
   return !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
 }
 if (webPushConfigured()) {
@@ -4089,7 +4092,7 @@ if (webPushConfigured()) {
 // a 24-hour customer reply window) — the env vars below let a school point
 // at whatever name they got approved, without a code change.
 function whatsappConfigured() {
-  if (DEMO_MODE) return false;
+  if (DEMO_MODE || TEST_MODE) return false;
   return !!(process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN);
 }
 const WHATSAPP_DEFAULT_TEMPLATES = {
@@ -5742,7 +5745,7 @@ async function parentScopedKvValue(req, key, value) {
 
 // Lets the login page show the "demo" banner and the demo logins. Reveals nothing when not a demo.
 app.get('/api/demo-info', (req, res) => {
-  if (!DEMO_MODE) return res.status(200).json({ demo: false });
+  if (!DEMO_MODE) return res.status(200).json({ demo: false, test: TEST_MODE });
   return res.status(200).json({ demo: true, password: process.env.DEMO_PASSWORD || 'Demo@123',
     logins: [['demo.admin','Admin'],['demo.principal','Principal'],['demo.accountant','Accountant'],['demo.office','Office Assistant'],['demo.teacher','Teacher'],['demo.parent','Parent'],['demo.student','Student']] });
 });
@@ -7117,7 +7120,7 @@ app.get('/api/me', async (req, res) => {
 // MySQL/MariaDB version (the first version of this was written for Postgres and listed no tables here).
 // Admin only: the file holds every record, including login hashes.
 // Tables left out on purpose: `sessions` (live login tokens — useless in a restore and a risk if the file leaks).
-const BACKUP_SKIP_TABLES = ['sessions'];
+const BACKUP_SKIP_TABLES = ['sessions', 'auto_backups', 'auto_backup_parts'];
 // kv_store 'backup-status' = { lastAt, tables, rows, by } — written each time the Admin downloads a full backup,
 // so the app can show "last backup" and warn when it is overdue. Never blocks a backup if it can't be written.
 async function readBackupStatus() {
@@ -7208,6 +7211,151 @@ app.get('/api/backup', async (req, res) => {
     console.error('backup error:', err);
     return res.status(500).json({ error: 'Could not generate backup.' });
   }
+});
+
+// ---------- Automatic daily backups (kept inside this school's own database, last 30) ----------
+// Every night (about 02:30 India time) the whole database is dumped the same way as the Admin's "Download Backup",
+// squeezed (gzip) and stored in the `auto_backups` table. Only the newest 30 are kept. The Admin can list them,
+// take one now, download any of them. Never touches live data; a failure is logged and tried again the next hour.
+const AUTO_BACKUP_KEEP = 30;
+// Admin-controlled: kv_store 'auto-backup-settings' = { enabled, time:'HH:MM' (India time), everyDays:1|2|3|7, keep:7..90 }.
+const AB_DEFAULTS = { enabled: true, time: '02:30', everyDays: 1, keep: 30 };
+function abNormalize(v) {
+  const o = (v && typeof v === 'object') ? v : {};
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(o.time || ''));
+  const hh = m ? Math.min(23, Number(m[1])) : 2, mm = m ? Math.min(59, Number(m[2])) : 30;
+  const ed = [1, 2, 3, 7].includes(Number(o.everyDays)) ? Number(o.everyDays) : 1;
+  const keep = Math.max(7, Math.min(90, Math.round(Number(o.keep) || 30)));
+  return { enabled: o.enabled !== false, time: String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0'), everyDays: ed, keep };
+}
+async function abSettings() {
+  try { const r = await sql`SELECT value FROM kv_store WHERE \`key\` = 'auto-backup-settings'`; if (r[0]) return abNormalize(r[0].value); } catch (e) { /* defaults */ }
+  return { ...AB_DEFAULTS };
+}
+let autoBackupBusy = false;
+async function ensureAutoBackupTable() {
+  await sql.query(`CREATE TABLE IF NOT EXISTS auto_backups (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    created_at DATETIME NOT NULL,
+    day CHAR(10) NOT NULL,
+    kind VARCHAR(12) NOT NULL DEFAULT 'auto',
+    tables_n INT NOT NULL DEFAULT 0,
+    rows_n INT NOT NULL DEFAULT 0,
+    bytes INT NOT NULL DEFAULT 0,
+    KEY idx_day (day)
+  )`);
+  // The squeezed file is stored in 512 KB pieces so a small database packet limit on the host can never stop a backup.
+  await sql.query(`CREATE TABLE IF NOT EXISTS auto_backup_parts (
+    backup_id INT NOT NULL,
+    seq INT NOT NULL,
+    chunk MEDIUMBLOB NOT NULL,
+    PRIMARY KEY (backup_id, seq)
+  )`);
+}
+function istDay(d = new Date()) { return new Date(d.getTime() + 330 * 60000).toISOString().slice(0, 10); }
+async function buildBackupObject() {
+  const names = await backupTableNames();
+  const backup = { generatedAt: new Date().toISOString(), format: 'erp-full-backup-v2', serverTzOffsetMin: new Date().getTimezoneOffset(), skippedTables: BACKUP_SKIP_TABLES, counts: {}, totalRows: 0, tables: {} };
+  for (const name of names) {
+    const rows = await sql.query(`SELECT * FROM \`${name}\``);
+    backup.tables[name] = rows; backup.counts[name] = rows.length; backup.totalRows += rows.length;
+  }
+  backup.complete = true; backup.totalTables = names.length;
+  return backup;
+}
+async function runAutoBackup(kind = 'auto') {
+  const keepN = (await abSettings()).keep;
+  if (autoBackupBusy) return { ok: false, busy: true };
+  autoBackupBusy = true;
+  try {
+    await ensureAutoBackupTable();
+    const b = await buildBackupObject();
+    const gz = zlib.gzipSync(Buffer.from(JSON.stringify(b), 'utf8'), { level: 6 });
+    if (gz.length > 200 * 1024 * 1024) throw new Error('backup too large');
+    await sql`INSERT INTO auto_backups (created_at, day, kind, tables_n, rows_n, bytes) VALUES (${new Date().toISOString()}, ${istDay()}, ${kind}, ${b.totalTables}, ${b.totalRows}, ${gz.length})`;
+    const idRow = await sql`SELECT MAX(id) AS id FROM auto_backups`;
+    const bid = Number(idRow[0].id);
+    try {
+      for (let off = 0, seq = 0; off < gz.length; off += 512 * 1024, seq++) {
+        await sql`INSERT INTO auto_backup_parts (backup_id, seq, chunk) VALUES (${bid}, ${seq}, ${gz.subarray(off, off + 512 * 1024)})`;
+      }
+    } catch (e) {
+      await sql`DELETE FROM auto_backup_parts WHERE backup_id = ${bid}`; await sql`DELETE FROM auto_backups WHERE id = ${bid}`;
+      throw e;
+    }
+    await sql.query(`DELETE FROM auto_backups WHERE id NOT IN (SELECT id FROM (SELECT id FROM auto_backups ORDER BY id DESC LIMIT ${keepN}) x)`);
+    await sql.query(`DELETE FROM auto_backup_parts WHERE backup_id NOT IN (SELECT id FROM auto_backups)`);
+    return { ok: true, tables: b.totalTables, rows: b.totalRows, bytes: gz.length };
+  } finally { autoBackupBusy = false; }
+}
+async function autoBackupTick() {
+  if (DEMO_MODE) return;
+  try {
+    const st = await abSettings();
+    if (!st.enabled) return;
+    const ist = new Date(Date.now() + 330 * 60000);
+    const [th, tm] = st.time.split(':').map(Number);
+    if (ist.getUTCHours() * 60 + ist.getUTCMinutes() < th * 60 + tm) return;
+    await ensureAutoBackupTable();
+    const r = await sql`SELECT day FROM auto_backups WHERE kind = 'auto' ORDER BY id DESC LIMIT 1`;
+    if (r.length) {
+      const gap = Math.round((Date.parse(istDay() + 'T00:00:00Z') - Date.parse(String(r[0].day) + 'T00:00:00Z')) / 86400000);
+      if (gap < st.everyDays) return;
+    }
+    const out = await runAutoBackup('auto');
+    if (out.ok) console.log(`Automatic backup saved: ${out.tables} tables, ${out.rows} rows, ${out.bytes} bytes.`);
+  } catch (e) { console.error('autoBackupTick failed:', e.message); }
+}
+setTimeout(() => { autoBackupTick(); }, 3 * 60 * 1000);
+setInterval(() => { autoBackupTick(); }, 60 * 60 * 1000);
+app.get('/api/backup/auto/settings', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can see this.' });
+  return res.status(200).json(await abSettings());
+});
+app.put('/api/backup/auto/settings', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can change this.' });
+  try {
+    const v = abNormalize(req.body);
+    await sql`INSERT INTO kv_store (\`key\`, value) VALUES ('auto-backup-settings', ${JSON.stringify(v)}) ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP`;
+    auditNote(req.authUser.name, req.authUser.role, 'BACKUP_SETTINGS', 'backup', null, `auto backup ${v.enabled ? 'on' : 'off'}, ${v.time}, every ${v.everyDays} day(s), keep ${v.keep}`, clientIp(req));
+    return res.status(200).json(v);
+  } catch (e) { console.error('auto backup settings error:', e); return res.status(500).json({ error: 'Could not save the backup settings.' }); }
+});
+app.get('/api/backup/auto', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can see the automatic backups.' });
+  try {
+    await ensureAutoBackupTable();
+    const rows = await sql`SELECT id, created_at, day, kind, tables_n, rows_n, bytes FROM auto_backups ORDER BY id DESC`;
+    return res.status(200).json({ keep: (await abSettings()).keep, settings: await abSettings(), backups: rows.map(r => ({ id: r.id, at: r.created_at, day: r.day, kind: r.kind, tables: r.tables_n, rows: r.rows_n, bytes: r.bytes })) });
+  } catch (e) { console.error('auto backup list error:', e); return res.status(500).json({ error: 'Could not read the automatic backups.' }); }
+});
+app.post('/api/backup/auto/run', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can take a backup.' });
+  try {
+    const out = await runAutoBackup('manual');
+    if (out.busy) return res.status(409).json({ error: 'A backup is already running. Try again in a minute.' });
+    auditNote(req.authUser.name, req.authUser.role, 'BACKUP_SERVER_COPY', 'backup', null, 'backup copy saved on the server', clientIp(req));
+    return res.status(200).json(out);
+  } catch (e) { console.error('manual auto backup error:', e); return res.status(500).json({ error: 'Could not take the backup.' }); }
+});
+app.get('/api/backup/auto/:id', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can download a backup.' });
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Bad backup number.' });
+    const r = await sql`SELECT day, kind, tables_n, rows_n, bytes FROM auto_backups WHERE id = ${id}`;
+    if (!r.length) return res.status(404).json({ error: 'That backup is no longer kept.' });
+    const parts = await sql`SELECT chunk FROM auto_backup_parts WHERE backup_id = ${id} ORDER BY seq`;
+    const gzAll = Buffer.concat(parts.map(x => Buffer.from(x.chunk)));
+    if (gzAll.length !== Number(r[0].bytes)) return res.status(500).json({ error: 'That backup is damaged and cannot be opened.' });
+    auditNote(req.authUser.name, req.authUser.role, 'BACKUP_DOWNLOAD', 'backup', String(id), 'server backup ' + r[0].day + ' downloaded', clientIp(req));
+    const json = zlib.gunzipSync(gzAll);
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="erp-backup-${r[0].day}-${r[0].kind}.json"`);
+    res.setHeader('X-Backup-Tables', String(r[0].tables_n));
+    res.setHeader('X-Backup-Rows', String(r[0].rows_n));
+    return res.status(200).send(json);
+  } catch (e) { console.error('auto backup download error:', e); return res.status(500).json({ error: 'Could not open that backup.' }); }
 });
 
 // ---------- ONE-TIME: Neon -> GoDaddy MySQL data import ----------
