@@ -1470,6 +1470,7 @@ async function enforceDateLockKv(req, res, key) {
 async function handleKv(req, res, key) {
   if (!key) return res.status(400).json({ error: 'Missing key.' });
   if (key === 'date-lock-policy' && req.method === 'PUT' && (!req.authUser || req.authUser.role !== 'Admin')) return res.status(403).json({ error: 'Only the Admin can change this setting.' });
+  if ((key === 'admit-card-policy' || key === 'admit-card-exceptions') && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change the admit card fee rules.' });
   if (key === 'exam-releases' && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can release marks to students.' });
   if (key === 'portal-settings' && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change the parent portal settings.' });
   if (key === 'timetable-shared-subjects' && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change this setting.' });
@@ -2290,6 +2291,8 @@ const KV_KEY_TO_MODULE = {
   'timetable-periods': ['timetable'],
   'timetable-days': ['timetable'],
   'exam-releases': ['exams', 'result'],
+  'admit-card-policy': ['exams', 'result'],
+  'admit-card-exceptions': ['exams', 'result'],
   'portal-settings': ['dashboard'],
   'syllabus-topics': ['syllabus'],
   // 'homework-items' removed — it's now a real resource (see
@@ -5649,7 +5652,7 @@ const PARENT_SHARED_REFERENCE_RESOURCES = ['fee-structure', 'exam-defs', 'subjec
 // office sees (it holds only dates and percentages, nothing per-student).
 // The timetable's period times and working days are the same for everyone. 'timetable-entries' is also let through,
 // but only the student's OWN class and section is returned (see parentScopedKvValue), never the whole school's.
-const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings', 'syllabus-topics', 'fee-schedule', 'grading-scale', 'grading-schemes', 'timetable-periods', 'timetable-days', 'timetable-entries', 'exam-releases', 'portal-settings'];
+const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings', 'syllabus-topics', 'fee-schedule', 'grading-scale', 'grading-schemes', 'timetable-periods', 'timetable-days', 'timetable-entries', 'exam-releases', 'portal-settings', 'admit-card-policy'];
 // A Teacher can always READ the timetable (periods, working days and entries) so My Day and My Timetable can show their own
 // periods, even when the role's Roles & Permissions only switch on a timetable sub-tab. Writing still needs the Timetable permission.
 function teacherReadsTimetable(req, key) {
@@ -5683,6 +5686,22 @@ app.get('/api/my-exam-status', async (req, res) => {
     return res.status(200).json(rows.filter(r => !examIsReleased(rel, r.exam_id, student.class_name)).map(r => ({ examId: r.exam_id, state: 'entering' })));
   } catch (err) {
     console.error('my-exam-status error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+// Which exams the Admin/Principal has allowed this student's admit card for although fees are due. Only the student's own
+// exam ids come back (never the reason or the amount), so the portal can show "your hall ticket is approved".
+app.get('/api/my-admit-card-status', async (req, res) => {
+  try {
+    if (!req.authUser || !PARENT_LOGIN_ROLES.includes(req.authUser.role)) return res.status(403).json({ error: 'You do not have permission to access this.' });
+    const student = await getLinkedStudent(req.authUser.id);
+    if (!student) return res.status(200).json({ allowedExamIds: [] });
+    const r = await sql`SELECT value FROM kv_store WHERE \`key\` = 'admit-card-exceptions'`;
+    let v = r.length ? r[0].value : null; if (typeof v === 'string') { try { v = JSON.parse(v); } catch (_) { v = null; } }
+    const ids = (v && typeof v === 'object' && !Array.isArray(v)) ? Object.keys(v).filter(k => k.endsWith('|' + student.id)).map(k => k.slice(0, k.length - student.id.length - 1)) : [];
+    return res.status(200).json({ allowedExamIds: ids });
+  } catch (err) {
+    console.error('my-admit-card-status error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });
