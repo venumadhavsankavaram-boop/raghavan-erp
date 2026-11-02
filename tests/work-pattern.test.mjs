@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { load, test, done } from './helpers.mjs';
 const g = { attIsSingleSession: d => d >= '2027-03-15' && d <= '2027-05-31', staffList: [{ id: 'm', workSession: 'Morning' }, { id: 'f' }], staffAttendanceRecords: [], currentUser: { role: 'Teacher' }, attendanceRecords: [], attMarkDate: '2027-01-10', attMarkSession: 'Morning', staffAttMarkDate: '2027-01-10', staffAttMarkSession: 'Morning' };
-const c = load('09-fees-subtabs.js', ['staffWorkPattern', 'staffWorksSession', 'staffAttDayFractions', 'attIsLocked', 'staffAttIsLocked'], g);
+const c = load('09-fees-subtabs.js', ['staffWorkPattern', 'staffWorksSession', 'staffAttDayFractions', 'attEditLeftSec', 'attIsLocked', 'staffAttIsLocked'], { ...g, attLoadedAt: Date.now(), staffAttLoadedAt: Date.now() });
 test('one-session staff only appear in their own session', () => {
   assert.equal(c.staffWorksSession({ workSession: 'Morning' }, '2027-01-10', 'Morning'), true);
   assert.equal(c.staffWorksSession({ workSession: 'Morning' }, '2027-01-10', 'Afternoon'), false);
