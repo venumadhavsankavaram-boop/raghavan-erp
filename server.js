@@ -1473,6 +1473,10 @@ async function handleKv(req, res, key) {
   if ((key === 'admit-card-policy' || key === 'admit-card-exceptions') && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change the admit card fee rules.' });
   if (key === 'exam-releases' && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can release marks to students.' });
   if (key === 'portal-settings' && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change the parent portal settings.' });
+  if (key === 'teacher-portal-settings' && req.method === 'PUT') {
+    if (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal')) return res.status(403).json({ error: 'Only the Admin or Principal can change the teacher portal settings.' });
+    req.body = tpNormalize(req.body); _tpCache = { at: 0, v: null };
+  }
   if (key === 'timetable-shared-subjects' && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change this setting.' });
   if (await enforceDateLockKv(req, res, key)) return;
   if (ADMIN_ONLY_KV_KEYS.includes(key) && (!req.authUser || req.authUser.role !== 'Admin')) {
@@ -4620,6 +4624,7 @@ app.post('/api/study-material', async (req, res) => {
   try {
     const role = req.authUser && req.authUser.role;
     if (!role || !(MATERIAL_MGR.includes(role) || role === 'Teacher')) return res.status(403).json({ error: 'You do not have permission to upload study material.' });
+    if (await tpBlocked(req, res, 'studyMaterial', 'Study material')) return;
     const b = req.body || {};
     const className = String(b.className || '').trim(), section = String(b.section || '').trim(), subject = String(b.subject || '').trim();
     const title = String(b.title || '').trim().slice(0, 200);
@@ -4746,13 +4751,15 @@ app.post('/api/exam-plans', async (req, res) => {
   try {
     const role = req.authUser && req.authUser.role;
     if (!role || !(MATERIAL_MGR.includes(role) || role === 'Teacher')) return res.status(403).json({ error: 'You do not have permission to plan exams.' });
+    if (await tpBlocked(req, res, 'examPlans', 'Exam plans')) return;
     const r = await validatePlanBody(req, req.body || {}); if (r.error) return res.status(r.status || 400).json({ error: r.error });
     const v = r.v; const id = 'ep_' + crypto.randomBytes(8).toString('hex');
     const staffName = req.authUser.name || req.authUser.username || '';
     await sql`INSERT INTO exam_plans (id, exam_id, exam_name, class_name, section, subject, syllabus, max_marks, exam_date, start_time, duration_min, instructions, status, staff_id, staff_name, created_by_user_id, submitted_at)
       VALUES (${id}, ${v.examId}, ${v.examName}, ${v.className}, ${v.section}, ${v.subject}, ${v.syllabus}, ${v.maxMarks}, ${v.examDate}, ${v.startTime}, ${v.durationMin}, ${v.instructions}, 'Submitted', ${v.staffId}, ${staffName}, ${req.authUser.id}, CURRENT_TIMESTAMP)`;
-    res.status(201).json({ id });
-    notifyUsersByRole(['Admin', 'Principal'], { title: 'Exam plan to review', body: `${staffName}: ${v.subject} · ${v.className} ${v.section}${v.examName ? ' · ' + v.examName : ''}`, tag: 'approval', url: '/' }).catch(e => console.error('exam plan notify failed', e));
+    const tpAuto = await tpAutoApprove(req, 'plan', id);
+    res.status(201).json({ id, autoApproved: tpAuto });
+    if (!tpAuto) notifyUsersByRole(['Admin', 'Principal'], { title: 'Exam plan to review', body: `${staffName}: ${v.subject} · ${v.className} ${v.section}${v.examName ? ' · ' + v.examName : ''}`, tag: 'approval', url: '/' }).catch(e => console.error('exam plan notify failed', e));
   } catch (err) { console.error('exam-plan create error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 app.put('/api/exam-plans/:id', async (req, res) => {
@@ -4760,12 +4767,14 @@ app.put('/api/exam-plans/:id', async (req, res) => {
     const rows = await sql`SELECT * FROM exam_plans WHERE id = ${req.params.id}`;
     if (!rows.length) return res.status(404).json({ error: 'Not found.' });
     if (!(await planOwnerOk(req, rows[0]))) return res.status(403).json({ error: 'You do not have permission to change this.' });
+    if (await tpBlocked(req, res, 'examPlans', 'Exam plans')) return;
     if (rows[0].status === 'Approved' && !MATERIAL_MGR.includes(req.authUser.role)) return res.status(409).json({ error: 'This plan is already approved. Ask the Principal to change it.' });
     const r = await validatePlanBody(req, req.body || {}); if (r.error) return res.status(r.status || 400).json({ error: r.error });
     const v = r.v;
     await sql`UPDATE exam_plans SET exam_id = ${v.examId}, exam_name = ${v.examName}, class_name = ${v.className}, section = ${v.section}, subject = ${v.subject}, syllabus = ${v.syllabus}, max_marks = ${v.maxMarks}, exam_date = ${v.examDate}, start_time = ${v.startTime}, duration_min = ${v.durationMin}, instructions = ${v.instructions}, status = 'Submitted', review_note = '', submitted_at = CURRENT_TIMESTAMP WHERE id = ${req.params.id}`;
-    res.status(200).json({ ok: true });
-    notifyUsersByRole(['Admin', 'Principal'], { title: 'Exam plan resubmitted', body: `${rows[0].staff_name}: ${v.subject} · ${v.className} ${v.section}`, tag: 'approval', url: '/' }).catch(() => {});
+    const tpAuto = await tpAutoApprove(req, 'plan', req.params.id);
+    res.status(200).json({ ok: true, autoApproved: tpAuto });
+    if (!tpAuto) notifyUsersByRole(['Admin', 'Principal'], { title: 'Exam plan resubmitted', body: `${rows[0].staff_name}: ${v.subject} · ${v.className} ${v.section}`, tag: 'approval', url: '/' }).catch(() => {});
   } catch (err) { console.error('exam-plan update error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 app.post('/api/exam-plans/:id/review', async (req, res) => {
@@ -4940,12 +4949,14 @@ app.post('/api/online-exams', async (req, res) => {
   try {
     const role = req.authUser && req.authUser.role;
     if (!role || !(MATERIAL_MGR.includes(role) || role === 'Teacher')) return res.status(403).json({ error: 'You do not have permission to set exams.' });
+    if (await tpBlocked(req, res, 'onlineExams', 'Online exams')) return;
     const r = await oeValidate(req, req.body || {}); if (r.error) return res.status(r.status || 400).json({ error: r.error });
     const v = r.v; const id = 'oe_' + crypto.randomBytes(8).toString('hex'); const staffName = req.authUser.name || req.authUser.username || '';
     await sql`INSERT INTO online_exams (id, title, class_name, section, subject, instructions, duration_min, start_ms, end_ms, total_marks, questions, status, staff_id, staff_name, created_by_user_id, show_key)
       VALUES (${id}, ${v.title}, ${v.className}, ${v.section}, ${v.subject}, ${v.instructions}, ${v.durationMin}, ${v.startMs}, ${v.endMs}, ${v.total}, ${JSON.stringify(v.questions)}, 'Submitted', ${v.staffId}, ${staffName}, ${req.authUser.id}, ${v.showKey})`;
-    res.status(201).json({ id });
-    notifyUsersByRole(['Admin', 'Principal'], { title: 'Online exam to review', body: `${staffName}: ${v.title} · ${v.className} ${v.section}`, tag: 'approval', url: '/' }).catch(e => console.error('online exam notify failed', e));
+    const tpAuto = await tpAutoApprove(req, 'exam', id);
+    res.status(201).json({ id, autoApproved: tpAuto });
+    if (!tpAuto) notifyUsersByRole(['Admin', 'Principal'], { title: 'Online exam to review', body: `${staffName}: ${v.title} · ${v.className} ${v.section}`, tag: 'approval', url: '/' }).catch(e => console.error('online exam notify failed', e));
   } catch (err) { console.error('online-exam create error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 app.put('/api/online-exams/:id', async (req, res) => {
@@ -4953,14 +4964,16 @@ app.put('/api/online-exams/:id', async (req, res) => {
     const rows = await sql`SELECT * FROM online_exams WHERE id = ${req.params.id}`;
     if (!rows.length) return res.status(404).json({ error: 'Not found.' });
     if (!(await oeOwnerOk(req, rows[0]))) return res.status(403).json({ error: 'You do not have permission to change this.' });
+    if (await tpBlocked(req, res, 'onlineExams', 'Online exams')) return;
     const cnt = await sql`SELECT COUNT(*) AS n FROM online_attempts WHERE exam_id = ${req.params.id}`;
     if (oeNum(cnt[0].n) > 0) return res.status(409).json({ error: 'Students have already started this exam, so it can no longer be edited.' });
     if (rows[0].status === 'Approved' && !MATERIAL_MGR.includes(req.authUser.role)) return res.status(409).json({ error: 'This exam is already approved. Ask the Principal to change it.' });
     const r = await oeValidate(req, req.body || {}); if (r.error) return res.status(r.status || 400).json({ error: r.error });
     const v = r.v;
     await sql`UPDATE online_exams SET title = ${v.title}, class_name = ${v.className}, section = ${v.section}, subject = ${v.subject}, instructions = ${v.instructions}, duration_min = ${v.durationMin}, start_ms = ${v.startMs}, end_ms = ${v.endMs}, total_marks = ${v.total}, questions = ${JSON.stringify(v.questions)}, show_key = ${v.showKey}, status = 'Submitted', review_note = '' WHERE id = ${req.params.id}`;
-    res.status(200).json({ ok: true });
-    notifyUsersByRole(['Admin', 'Principal'], { title: 'Online exam resubmitted', body: `${rows[0].staff_name}: ${v.title} · ${v.className} ${v.section}`, tag: 'approval', url: '/' }).catch(() => {});
+    const tpAuto = await tpAutoApprove(req, 'exam', req.params.id);
+    res.status(200).json({ ok: true, autoApproved: tpAuto });
+    if (!tpAuto) notifyUsersByRole(['Admin', 'Principal'], { title: 'Online exam resubmitted', body: `${rows[0].staff_name}: ${v.title} · ${v.className} ${v.section}`, tag: 'approval', url: '/' }).catch(() => {});
   } catch (err) { console.error('online-exam update error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 app.post('/api/online-exams/:id/review', async (req, res) => {
@@ -6617,6 +6630,80 @@ async function teacherMayTeach(scope, item) {
   let secs = rows[0].sections; if (typeof secs === 'string') { try { secs = JSON.parse(secs); } catch (_) { secs = []; } }
   return Array.isArray(secs) && secs.length > 0 && secs.every(mine);
 }
+// ---------- Teacher portal controls (Admin Tools > Teacher portal) ----------
+// kv 'teacher-portal-settings'. Defaults keep today's behaviour exactly; every rule is checked here on the server.
+const TP_DEFAULTS = {
+  features: { homework: true, studyMaterial: true, examPlans: true, onlineExams: true },
+  approvals: { examPlans: 'review', onlineExams: 'review' },
+  windows: { attendanceBackDays: null, marksLockAfterRelease: false },
+  visibility: { parentContacts: true, healthDetails: true, classTeacherSeesAllMarks: false },
+  language: 'en',
+};
+function tpNormalize(b) {
+  b = (b && typeof b === 'object') ? b : {};
+  const f = b.features || {}, a = b.approvals || {}, w = b.windows || {}, v = b.visibility || {};
+  const d = TP_DEFAULTS;
+  const bool = (x, def) => (typeof x === 'boolean' ? x : def);
+  const back = (w.attendanceBackDays === null || w.attendanceBackDays === '' || w.attendanceBackDays === undefined) ? null : Math.max(0, Math.min(365, parseInt(w.attendanceBackDays, 10)));
+  return {
+    features: { homework: bool(f.homework, d.features.homework), studyMaterial: bool(f.studyMaterial, d.features.studyMaterial), examPlans: bool(f.examPlans, d.features.examPlans), onlineExams: bool(f.onlineExams, d.features.onlineExams) },
+    approvals: { examPlans: a.examPlans === 'auto' ? 'auto' : 'review', onlineExams: a.onlineExams === 'auto' ? 'auto' : 'review' },
+    windows: { attendanceBackDays: Number.isFinite(back) ? back : null, marksLockAfterRelease: bool(w.marksLockAfterRelease, false) },
+    visibility: { parentContacts: bool(v.parentContacts, true), healthDetails: bool(v.healthDetails, true), classTeacherSeesAllMarks: bool(v.classTeacherSeesAllMarks, false) },
+    language: b.language === 'te' ? 'te' : 'en',
+  };
+}
+let _tpCache = { at: 0, v: null };
+async function teacherPortalSettings() {
+  if (_tpCache.v && Date.now() - _tpCache.at < 8000) return _tpCache.v;
+  let v = null;
+  try { const r = await sql`SELECT value FROM kv_store WHERE \`key\` = 'teacher-portal-settings'`; v = r.length ? r[0].value : null; if (typeof v === 'string') v = JSON.parse(v); } catch (_) { v = null; }
+  _tpCache = { at: Date.now(), v: tpNormalize(v) };
+  return _tpCache.v;
+}
+// A Teacher login is refused when the Admin/Principal has switched that feature off. Everyone else is unaffected.
+async function tpBlocked(req, res, feature, label) {
+  if (!req.authUser || req.authUser.role !== 'Teacher') return false;
+  const s = await teacherPortalSettings();
+  if (s.features[feature] !== false) return false;
+  res.status(403).json({ error: label + ' is switched off for teachers by the school. Please ask the Admin or Principal.', code: 'TEACHER_FEATURE_OFF' });
+  return true;
+}
+// When the school has chosen "no review needed", a Teacher's exam plan / online exam is approved the moment it is saved.
+async function tpAutoApprove(req, kind, id) {
+  if (!req.authUser || req.authUser.role !== 'Teacher') return false;
+  const s = await teacherPortalSettings();
+  if ((kind === 'plan' ? s.approvals.examPlans : s.approvals.onlineExams) !== 'auto') return false;
+  let row;
+  if (kind === 'plan') {
+    await sql`UPDATE exam_plans SET status = 'Approved', review_note = '', reviewed_by = 'Auto-approved (school setting)', reviewed_at = CURRENT_TIMESTAMP WHERE id = ${id}`;
+    row = (await sql`SELECT * FROM exam_plans WHERE id = ${id}`)[0];
+  } else {
+    row = (await sql`SELECT * FROM online_exams WHERE id = ${id}`)[0];
+    if (!row || Number(row.end_ms) <= Date.now()) return false;
+    await sql`UPDATE online_exams SET status = 'Approved', review_note = '', reviewed_by = 'Auto-approved (school setting)', reviewed_at = CURRENT_TIMESTAMP WHERE id = ${id}`;
+  }
+  (async () => {
+    try {
+      if (!row) return;
+      const kids = await sql`SELECT id FROM students WHERE class_name = ${row.class_name} AND section = ${row.section} AND (status IS NULL OR LOWER(status) = 'active') AND deleted_at IS NULL`;
+      for (const k of kids) await sendPushToStudent(k.id, kind === 'plan'
+        ? { title: 'Exam planned', body: `${row.subject}${row.exam_name ? ' (' + row.exam_name + ')' : ''}. Syllabus is in the portal.`, tag: 'exam-plan', url: '/' }
+        : { title: 'Online exam scheduled', body: `${row.subject}: ${row.title} — ${row.duration_min} minutes. Open the portal to take it.`, tag: 'online-exam', url: '/' });
+    } catch (e) { console.error('auto-approve notify failed', e); }
+  })();
+  return true;
+}
+const TP_CONTACT_FIELDS = ['fatherPhone', 'motherPhone', 'guardianPhone', 'contact', 'phone', 'whatsapp', 'email', 'fatherEmail', 'motherEmail', 'fatherAddress', 'motherAddress', 'address', 'permanentAddress'];
+const TP_HEALTH_FIELDS = ['blood', 'bloodGroup', 'caste', 'subCaste', 'religion', 'disability', 'medicalNotes', 'allergies', 'aadhaar', 'aadhar'];
+function tpStripStudent(o, vis) {
+  const out = { ...o };
+  if (!vis.parentContacts) TP_CONTACT_FIELDS.forEach(k => { if (k in out) out[k] = ''; });
+  if (!vis.healthDetails) TP_HEALTH_FIELDS.forEach(k => { if (k in out) out[k] = ''; });
+  return out;
+}
+function tpDaysBetween(a, b) { const t = x => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(x || '')); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN; }; return Math.round((t(a) - t(b)) / 86400000); }
+
 async function getTeacherScope(userId) {
   const staff = await getMyStaffFull(userId);
   if (!staff) return { staffId: null, classTeacherOf: null, subjectSections: [] };
@@ -7515,7 +7602,8 @@ app.all('/api/:resource', async (req, res) => {
       if (!pairs.length) return res.status(200).json([]);
       const rows = await sql`SELECT * FROM students WHERE deleted_at IS NULL`;
       const filtered = rows.filter(r => pairs.some(p => p.className === r.class_name && p.section === r.section));
-      return res.status(200).json(filtered.map(r => studentMediaLight(hybridToAppShape(r, HYBRID_RESOURCES.students.core))));
+      const tpVis = (await teacherPortalSettings()).visibility;
+      return res.status(200).json(filtered.map(r => tpStripStudent(studentMediaLight(hybridToAppShape(r, HYBRID_RESOURCES.students.core)), tpVis)));
     }
     // A Teacher login only ever gets to see or touch attendance for the one
     // class they're the Class Teacher of, and exam marks for the
@@ -7541,6 +7629,7 @@ app.all('/api/:resource', async (req, res) => {
         else if (req.method === 'DELETE') ok = false;
       }
       if (!ok) return res.status(403).json({ error: 'You can only manage homework for a class and subject you are assigned to teach.' });
+      if (req.method !== 'DELETE' && await tpBlocked(req, res, 'homework', 'Homework')) return;
     }
     if (req.authUser && req.authUser.role === 'Teacher' && (resource === 'attendance' || resource === 'exam-results')) {
       const scope = await getTeacherScope(req.authUser.id);
@@ -7564,19 +7653,27 @@ app.all('/api/:resource', async (req, res) => {
           const inScope = targetStudentId && scope.classTeacherOf &&
             (await sql`SELECT 1 FROM students WHERE id = ${targetStudentId} AND class_name = ${scope.classTeacherOf.className} AND section = ${scope.classTeacherOf.section}`).length > 0;
           if (!inScope) return res.status(403).json({ error: 'You can only manage attendance for your own homeroom class.' });
+          const tpBack = (await teacherPortalSettings()).windows.attendanceBackDays;
+          if (tpBack !== null) {
+            let tpDate = (req.body || {}).date;
+            if (req.method === 'DELETE') { const ex2 = req.query.id ? await sql`SELECT date FROM attendance_records WHERE id = ${req.query.id}` : []; tpDate = ex2.length ? ex2[0].date : null; }
+            if (tpDate && tpDaysBetween(todayInSchoolTz(), tpDate) > tpBack) return res.status(403).json({ error: tpBack === 0 ? 'The school allows teachers to mark or change attendance for today only.' : `The school allows teachers to mark or change attendance only for the last ${tpBack} day${tpBack === 1 ? '' : 's'}. Please ask the Admin or Principal.`, code: 'ATTENDANCE_WINDOW' });
+          }
         }
       }
       if (resource === 'exam-results') {
         const isMySubjectSection = (subject, className, section) =>
           scope.subjectSections.some(ss => ss.subject === subject && ss.className === className && ss.section === section);
         if (req.method === 'GET') {
-          if (!scope.subjectSections.length) return res.status(200).json([]);
+          const tpAllMarks = (await teacherPortalSettings()).visibility.classTeacherSeesAllMarks;
+          if (!scope.subjectSections.length && !(tpAllMarks && scope.classTeacherOf)) return res.status(200).json([]);
           const allRows = await sql`SELECT * FROM exam_results FORCE INDEX (idx_exam_results_created_at) ORDER BY created_at ASC`;
           const studentIds = [...new Set(allRows.map(r => r.student_id))];
           const classMap = await studentClassMap(studentIds);
           const filtered = allRows.filter(r => {
             const cls = classMap[r.student_id];
-            return cls && isMySubjectSection(r.subject, cls.className, cls.section);
+            if (cls && isMySubjectSection(r.subject, cls.className, cls.section)) return true;
+            return !!(cls && tpAllMarks && scope.classTeacherOf && cls.className === scope.classTeacherOf.className && cls.section === scope.classTeacherOf.section);
           });
           return res.status(200).json(filtered.map(r => simpleToAppShape(r, SIMPLE_RESOURCES['exam-results'].fields)));
         }
@@ -7594,6 +7691,12 @@ app.all('/api/:resource', async (req, res) => {
           const cls = targetStudentId ? (await studentClassMap([targetStudentId]))[targetStudentId] : null;
           const inScope = cls && targetSubject && isMySubjectSection(targetSubject, cls.className, cls.section);
           if (!inScope) return res.status(403).json({ error: 'You can only enter marks for a class/subject you are assigned to teach.' });
+          if ((await teacherPortalSettings()).windows.marksLockAfterRelease) {
+            let tpExam = (req.body || {}).examId;
+            if (req.method === 'DELETE') { const ex3 = req.query.id ? await sql`SELECT exam_id FROM exam_results WHERE id = ${req.query.id}` : []; tpExam = ex3.length ? ex3[0].exam_id : null; }
+            const tpRel = await readExamReleases();
+            if (tpExam && tpRel && examIsReleased(tpRel, tpExam, cls.className)) return res.status(403).json({ error: 'These marks are already released to students, so they are locked for teachers. Please ask the Admin or Principal to change them.', code: 'MARKS_LOCKED' });
+          }
         }
       }
     }
