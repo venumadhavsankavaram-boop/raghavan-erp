@@ -84,6 +84,34 @@ try {
   list = await call('GET', '/api/payments', A.ck); const v1 = list.j.find(x => x.id === 'zpay1'); ok('the voided payment is kept, marked void (not deleted)', !!v1 && (v1.voided === true || v1.voided === 1 || v1.voided === 'true'), v1);
   ok('teacher cannot delete payments', [403, 405].includes((await call('DELETE', '/api/payments?id=zpay1', T.ck)).s));
 
+  // ================= BULK PARENT LOGINS + SLIPS =================
+  console.log('\nBulk logins');
+  for (const [id, f, l] of [['zb1', 'Ravi', 'Kumar'], ['zb2', 'Ravi', 'Kumar'], ['zb3', 'Sita', 'Devi-Rao']]) {
+    await call('POST', '/api/students', A.ck, { id, firstName: f, lastName: l, className: '3rd Class', section: 'B', status: 'Active', admissionNo: 'ZZ-' + id });
+  }
+  ok('teacher cannot use the bulk login maker', (await call('POST', '/api/student-logins/bulk', T.ck, { className: '3rd Class', section: 'B', password: 'student@123' })).s === 403);
+  ok('parent cannot print slips', (await call('GET', '/api/student-logins/slips', P1.ck)).s === 403);
+  ok('a too-easy starting password is refused', (await call('POST', '/api/student-logins/bulk', A.ck, { className: '3rd Class', section: 'B', password: '123456' })).s === 400);
+  const pv = await call('POST', '/api/student-logins/bulk', A.ck, { className: '3rd Class', section: 'B', password: 'student@123', preview: true });
+  ok('preview counts students that need a login (and creates nothing)', pv.s === 200 && pv.j.needLogin === 3, pv.j);
+  const mkb = await call('POST', '/api/student-logins/bulk', A.ck, { className: '3rd Class', section: 'B', password: 'student@123', forceChange: true });
+  ok('bulk create makes one login per student', mkb.s === 200 && mkb.j.created.length === 3, mkb.j);
+  const names = (mkb.j.created || []).map(x => x.username);
+  ok('usernames come from the student name and never repeat', new Set(names).size === 3 && names.includes('ravikumar') && names.includes('ravikumar2') && names.includes('sitadevirao'), names);
+  const again = await call('POST', '/api/student-logins/bulk', A.ck, { className: '3rd Class', section: 'B', password: 'student@123' });
+  ok('running it again creates nobody twice', again.s === 200 && again.j.created.length === 0 && again.j.alreadyHave === 3, again.j);
+  const pl = await login('ravikumar', 'student@123'); ok('the parent signs in with the starting password', pl.s === 200, pl.s);
+  const me = await call('GET', '/api/me', pl.ck); ok('and is told to choose their own password', me.s === 200 && me.j.mustChangePassword === true && me.j.role === 'Parent', me.j);
+  const sl = await call('GET', '/api/student-logins/slips?className=3rd%20Class&section=B', A.ck);
+  ok('the slips list has all three with the starting password', sl.s === 200 && sl.j.slips.length === 3 && sl.j.slips.every(x => x.password === 'student@123'), sl.j);
+  ok('slips for another class are not mixed in', (await call('GET', '/api/student-logins/slips?className=1st%20Class', A.ck)).j.slips.length === 0);
+  const ul = await call('GET', '/api/users', A.ck); ok('the users list never carries the starting password', ul.s === 200 && !JSON.stringify(ul.j).includes('student@123'));
+  const ch = await call('POST', '/api/account/password', pl.ck, { current: 'student@123', next: 'MyOwn#Pass9' });
+  ok('the parent sets their own password', ch.s === 200, ch.j);
+  const sl2 = await call('GET', '/api/student-logins/slips?className=3rd%20Class&section=B', A.ck);
+  ok('that parent drops off the slip list (password no longer printable)', sl2.j.slips.length === 2 && !sl2.j.slips.some(x => x.username === 'ravikumar'), sl2.j);
+  ok('old starting password stops working', (await login('ravikumar', 'student@123')).s === 401);
+
   // ================= MARKS RELEASE =================
   console.log('\nMarks release');
   const setRel = async (rel, ck) => call('PUT', '/api/kv/exam-releases', ck, rel);

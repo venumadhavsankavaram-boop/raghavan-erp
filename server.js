@@ -296,6 +296,8 @@ async function ensureSchema() {
   await addColumnIfMissing('users', 'twofa_recovery TEXT');
   await addColumnIfMissing('users', 'twofa_last_step BIGINT');
   await addColumnIfMissing('users', 'must_change_password TINYINT DEFAULT 0');
+  // Starting password written on a printed login slip; cleared the moment the parent sets their own. Never sent by the generic users API.
+  await addColumnIfMissing('users', 'initial_pw VARCHAR(100)');
   // A user's own "My Account" profile photo (base64 data URL, capped at 2MB
   // client-side — see PHOTO_UPLOAD_MAX_BYTES in index.html, well under this
   // server's 25mb JSON body limit). This column didn't exist before, so the
@@ -2686,6 +2688,7 @@ async function handleUsers(req, res) {
       const setClause = cols.filter(c => c !== 'id').map((c, i) => `${c} = $${i + 2}`).join(', ');
       const updateVals = [body.id, ...fields.filter(f => f.col !== 'id').map(f => (body[f.app] === undefined ? null : body[f.app]))];
       await sql.query(`UPDATE ${table} SET ${setClause} WHERE id = $1`, updateVals);
+      if ((req.body || {}).password) await sql`UPDATE users SET initial_pw = NULL WHERE id = ${body.id}`.catch(() => {});
       return res.status(200).json({ ok: true });
     }
   }
@@ -6097,7 +6100,7 @@ app.post('/api/account/password', async (req, res) => {
     if (!ok) return res.status(400).json({ error: 'Current password is incorrect.' });
     if (next === current) return res.status(400).json({ error: 'Choose a new password that is different from the current one.' });
     const hash = await bcrypt.hash(next, 10);
-    await sql`UPDATE users SET password = ${hash}, must_change_password = 0 WHERE id = ${req.authUser.id}`;
+    await sql`UPDATE users SET password = ${hash}, must_change_password = 0, initial_pw = NULL WHERE id = ${req.authUser.id}`;
     await sql`UPDATE sessions SET must_change = 0 WHERE user_id = ${req.authUser.id}`.catch(() => {});
     // Anyone else signed in with the old password (another device, a stolen session) is signed out; this device stays in.
     const mine = parseCookies(req).sid ? hashSessionToken(parseCookies(req).sid) : '';
@@ -6142,7 +6145,7 @@ app.post('/api/admin/users/reset-password', async (req, res) => {
     const problem = passwordProblem(temp, target.role);
     if (problem) return res.status(400).json({ error: problem });
     const hash = await bcrypt.hash(temp, 10);
-    await sql`UPDATE users SET password = ${hash}, must_change_password = 1 WHERE id = ${target.id}`;
+    await sql`UPDATE users SET password = ${hash}, must_change_password = 1, initial_pw = NULL WHERE id = ${target.id}`;
     await sql`DELETE FROM sessions WHERE user_id = ${target.id}`.catch(() => {});
     await sql`UPDATE password_reset_requests SET status = 'done', resolved_at = now() WHERE user_id = ${target.id} AND status = 'pending'`.catch(() => {});
     auditNote(req.authUser.name, req.authUser.role, 'PASSWORD_RESET', 'users', target.id, `temporary password set for ${target.username} (${target.role}); user must change it at next sign-in`, clientIp(req));
@@ -7211,6 +7214,60 @@ app.get('/api/backup', async (req, res) => {
     console.error('backup error:', err);
     return res.status(500).json({ error: 'Could not generate backup.' });
   }
+});
+
+// ---------- Bulk student/parent logins + printable login slips (Admin only) ----------
+// POST /api/student-logins/bulk  { className, section ('' = every section), password, forceChange, preview }
+//   Creates a Parent login for every active student of that class who has none yet. Username = the student's name
+//   (letters/digits only, a number is added if taken). preview:true only counts. The starting password is kept in users.initial_pw
+//   until the parent sets their own, so the slips can be printed again; it is erased at that moment.
+// GET /api/student-logins/slips?className=&section=  -> logins still on their starting password (what the slips need).
+function slugName(name) { return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 20) || 'student'; }
+app.post('/api/student-logins/bulk', async (req, res) => {
+  try {
+    if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can create logins in bulk.' });
+    const b = req.body || {};
+    const className = String(b.className || '').trim(), section = String(b.section || '').trim();
+    if (!className) return res.status(400).json({ error: 'Choose a class first.' });
+    const password = String(b.password || '');
+    const problem = passwordProblem(password, 'Parent'); if (problem) return res.status(400).json({ error: problem });
+    const kids = section
+      ? await sql`SELECT id, first_name, last_name, class_name, section, admission_no FROM students WHERE class_name = ${className} AND section = ${section} AND (status IS NULL OR LOWER(status) = 'active') AND deleted_at IS NULL ORDER BY first_name, last_name`
+      : await sql`SELECT id, first_name, last_name, class_name, section, admission_no FROM students WHERE class_name = ${className} AND (status IS NULL OR LOWER(status) = 'active') AND deleted_at IS NULL ORDER BY section, first_name, last_name`;
+    const have = new Set((await sql`SELECT linked_student_id FROM users WHERE role IN ('Student', 'Parent') AND deleted_at IS NULL AND linked_student_id IS NOT NULL AND linked_student_id <> ''`).map(r => r.linked_student_id));
+    const todo = kids.filter(k => !have.has(k.id));
+    if (b.preview) return res.status(200).json({ students: kids.length, needLogin: todo.length, alreadyHave: kids.length - todo.length });
+    if (!todo.length) return res.status(200).json({ created: [], students: kids.length, alreadyHave: kids.length });
+    const taken = new Set((await sql`SELECT username FROM users`).map(r => String(r.username || '').toLowerCase()));
+    const hash = await bcrypt.hash(password, 10);
+    const force = b.forceChange === false ? 0 : 1;
+    const created = [];
+    for (const k of todo) {
+      const full = ((k.first_name || '') + ' ' + (k.last_name || '')).trim();
+      const base = slugName(full); let cand = base, n = 1;
+      while (taken.has(cand)) { n++; cand = base + n; }
+      taken.add(cand);
+      const id = 'u_' + crypto.randomBytes(8).toString('hex');
+      await sql`INSERT INTO users (id, name, username, password, role, linked_student_id, recovery_code, must_change_password, initial_pw)
+        VALUES (${id}, ${full}, ${cand}, ${hash}, 'Parent', ${k.id}, ${crypto.randomBytes(6).toString('hex').toUpperCase()}, ${force}, ${password})`;
+      created.push({ studentId: k.id, name: full, className: k.class_name, section: k.section, admissionNo: k.admission_no || '', username: cand });
+    }
+    auditNote(req.authUser.name, req.authUser.role, 'BULK_LOGINS', 'users', null, `created ${created.length} parent login(s) for ${className}${section ? ' ' + section : ''}`, clientIp(req));
+    return res.status(200).json({ created, students: kids.length, alreadyHave: kids.length - todo.length });
+  } catch (err) { console.error('bulk student logins error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.get('/api/student-logins/slips', async (req, res) => {
+  try {
+    if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can print login slips.' });
+    const className = String(req.query.className || '').trim(), section = String(req.query.section || '').trim();
+    const rows = await sql`SELECT u.username, u.initial_pw, s.id, s.first_name, s.last_name, s.class_name, s.section, s.admission_no
+      FROM users u JOIN students s ON s.id = u.linked_student_id
+      WHERE u.deleted_at IS NULL AND u.initial_pw IS NOT NULL AND u.initial_pw <> '' AND s.deleted_at IS NULL AND (s.status IS NULL OR LOWER(s.status) = 'active')
+      ORDER BY s.class_name, s.section, s.first_name, s.last_name`;
+    const list = rows.filter(r => (!className || r.class_name === className) && (!section || r.section === section))
+      .map(r => ({ studentId: r.id, name: ((r.first_name || '') + ' ' + (r.last_name || '')).trim(), className: r.class_name, section: r.section, admissionNo: r.admission_no || '', username: r.username, password: r.initial_pw }));
+    return res.status(200).json({ slips: list });
+  } catch (err) { console.error('login slips error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 
 // ---------- Automatic daily backups (kept inside this school's own database, last 30) ----------
