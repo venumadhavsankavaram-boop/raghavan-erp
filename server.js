@@ -7270,6 +7270,22 @@ app.get('/api/student-logins/slips', async (req, res) => {
   } catch (err) { console.error('login slips error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 
+// GET /api/student-logins/push-status?className=&section=  -> which parent/student logins have at least one phone with notifications on.
+app.get('/api/student-logins/push-status', async (req, res) => {
+  try {
+    if (!req.authUser || !['Admin', 'Principal'].includes(req.authUser.role)) return res.status(403).json({ error: 'Only an Admin or Principal can view this.' });
+    const className = String(req.query.className || '').trim(), section = String(req.query.section || '').trim();
+    const rows = await sql`SELECT u.id AS uid, u.username, s.id, s.first_name, s.last_name, s.class_name, s.section, s.admission_no,
+        (SELECT COUNT(*) FROM push_subscriptions p WHERE p.user_id = u.id) AS devices
+      FROM users u JOIN students s ON s.id = u.linked_student_id
+      WHERE u.deleted_at IS NULL AND u.role IN ('Student', 'Parent') AND s.deleted_at IS NULL AND (s.status IS NULL OR LOWER(s.status) = 'active')
+      ORDER BY s.class_name, s.section, s.first_name, s.last_name`;
+    const list = rows.filter(r => (!className || r.class_name === className) && (!section || r.section === section))
+      .map(r => ({ studentId: r.id, name: ((r.first_name || '') + ' ' + (r.last_name || '')).trim(), className: r.class_name, section: r.section, admissionNo: r.admission_no || '', username: r.username, on: Number(r.devices) > 0 }));
+    return res.status(200).json({ pushConfigured: webPushConfigured(), total: list.length, on: list.filter(x => x.on).length, students: list });
+  } catch (err) { console.error('push status error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+
 // ---------- Automatic daily backups (kept inside this school's own database, last 30) ----------
 // Every night (about 02:30 India time) the whole database is dumped the same way as the Admin's "Download Backup",
 // squeezed (gzip) and stored in the `auto_backups` table. Only the newest 30 are kept. The Admin can list them,

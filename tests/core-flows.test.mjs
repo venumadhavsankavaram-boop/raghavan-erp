@@ -111,6 +111,9 @@ try {
   const sl2 = await call('GET', '/api/student-logins/slips?className=3rd%20Class&section=B', A.ck);
   ok('that parent drops off the slip list (password no longer printable)', sl2.j.slips.length === 2 && !sl2.j.slips.some(x => x.username === 'ravikumar'), sl2.j);
   ok('old starting password stops working', (await login('ravikumar', 'student@123')).s === 401);
+  ok('a parent cannot see who has notifications on', (await call('GET', '/api/student-logins/push-status', P1.ck)).s === 403);
+  const ps = await call('GET', '/api/student-logins/push-status?className=3rd%20Class&section=B', A.ck);
+  ok('admin sees the notification status (nobody has subscribed yet)', ps.s === 200 && ps.j.total === 3 && ps.j.on === 0 && ps.j.students.every(x => x.on === false), ps.j);
 
   // ================= MARKS RELEASE =================
   console.log('\nMarks release');

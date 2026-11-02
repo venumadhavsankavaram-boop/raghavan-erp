@@ -43,6 +43,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
       '<div class="blk-btns"><button class="btn btn-primary" id="blkCreate">Create logins</button>' +
       '<button class="btn" id="blkPrint">🖨️ Print login slips</button></div>' +
       '<div class="blk-hint" id="blkPush" style="margin:10px 0 0;"></div>' +
+      '<div class="blk-btns" style="margin-top:6px;"><button class="btn" id="blkNotif">🔔 Who has notifications on?</button></div>' +
       '<div class="blk-out" id="blkOut">' + keepOut + '</div>';
     pushLine(card);
     card.querySelector('#blkCls').onchange = e => { S.cls = e.target.value; S.sec = ''; draw(card); preview(card); };
@@ -51,6 +52,25 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     card.querySelector('#blkForce').onchange = e => { S.force = e.target.checked; };
     card.querySelector('#blkCreate').onclick = () => create(card);
     card.querySelector('#blkPrint').onclick = () => printSlips(card);
+    card.querySelector('#blkNotif').onclick = () => notifStatus(card);
+  }
+  async function notifStatus(card){
+    try{
+      const j = await api('GET', '/api/student-logins/push-status?className=' + encodeURIComponent(S.cls) + '&section=' + encodeURIComponent(S.sec));
+      const where = S.cls ? (S.cls + (S.sec ? ' ' + S.sec : '')) : 'all classes';
+      const off = j.students.filter(x => !x.on);
+      let h = '<b>' + j.on + ' of ' + j.total + '</b> parents in ' + esc(where) + ' have notifications on' + (j.total ? ' (' + Math.round(100 * j.on / j.total) + '%)' : '') + '.';
+      if(!j.pushConfigured) h += ' <span style="color:#b3261e;">Phone notifications are not set up for this school yet, so nobody can turn them on.</span>';
+      if(off.length){
+        h += '<div style="margin-top:8px;max-height:220px;overflow:auto;border:1px solid #e1e6f0;border-radius:10px;padding:6px 10px;">' +
+          off.map(x => '⚠️ ' + esc(x.name) + ' <span style="color:#5b6784;">· ' + esc(x.className) + ' ' + esc(x.section || '') + (x.admissionNo ? ' · #' + esc(x.admissionNo) : '') + '</span>').join('<br>') + '</div>' +
+          '<div class="blk-btns"><button class="btn" id="blkNCopy">Copy list</button><button class="btn" id="blkNPrint">🖨️ Print list</button></div>';
+      } else if(j.total){ h += ' <span class="blk-ok">Everyone here is on. 🎉</span>'; }
+      out(card, h);
+      const txt = 'Parents without notifications (' + where + '):\n' + off.map(x => x.name + ' - ' + x.className + ' ' + (x.section || '')).join('\n');
+      const c = card.querySelector('#blkNCopy'); if(c) c.onclick = async () => { try{ await navigator.clipboard.writeText(txt); toast('List copied.'); }catch(e){ toast('Could not copy.'); } };
+      const pr = card.querySelector('#blkNPrint'); if(pr) pr.onclick = () => printHtml('<!doctype html><html><head><meta charset="utf-8"><title>Notifications not on</title><style>body{font:14px Arial;padding:20px}li{margin:3px 0}</style></head><body><h3>Parents without notifications — ' + esc(where) + '</h3><ol>' + off.map(x => '<li>' + esc(x.name) + ' — ' + esc(x.className) + ' ' + esc(x.section || '') + '</li>').join('') + '</ol></body></html>');
+    }catch(e){ out(card, '<span style="color:#b3261e;">' + esc(e.message) + '</span>'); }
   }
   async function pushLine(card){
     const el = card.querySelector('#blkPush'); if(!el) return;
@@ -166,12 +186,11 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
 
 /* ---------- Parent/Student home: "Turn on notifications" button ---------- */
 (function(){
-  const KEY = 'ppNotifHide';
   let state = null;   // 'off' | 'on' | 'blocked' | 'unsupported' | 'unconfigured'
   const lang = () => { try{ return localStorage.getItem('portalLang') === 'te' ? 'te' : 'en'; }catch(e){ return 'en'; } };
   const TX = {
-    en: { t: 'Get fee, marks and homework alerts on your phone', b: 'Turn on notifications', n: 'Not now', ok: 'Notifications are on for this phone.', blocked: 'Notifications are blocked. Open your phone Settings → Apps → Chrome (or this app) → Notifications and allow them.' },
-    te: { t: 'ఫీజు, మార్కులు, హోంవర్క్ అలర్ట్‌లు మీ ఫోన్‌లో పొందండి', b: 'నోటిఫికేషన్లు ఆన్ చేయండి', n: 'ఇప్పుడు వద్దు', ok: 'ఈ ఫోన్‌లో నోటిఫికేషన్లు ఆన్ అయ్యాయి.', blocked: 'నోటిఫికేషన్లు బ్లాక్ అయ్యాయి. ఫోన్ Settings → Apps → Chrome → Notifications లో అనుమతించండి.' }
+    en: { t: 'Get fee, marks and homework alerts on your phone', b: 'Turn on notifications', n: 'Remind me later', ok: 'Notifications are on for this phone.', blocked: 'Notifications are blocked. Open your phone Settings → Apps → Chrome (or this app) → Notifications and allow them.' },
+    te: { t: 'ఫీజు, మార్కులు, హోంవర్క్ అలర్ట్‌లు మీ ఫోన్‌లో పొందండి', b: 'నోటిఫికేషన్లు ఆన్ చేయండి', n: 'తర్వాత గుర్తు చేయండి', ok: 'ఈ ఫోన్‌లో నోటిఫికేషన్లు ఆన్ అయ్యాయి.', blocked: 'నోటిఫికేషన్లు బ్లాక్ అయ్యాయి. ఫోన్ Settings → Apps → Chrome → Notifications లో అనుమతించండి.' }
   };
   const isParent = () => typeof currentUser !== 'undefined' && currentUser && ['Parent', 'Student'].includes(currentUser.role);
   async function check(){
@@ -185,15 +204,14 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
   }
   function paint(){
     const hero = document.getElementById('ppHero'); if(!hero || document.getElementById('ppNotif')) return;
-    if(!isParent() || state !== 'off') return;
-    try{ if(localStorage.getItem(KEY) === '1') return; }catch(e){}
+    if(!isParent() || (state !== 'off' && state !== 'blocked')) return;
     const L = TX[lang()];
     const d = document.createElement('div'); d.id = 'ppNotif';
     d.style.cssText = 'margin:12px 0;padding:12px 14px;border-radius:14px;background:#fff7e0;border:1px solid #f0d78a;display:flex;gap:10px;align-items:center;flex-wrap:wrap;';
     d.innerHTML = '<span style="font-size:1.4rem;">🔔</span><div style="flex:1 1 200px;font-weight:600;color:#4a3b00;">' + L.t + '</div>' +
-      '<button type="button" class="btn btn-primary" id="ppNotifOn">' + L.b + '</button><button type="button" class="btn" id="ppNotifNo">' + L.n + '</button>';
+      '<button type="button" class="btn btn-primary" id="ppNotifOn">' + L.b + '</button>';
     hero.insertAdjacentElement('afterend', d);
-    d.querySelector('#ppNotifNo').onclick = () => { try{ localStorage.setItem(KEY, '1'); }catch(e){} d.remove(); };
+    if(state === 'blocked'){ d.querySelector('div').textContent = L.blocked; d.querySelector('#ppNotifOn').remove(); }
     d.querySelector('#ppNotifOn').onclick = async () => {
       try{ if(typeof window.ncEnablePush === 'function') await window.ncEnablePush(); }catch(e){}
       await check();
