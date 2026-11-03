@@ -122,7 +122,7 @@ try {
   ok('the health address shows nothing private', Object.keys(hp.j).sort().join() === 'db,ms,ok', hp.j);
   ok('a parent cannot open the detailed health report', (await call('GET', '/api/health/details', P1.ck)).s === 403);
   const hd = await call('GET', '/api/health/details', A.ck);
-  ok('admin sees the detailed health report', hd.s === 200 && hd.j.db.ok === true && typeof hd.j.problemsLast24h === 'number' && 'backup' in hd.j, hd.j);
+  ok('admin sees the detailed health report', hd.s === 200 && hd.j.db.ok === true && typeof hd.j.problemsLast24h === 'number' && 'backup' in hd.j && Array.isArray(hd.j.biggestTables), hd.j);
 
   // ================= MARKS RELEASE =================
   console.log('\nMarks release');

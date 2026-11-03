@@ -66,6 +66,7 @@
       else h += row(Date.now() - Date.parse(last.at) < (b.everyDays + 2) * 86400000, 'Last backup ' + ago(last.at) + ' · ' + Number(last.rows).toLocaleString('en-IN') + ' records');
       h += row(d.push.configured, d.push.configured ? 'Phone notifications are set up' : 'Phone notifications are <b>not set up</b> (parents and staff get no phone alerts)');
       h += row(d.problemsLast24h === 0, d.problemsLast24h === 0 ? 'No server problems in the last 24 hours' : d.problemsLast24h + ' server problem(s) in the last 24 hours — see Admin Tools → Server problems');
+      if(d.biggestTables && d.biggestTables.length) h += '<details style="margin-top:6px;"><summary style="cursor:pointer;">Biggest tables in the database</summary>' + d.biggestTables.map(t => '<div style="padding:1px 0;">' + esc(t.name) + ' — ' + t.mb + ' MB · about ' + Number(t.rows).toLocaleString('en-IN') + ' rows</div>').join('') + '</details>';
       h += '<div style="color:var(--ink-soft);margin-top:4px;">Server running for ' + (d.uptimeMinutes >= 120 ? Math.round(d.uptimeMinutes / 60) + ' hours' : d.uptimeMinutes + ' minutes') + ' · memory ' + d.memoryMb + ' MB</div>';
       box.innerHTML = h;
     }catch(e){ box.innerHTML = '<span style="color:#b3261e;">Could not read the health check (' + esc(e.message) + ').</span>'; }

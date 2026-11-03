@@ -7316,6 +7316,11 @@ app.get('/api/health/details', async (req, res) => {
     const t0 = Date.now(); await sql`SELECT 1 AS ok`; const dbMs = Date.now() - t0;
     let lastBackup = null;
     try { await ensureAutoBackupTable(); const r = await sql`SELECT created_at, kind, rows_n FROM auto_backups ORDER BY id DESC LIMIT 1`; if (r[0]) lastBackup = { at: r[0].created_at, kind: r[0].kind, rows: Number(r[0].rows_n) }; } catch (e) { /* none */ }
+    let biggestTables = [];
+    try {
+      const tr = await sql`SELECT table_name AS name, table_rows AS row_est, (data_length + index_length) AS bytes FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY (data_length + index_length) DESC LIMIT 8`;
+      biggestTables = tr.map(x => ({ name: x.name || x.TABLE_NAME, rows: Number(x.row_est || x.TABLE_ROWS || 0), mb: Math.round(Number(x.bytes || x.BYTES || 0) / 10485.76) / 100 }));
+    } catch (e) { /* not available on this database */ }
     const st = await abSettings();
     const errs = await loadServerErrors();
     const dayAgo = Date.now() - 86400000;
@@ -7324,6 +7329,7 @@ app.get('/api/health/details', async (req, res) => {
       db: { ok: true, ms: dbMs },
       backup: { enabled: st.enabled, everyDays: st.everyDays, last: lastBackup, failure: lastBackupFailure },
       push: { configured: webPushConfigured() },
+      biggestTables,
       problemsLast24h: recent,
       uptimeMinutes: Math.round((Date.now() - SERVER_STARTED_AT) / 60000),
       memoryMb: Math.round(process.memoryUsage().rss / 1048576),
