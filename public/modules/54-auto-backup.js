@@ -72,9 +72,28 @@
       else h += row(Date.now() - Date.parse(last.at) < (b.everyDays + 2) * 86400000, 'Last backup ' + ago(last.at) + ' · ' + Number(last.rows).toLocaleString('en-IN') + ' records');
       h += row(d.push.configured, d.push.configured ? 'Phone notifications are set up' : 'Phone notifications are <b>not set up</b> (parents and staff get no phone alerts)');
       h += row(d.problemsLast24h === 0, d.problemsLast24h === 0 ? 'No server problems in the last 24 hours' : d.problemsLast24h + ' server problem(s) in the last 24 hours — see Admin Tools → Server problems');
+      if(d.dbSize){
+        const z = d.dbSize, fmt = m => m >= 1024 ? (m / 1024).toFixed(2) + ' GB' : Math.round(m) + ' MB';
+        let line = '<b>Database size: ' + fmt(z.totalMb) + '</b> · school records ' + fmt(z.dataMb) + ' + saved backups ' + fmt(z.backupMb);
+        if(z.limitMb) line += ' · <b>' + z.usedPct + '%</b> of your ' + fmt(z.limitMb) + ' limit' + (z.usedPct >= 80 ? ' ⚠️' : '');
+        const g = z.growth30 != null ? ('+' + z.growth30 + ' MB in the last 30 days') : (z.growth7 != null ? ('+' + z.growth7 + ' MB in the last 7 days') : 'growth appears after a few days of tracking');
+        h += row(!z.limitMb || z.usedPct < 80, line + '<div style="color:var(--ink-soft);margin-left:22px;">' + esc(g) + ' · approximate · <a href="#" id="dbLimitLink">' + (z.limitMb ? 'change plan limit' : 'set plan limit') + '</a></div>' +
+          '<div id="dbLimitBox" style="display:none;margin:6px 0 0 22px;"><input type="number" id="dbLimitVal" min="1" step="any" placeholder="e.g. 5" style="width:90px;padding:4px 6px;border:1px solid var(--border);border-radius:8px;"> <select id="dbLimitUnit" style="padding:4px;border-radius:8px;border:1px solid var(--border);"><option value="1024">GB</option><option value="1">MB</option></select> <button class="btn btn-sm btn-primary" id="dbLimitSave">Save</button> <button class="btn btn-sm" id="dbLimitClear">Remove</button><div style="color:var(--ink-soft);font-size:0.75rem;margin-top:3px;">Enter the database size your GoDaddy plan allows. You get a phone alert at 80%.</div></div>');
+      }
       if(d.biggestTables && d.biggestTables.length) h += '<details style="margin-top:6px;"><summary style="cursor:pointer;">Biggest tables in the database</summary>' + d.biggestTables.map(t => '<div style="padding:1px 0;">' + esc(t.name) + ' — ' + t.mb + ' MB · about ' + Number(t.rows).toLocaleString('en-IN') + ' rows</div>').join('') + '</details>';
       h += '<div style="color:var(--ink-soft);margin-top:4px;">Server running for ' + (d.uptimeMinutes >= 120 ? Math.round(d.uptimeMinutes / 60) + ' hours' : d.uptimeMinutes + ' minutes') + ' · memory ' + d.memoryMb + ' MB</div>';
       box.innerHTML = h;
+      const lk = box.querySelector('#dbLimitLink');
+      if(lk){
+        lk.onclick = e => { e.preventDefault(); const b2 = box.querySelector('#dbLimitBox'); b2.style.display = b2.style.display === 'none' ? 'block' : 'none'; };
+        const put = async mb => {
+          try{ const r2 = await fetch('/api/health/db-limit', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mb }) }); const j = await r2.json().catch(()=>({})); if(!r2.ok) throw new Error(j.error || 'HTTP ' + r2.status);
+            if(window.showToast) showToast('Plan limit saved.'); loadHealth(hc);
+          }catch(err){ if(window.showToast) showToast('Could not save (' + err.message + ').'); }
+        };
+        box.querySelector('#dbLimitSave').onclick = () => { const v = Number(box.querySelector('#dbLimitVal').value), u = Number(box.querySelector('#dbLimitUnit').value); if(!(v > 0)){ if(window.showToast) showToast('Enter a number first.'); return; } put(Math.round(v * u)); };
+        box.querySelector('#dbLimitClear').onclick = () => put(0);
+      }
     }catch(e){ box.innerHTML = '<span style="color:#b3261e;">Could not read the health check (' + esc(e.message) + ').</span>'; }
   }
 

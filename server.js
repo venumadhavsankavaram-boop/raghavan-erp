@@ -7310,12 +7310,68 @@ app.get('/api/health', async (req, res) => {
     return res.status(200).json({ ok: true, db: true, ms: Date.now() - t0 });
   } catch (e) { return res.status(503).json({ ok: false, db: false }); }
 });
+// ---- Database size: how big the school's database is, how fast it grows, and (once the Admin enters the plan limit) how full ----
+async function kvRead(key) {
+  try { const r = await sql`SELECT value FROM kv_store WHERE \`key\` = ${key}`; let v = r[0] && r[0].value; if (typeof v === 'string') { try { v = JSON.parse(v); } catch (e) { /* keep */ } } return v === undefined ? null : v; } catch (e) { return null; }
+}
+async function kvWrite(key, val) {
+  await sql`INSERT INTO kv_store (\`key\`, value) VALUES (${key}, ${JSON.stringify(val)}) ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP`;
+}
+async function dbSizeNow() {
+  const rows = await sql`SELECT table_name AS name, (data_length + index_length) AS bytes FROM information_schema.tables WHERE table_schema = DATABASE()`;
+  let total = 0, backup = 0;
+  for (const r of rows) { const b = Number(r.bytes || r.BYTES || 0), n = String(r.name || r.TABLE_NAME || ''); total += b; if (n === 'auto_backups' || n === 'auto_backup_parts') backup += b; }
+  return { totalMb: Math.round(total / 10485.76) / 100, backupMb: Math.round(backup / 10485.76) / 100 };
+}
+async function recordDbSize() {
+  try {
+    const day = istDay();
+    let hist = await kvRead('db-size-history'); if (!Array.isArray(hist)) hist = [];
+    if (hist.length && hist[hist.length - 1].day === day) return hist;
+    const n = await dbSizeNow();
+    hist.push({ day, mb: n.totalMb }); if (hist.length > 400) hist = hist.slice(-400);
+    await kvWrite('db-size-history', hist);
+    return hist;
+  } catch (e) { console.error('recordDbSize failed:', e.message); return []; }
+}
+function dbGrowth(hist, nowMb, days) {
+  const cut = Date.parse(istDay() + 'T00:00:00Z') - days * 86400000;
+  let ref = null; for (const h of hist) { if (Date.parse(h.day + 'T00:00:00Z') <= cut) ref = h; }
+  return ref ? Math.round((nowMb - ref.mb) * 100) / 100 : null;
+}
+async function dbSizeTick() {
+  try {
+    await recordDbSize();
+    const lim = Number(await kvRead('db-size-limit-mb')) || 0;
+    if (lim > 0) { const n = await dbSizeNow(); if (n.totalMb >= lim * 0.8) alertAdmins('db_size_80', '⚠️ Database is getting full', `The school database uses ${Math.round(n.totalMb)} MB of the ${Math.round(lim)} MB limit you set. Open Admin Tools to check.`); }
+  } catch (e) { console.error('dbSizeTick failed:', e.message); }
+}
+setTimeout(() => { dbSizeTick(); }, 4 * 60 * 1000);
+setInterval(() => { dbSizeTick(); }, 6 * 60 * 60 * 1000);
+app.put('/api/health/db-limit', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can change this.' });
+  try {
+    const raw = (req.body || {}).mb;
+    if (raw === null || raw === '' || raw === 0) { await kvWrite('db-size-limit-mb', 0); return res.status(200).json({ limitMb: 0 }); }
+    const mb = Math.round(Number(raw));
+    if (!(mb >= 50 && mb <= 10485760)) return res.status(400).json({ error: 'Enter a size between 50 MB and 10,000 GB.' });
+    await kvWrite('db-size-limit-mb', mb);
+    auditNote(req.authUser.name, req.authUser.role, 'DB_LIMIT_SET', 'settings', null, `database plan limit set to ${mb} MB`, clientIp(req));
+    return res.status(200).json({ limitMb: mb });
+  } catch (e) { console.error('db limit error:', e); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
 app.get('/api/health/details', async (req, res) => {
   if (!req.authUser || !['Admin', 'Principal'].includes(req.authUser.role)) return res.status(403).json({ error: 'Only an Admin or Principal can view this.' });
   try {
     const t0 = Date.now(); await sql`SELECT 1 AS ok`; const dbMs = Date.now() - t0;
     let lastBackup = null;
     try { await ensureAutoBackupTable(); const r = await sql`SELECT created_at, kind, rows_n FROM auto_backups ORDER BY id DESC LIMIT 1`; if (r[0]) lastBackup = { at: r[0].created_at, kind: r[0].kind, rows: Number(r[0].rows_n) }; } catch (e) { /* none */ }
+    let dbSizeInfo = null;
+    try {
+      const now = await dbSizeNow(); const hist = await recordDbSize();
+      const lim = Number(await kvRead('db-size-limit-mb')) || 0;
+      dbSizeInfo = { totalMb: now.totalMb, backupMb: now.backupMb, dataMb: Math.round((now.totalMb - now.backupMb) * 100) / 100, limitMb: lim || null, usedPct: lim ? Math.round(1000 * now.totalMb / lim) / 10 : null, growth7: dbGrowth(hist, now.totalMb, 7), growth30: dbGrowth(hist, now.totalMb, 30), trackedDays: hist.length };
+    } catch (e) { /* not available */ }
     let biggestTables = [];
     try {
       const tr = await sql`SELECT table_name AS name, table_rows AS row_est, (data_length + index_length) AS bytes FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY (data_length + index_length) DESC LIMIT 8`;
@@ -7329,6 +7385,7 @@ app.get('/api/health/details', async (req, res) => {
       db: { ok: true, ms: dbMs },
       backup: { enabled: st.enabled, everyDays: st.everyDays, last: lastBackup, failure: lastBackupFailure },
       push: { configured: webPushConfigured() },
+      dbSize: dbSizeInfo,
       biggestTables,
       problemsLast24h: recent,
       uptimeMinutes: Math.round((Date.now() - SERVER_STARTED_AT) / 60000),

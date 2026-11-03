@@ -124,6 +124,15 @@ try {
   const hd = await call('GET', '/api/health/details', A.ck);
   ok('admin sees the detailed health report', hd.s === 200 && hd.j.db.ok === true && typeof hd.j.problemsLast24h === 'number' && 'backup' in hd.j && Array.isArray(hd.j.biggestTables), hd.j);
 
+  ok('the health report carries the database size', hd.j.dbSize && hd.j.dbSize.totalMb > 0 && hd.j.dbSize.limitMb === null, hd.j.dbSize);
+  ok('a parent cannot set the plan limit', (await call('PUT', '/api/health/db-limit', P1.ck, { mb: 5000 })).s === 403);
+  ok('a silly plan limit is refused', (await call('PUT', '/api/health/db-limit', A.ck, { mb: 3 })).s === 400);
+  ok('admin sets the plan limit', (await call('PUT', '/api/health/db-limit', A.ck, { mb: 5120 })).j.limitMb === 5120);
+  const hd2 = await call('GET', '/api/health/details', A.ck);
+  ok('the report now shows percent used', hd2.j.dbSize.limitMb === 5120 && typeof hd2.j.dbSize.usedPct === 'number', hd2.j.dbSize);
+  await call('PUT', '/api/health/db-limit', A.ck, { mb: 0 });
+  ok('the limit can be removed', (await call('GET', '/api/health/details', A.ck)).j.dbSize.limitMb === null);
+
   // ================= PHOTO SHRINKER =================
   console.log('\nPhoto shrinker');
   await call('POST', '/api/students', A.ck, { id: 'zph1', firstName: 'Photo', lastName: 'Big', className: '3rd Class', section: 'B', status: 'Active', admissionNo: 'ZZ-ph1', photo: 'data:image/jpeg;base64,' + 'A'.repeat(90000) });
