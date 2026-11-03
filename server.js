@@ -7388,14 +7388,14 @@ app.post('/api/photo-shrink/done', async (req, res) => {
 // squeezed (gzip) and stored in the `auto_backups` table. Only the newest 30 are kept. The Admin can list them,
 // take one now, download any of them. Never touches live data; a failure is logged and tried again the next hour.
 const AUTO_BACKUP_KEEP = 30;
-// Admin-controlled: kv_store 'auto-backup-settings' = { enabled, time:'HH:MM' (India time), everyDays:1|2|3|7, keep:7..90 }.
+// Admin-controlled: kv_store 'auto-backup-settings' = { enabled, time:'HH:MM' (India time), everyDays:1|2|3|7, keep:2..90 }.
 const AB_DEFAULTS = { enabled: true, time: '02:30', everyDays: 1, keep: 30 };
 function abNormalize(v) {
   const o = (v && typeof v === 'object') ? v : {};
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(o.time || ''));
   const hh = m ? Math.min(23, Number(m[1])) : 2, mm = m ? Math.min(59, Number(m[2])) : 30;
   const ed = [1, 2, 3, 7].includes(Number(o.everyDays)) ? Number(o.everyDays) : 1;
-  const keep = Math.max(7, Math.min(90, Math.round(Number(o.keep) || 30)));
+  const keep = Math.max(2, Math.min(90, Math.round(Number(o.keep) || 30)));
   return { enabled: o.enabled !== false, time: String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0'), everyDays: ed, keep };
 }
 async function abSettings() {

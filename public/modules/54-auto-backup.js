@@ -9,7 +9,7 @@
     try{
       const r = await fetch('/api/backup/auto'); if(!r.ok) throw new Error('HTTP ' + r.status);
       const d = await r.json();
-      renderSettings(card, d.settings);
+      renderSettings(card, d.settings, d.backups && d.backups[0] ? d.backups[0].bytes : 0);
       if(!d.backups.length){ list.innerHTML = '<span style="color:var(--ink-soft);">No copy yet — the first one is saved automatically at the time set above, or press “Take one now”.</span>'; return; }
       list.innerHTML = '<div style="color:var(--ink-soft);margin-bottom:6px;">Newest first · the server keeps the last ' + d.keep + '</div>' +
         '<div style="max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:10px;"><table style="width:100%;font-size:0.78rem;"><tbody>' +
@@ -18,7 +18,7 @@
           '</td><td style="padding:5px 10px;text-align:right;"><a href="#" data-bk="' + b.id + '" data-day="' + esc(b.day) + '" style="color:var(--teal);font-weight:600;">Download</a></td></tr>').join('') + '</tbody></table></div>';
     }catch(e){ list.textContent = 'Could not load (' + e.message + ').'; }
   }
-  function renderSettings(card, st){
+  function renderSettings(card, st, lastBytes){
     const box = card.querySelector('#autoBackupSettings'); if(!box || !st) return;
     const sel = 'padding:5px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface,#fff);color:inherit;';
     box.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;padding:10px 12px;border:1px solid var(--border);border-radius:12px;margin-bottom:12px;">' +
@@ -26,10 +26,16 @@
       '<button class="btn btn-sm" id="abToggle">' + (st.enabled ? 'Stop' : 'Start') + '</button>' +
       '<label style="font-size:0.78rem;">Time <input type="time" id="abTime" value="' + st.time + '" style="' + sel + '"></label>' +
       '<label style="font-size:0.78rem;">How often <select id="abEvery" style="' + sel + '">' + [[1,'Every day'],[2,'Every 2 days'],[3,'Every 3 days'],[7,'Every week']].map(o => '<option value="' + o[0] + '"' + (o[0] === st.everyDays ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select></label>' +
-      '<label style="font-size:0.78rem;">Keep last <select id="abKeep" style="' + sel + '">' + [7,14,30,60,90].map(n => '<option' + (n === st.keep ? ' selected' : '') + '>' + n + '</option>').join('') + '</select> copies</label>' +
+      '<label style="font-size:0.78rem;">Keep last <input type="number" id="abKeep" min="2" max="90" step="1" value="' + st.keep + '" style="width:64px;' + sel + '"> copies</label>' +
+      '<span id="abKeepHint" style="font-size:0.75rem;color:var(--ink-soft);"></span>' +
       '<button class="btn btn-primary btn-sm" id="abSave">Save</button></div>';
+    const hint = function(){
+      const n = Math.max(2, Math.min(90, Math.round(Number(box.querySelector('#abKeep').value) || 0)));
+      box.querySelector('#abKeepHint').textContent = lastBytes ? '≈ ' + fmtSize(lastBytes * n) + ' of server space at today\'s size' : '';
+    };
+    box.querySelector('#abKeep').oninput = hint; hint();
     const save = async function(patch){
-      const body = Object.assign({}, st, { time: box.querySelector('#abTime').value || st.time, everyDays: Number(box.querySelector('#abEvery').value), keep: Number(box.querySelector('#abKeep').value) }, patch || {});
+      const body = Object.assign({}, st, { time: box.querySelector('#abTime').value || st.time, everyDays: Number(box.querySelector('#abEvery').value), keep: Math.max(2, Math.min(90, Math.round(Number(box.querySelector('#abKeep').value) || st.keep))) }, patch || {});
       try{ const r = await fetch('/api/backup/auto/settings', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
         const d = await r.json().catch(()=>({})); if(!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
         if(window.showToast) showToast('Backup settings saved.'); load(card);

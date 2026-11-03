@@ -143,6 +143,12 @@ try {
   const stu = await call('GET', '/api/students', A.ck);
   ok('other fields of the student are untouched', (stu.j.find(x => x.id === 'zph1') || {}).firstName === 'Photo');
 
+  const ks = await call('PUT', '/api/backup/auto/settings', A.ck, { enabled: true, time: '02:30', everyDays: 1, keep: 4 });
+  ok('admin can keep just 4 backups', ks.s === 200 && ks.j.keep === 4, ks.j);
+  const ks2 = await call('PUT', '/api/backup/auto/settings', A.ck, { enabled: true, time: '02:30', everyDays: 1, keep: 1 });
+  ok('keeping fewer than 2 is raised to 2', ks2.s === 200 && ks2.j.keep === 2, ks2.j);
+  await call('PUT', '/api/backup/auto/settings', A.ck, { enabled: true, time: '02:30', everyDays: 1, keep: 7 });
+
   // ================= MARKS RELEASE =================
   console.log('\nMarks release');
   const setRel = async (rel, ck) => call('PUT', '/api/kv/exam-releases', ck, rel);
