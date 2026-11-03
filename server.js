@@ -1190,6 +1190,7 @@ const PUBLIC_API_ROUTES = [
   { path: '/api/login/2fa/email', methods: ['POST'] },
   { path: '/api/password-reset-request', methods: ['POST'] },
   { path: '/api/demo-info', methods: ['GET'] },
+  { path: '/api/health', methods: ['GET', 'HEAD'] },
   { path: '/api/logout', methods: ['POST'] },
   { path: '/api/vendor-support-login', methods: ['GET'] },
   { path: '/api/vendor/admission-inquiries', methods: ['GET'] },
@@ -7286,6 +7287,51 @@ app.get('/api/student-logins/push-status', async (req, res) => {
   } catch (err) { console.error('push status error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 
+// ---------- Site health: a public "is it alive" address for an outside monitor + an Admin health card ----------
+// GET /api/health  (no sign-in; reveals nothing private): 200 {ok:true} when the server and database answer, 503 otherwise.
+// Point a free uptime monitor (e.g. UptimeRobot) at it and it phones the Admin when the site goes down.
+const SERVER_STARTED_AT = Date.now();
+let lastBackupFailure = null;   // { at, message } - cleared by the next successful backup
+const healthAlertedAt = new Map();
+async function alertAdmins(tag, title, body) {
+  try {
+    const t = Date.now();
+    if ((healthAlertedAt.get(tag) || 0) > t - 20 * 3600 * 1000) return;   // at most one phone alert per problem per ~day
+    healthAlertedAt.set(tag, t);
+    const admins = await sql`SELECT id FROM users WHERE role = 'Admin' AND deleted_at IS NULL`;
+    for (const a of admins) await sendPushToUser(a.id, { tag, title, body, url: '/' });
+  } catch (e) { console.error('alertAdmins failed:', e.message); }
+}
+app.get('/api/health', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const t0 = Date.now();
+    await sql`SELECT 1 AS ok`;
+    return res.status(200).json({ ok: true, db: true, ms: Date.now() - t0 });
+  } catch (e) { return res.status(503).json({ ok: false, db: false }); }
+});
+app.get('/api/health/details', async (req, res) => {
+  if (!req.authUser || !['Admin', 'Principal'].includes(req.authUser.role)) return res.status(403).json({ error: 'Only an Admin or Principal can view this.' });
+  try {
+    const t0 = Date.now(); await sql`SELECT 1 AS ok`; const dbMs = Date.now() - t0;
+    let lastBackup = null;
+    try { await ensureAutoBackupTable(); const r = await sql`SELECT created_at, kind, rows_n FROM auto_backups ORDER BY id DESC LIMIT 1`; if (r[0]) lastBackup = { at: r[0].created_at, kind: r[0].kind, rows: Number(r[0].rows_n) }; } catch (e) { /* none */ }
+    const st = await abSettings();
+    const errs = await loadServerErrors();
+    const dayAgo = Date.now() - 86400000;
+    const recent = errs.filter(x => Date.parse(x.at) > dayAgo).reduce((n, x) => n + (x.count || 1), 0);
+    return res.status(200).json({
+      db: { ok: true, ms: dbMs },
+      backup: { enabled: st.enabled, everyDays: st.everyDays, last: lastBackup, failure: lastBackupFailure },
+      push: { configured: webPushConfigured() },
+      problemsLast24h: recent,
+      uptimeMinutes: Math.round((Date.now() - SERVER_STARTED_AT) / 60000),
+      memoryMb: Math.round(process.memoryUsage().rss / 1048576),
+      testCopy: !!(typeof TEST_MODE !== 'undefined' && TEST_MODE)
+    });
+  } catch (e) { console.error('health details error:', e); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+
 // ---------- Automatic daily backups (kept inside this school's own database, last 30) ----------
 // Every night (about 02:30 India time) the whole database is dumped the same way as the Admin's "Download Backup",
 // squeezed (gzip) and stored in the `auto_backups` table. Only the newest 30 are kept. The Admin can list them,
@@ -7358,7 +7404,12 @@ async function runAutoBackup(kind = 'auto') {
     }
     await sql.query(`DELETE FROM auto_backups WHERE id NOT IN (SELECT id FROM (SELECT id FROM auto_backups ORDER BY id DESC LIMIT ${keepN}) x)`);
     await sql.query(`DELETE FROM auto_backup_parts WHERE backup_id NOT IN (SELECT id FROM auto_backups)`);
+    lastBackupFailure = null;
     return { ok: true, tables: b.totalTables, rows: b.totalRows, bytes: gz.length };
+  } catch (e) {
+    lastBackupFailure = { at: new Date().toISOString(), message: String(e && e.message || e).slice(0, 160) };
+    if (kind === 'auto') alertAdmins('backup_failed', '⚠️ Nightly backup failed', 'The automatic backup could not be saved. Open Admin Tools to check, or press Take one now.');
+    throw e;
   } finally { autoBackupBusy = false; }
 }
 async function autoBackupTick() {
@@ -7366,6 +7417,11 @@ async function autoBackupTick() {
   try {
     const st = await abSettings();
     if (!st.enabled) return;
+    try {
+      await ensureAutoBackupTable();
+      const lr = await sql`SELECT created_at FROM auto_backups ORDER BY id DESC LIMIT 1`;
+      if (lr[0] && Date.now() - Date.parse(lr[0].created_at) > (st.everyDays + 2) * 86400000) alertAdmins('backup_overdue', '⚠️ No recent backup', 'The last automatic backup is more than ' + (st.everyDays + 2) + ' days old. Open Admin Tools to check.');
+    } catch (e) { /* ignore */ }
     const ist = new Date(Date.now() + 330 * 60000);
     const [th, tm] = st.time.split(':').map(Number);
     if (ist.getUTCHours() * 60 + ist.getUTCMinutes() < th * 60 + tm) return;

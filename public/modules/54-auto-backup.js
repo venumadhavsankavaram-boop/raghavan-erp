@@ -47,6 +47,43 @@
     }catch(e){ if(window.showToast) showToast('Could not download (' + e.message + ').'); }
     a.textContent = t;
   }
+
+  function ago(iso){
+    const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
+    if(!(m >= 0)) return ''; if(m < 60) return m + ' min ago'; if(m < 2880) return Math.round(m / 60) + ' hours ago'; return Math.round(m / 1440) + ' days ago';
+  }
+  function row(ok, text){ return '<div style="padding:3px 0;">' + (ok ? '✅' : '⚠️') + ' ' + text + '</div>'; }
+  async function loadHealth(hc){
+    const box = hc.querySelector('#siteHealthBody');
+    try{
+      const r = await fetch('/api/health/details'); if(!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      const b = d.backup || {}, last = b.last;
+      let h = row(d.db.ok, 'Database answering (' + d.db.ms + ' ms)');
+      if(b.failure) h += row(false, '<b>Last backup attempt failed</b> (' + esc(b.failure.message) + ') ' + ago(b.failure.at));
+      else if(!b.enabled) h += row(false, 'Automatic backups are switched <b>off</b>');
+      else if(!last) h += row(false, 'No backup saved yet (the first one is made automatically)');
+      else h += row(Date.now() - Date.parse(last.at) < (b.everyDays + 2) * 86400000, 'Last backup ' + ago(last.at) + ' · ' + Number(last.rows).toLocaleString('en-IN') + ' records');
+      h += row(d.push.configured, d.push.configured ? 'Phone notifications are set up' : 'Phone notifications are <b>not set up</b> (parents and staff get no phone alerts)');
+      h += row(d.problemsLast24h === 0, d.problemsLast24h === 0 ? 'No server problems in the last 24 hours' : d.problemsLast24h + ' server problem(s) in the last 24 hours — see Admin Tools → Server problems');
+      h += '<div style="color:var(--ink-soft);margin-top:4px;">Server running for ' + (d.uptimeMinutes >= 120 ? Math.round(d.uptimeMinutes / 60) + ' hours' : d.uptimeMinutes + ' minutes') + ' · memory ' + d.memoryMb + ' MB</div>';
+      box.innerHTML = h;
+    }catch(e){ box.innerHTML = '<span style="color:#b3261e;">Could not read the health check (' + esc(e.message) + ').</span>'; }
+  }
+  function buildHealth(after){
+    if(document.getElementById('siteHealthCard')) return;
+    const hc = document.createElement('div');
+    hc.id = 'siteHealthCard'; hc.className = after.className; hc.style.marginTop = '14px';
+    const url = location.origin + '/api/health';
+    hc.innerHTML = '<h3 style="margin:0 0 4px;">Site health</h3>' +
+      '<div style="font-size:0.8rem;color:var(--ink-soft);margin-bottom:8px;">A quick look at whether everything is working. You also get a phone alert if a nightly backup fails. To be told when the whole site is <b>down</b>, point a free uptime monitor at this address:</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;"><code style="padding:4px 8px;background:#f1f4fa;border-radius:8px;word-break:break-all;">' + esc(url) + '</code><button class="btn btn-sm" id="siteHealthCopy">Copy address</button><button class="btn btn-sm" id="siteHealthRefresh">Refresh</button></div>' +
+      '<div id="siteHealthBody" style="font-size:0.85rem;">Checking…</div>';
+    after.insertAdjacentElement('beforebegin', hc);
+    hc.querySelector('#siteHealthCopy').onclick = async () => { try{ await navigator.clipboard.writeText(url); if(window.showToast) showToast('Address copied.'); }catch(e){ if(window.showToast) showToast('Could not copy.'); } };
+    hc.querySelector('#siteHealthRefresh').onclick = () => loadHealth(hc);
+    loadHealth(hc);
+  }
   function build(anchor){
     if(document.getElementById('autoBackupCard')) return;
     const host = anchor.closest('.card') || anchor.parentElement;
@@ -58,6 +95,7 @@
       '<div style="font-size:0.8rem;color:var(--ink-soft);margin-bottom:10px;">On the schedule set below the server saves a full copy of all school records by itself, so you are covered even on a day you forget to download one. This is in addition to your own downloaded backup — keep doing that now and then.</div>' +
       '<div id="autoBackupSettings"></div><button class="btn btn-primary btn-sm" id="autoBackupNow">Take one now</button><div id="autoBackupList" style="margin-top:12px;font-size:0.8rem;">Loading…</div>';
     host.insertAdjacentElement('afterend', card);
+    buildHealth(card);
     card.querySelector('#autoBackupNow').onclick = async function(){
       const b = this; b.disabled = true; const t = b.textContent; b.textContent = 'Saving…';
       try{ const r = await fetch('/api/backup/auto/run', { method:'POST' }); const d = await r.json().catch(()=>({})); if(!r.ok) throw new Error(d.error || 'HTTP ' + r.status);

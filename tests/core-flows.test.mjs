@@ -115,6 +115,15 @@ try {
   const ps = await call('GET', '/api/student-logins/push-status?className=3rd%20Class&section=B', A.ck);
   ok('admin sees the notification status (nobody has subscribed yet)', ps.s === 200 && ps.j.total === 3 && ps.j.on === 0 && ps.j.students.every(x => x.on === false), ps.j);
 
+  // ================= SITE HEALTH =================
+  console.log('\nSite health');
+  const hp = await call('GET', '/api/health', null);
+  ok('the public health address answers without signing in', hp.s === 200 && hp.j.ok === true && hp.j.db === true, hp);
+  ok('the health address shows nothing private', Object.keys(hp.j).sort().join() === 'db,ms,ok', hp.j);
+  ok('a parent cannot open the detailed health report', (await call('GET', '/api/health/details', P1.ck)).s === 403);
+  const hd = await call('GET', '/api/health/details', A.ck);
+  ok('admin sees the detailed health report', hd.s === 200 && hd.j.db.ok === true && typeof hd.j.problemsLast24h === 'number' && 'backup' in hd.j, hd.j);
+
   // ================= MARKS RELEASE =================
   console.log('\nMarks release');
   const setRel = async (rel, ck) => call('PUT', '/api/kv/exam-releases', ck, rel);
