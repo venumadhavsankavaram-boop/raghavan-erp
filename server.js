@@ -7338,6 +7338,51 @@ app.get('/api/health/details', async (req, res) => {
   } catch (e) { console.error('health details error:', e); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 
+// ---------- Photo shrinker (Admin): old photos were saved at full phone-camera size (~190 KB each) ----------
+// The Admin's browser shrinks each photo (about 480 px, JPEG) and sends it back here; only the photo inside the record changes.
+const PHOTO_SHRINK_TABLES = { students: 'students', staff: 'staff' };
+app.get('/api/photo-shrink/scan', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can do this.' });
+  try {
+    const out = {};
+    for (const t of Object.keys(PHOTO_SHRINK_TABLES)) {
+      const rows = await sql.query(`SELECT id, CHAR_LENGTH(JSON_UNQUOTE(JSON_EXTRACT(extra, '$.photo'))) AS n FROM \`${t}\` WHERE JSON_EXTRACT(extra, '$.photo') IS NOT NULL AND JSON_UNQUOTE(JSON_EXTRACT(extra, '$.photo')) LIKE 'data:image/%'`);
+      const big = rows.filter(r => Number(r.n) > 70000);
+      out[t] = { photos: rows.length, bytes: rows.reduce((a, r) => a + Number(r.n || 0), 0), bigCount: big.length, bigBytes: big.reduce((a, r) => a + Number(r.n || 0), 0), bigIds: big.map(r => r.id) };
+    }
+    return res.status(200).json(out);
+  } catch (e) { console.error('photo scan error:', e); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.get('/api/photo-shrink/photo', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can do this.' });
+  try {
+    const t = PHOTO_SHRINK_TABLES[String(req.query.table || '')]; if (!t) return res.status(400).json({ error: 'Unknown table.' });
+    const rows = await sql.query(`SELECT JSON_UNQUOTE(JSON_EXTRACT(extra, '$.photo')) AS photo FROM \`${t}\` WHERE id = $1`, [String(req.query.id || '')]);
+    if (!rows.length || !rows[0].photo) return res.status(404).json({ error: 'No photo.' });
+    return res.status(200).json({ photo: rows[0].photo });
+  } catch (e) { console.error('photo read error:', e); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/photo-shrink/save', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can do this.' });
+  try {
+    const t = PHOTO_SHRINK_TABLES[String((req.body || {}).table || '')]; if (!t) return res.status(400).json({ error: 'Unknown table.' });
+    const id = String((req.body || {}).id || ''), photo = String((req.body || {}).photo || '');
+    if (!id || !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(photo)) return res.status(400).json({ error: 'The new photo must be a JPEG image.' });
+    if (photo.length > 120000) return res.status(400).json({ error: 'The new photo is still too large.' });
+    const cur = await sql.query(`SELECT CHAR_LENGTH(JSON_UNQUOTE(JSON_EXTRACT(extra, '$.photo'))) AS n FROM \`${t}\` WHERE id = $1`, [id]);
+    if (!cur.length) return res.status(404).json({ error: 'Record not found.' });
+    if (Number(cur[0].n || 0) <= photo.length) return res.status(200).json({ ok: true, skipped: true });   // never replace a photo with a bigger one
+    await sql.query(`UPDATE \`${t}\` SET extra = JSON_SET(extra, '$.photo', $1) WHERE id = $2`, [photo, id]);
+    return res.status(200).json({ ok: true, before: Number(cur[0].n), after: photo.length });
+  } catch (e) { console.error('photo save error:', e); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/photo-shrink/done', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can do this.' });
+  const b = req.body || {};
+  auditNote(req.authUser.name, req.authUser.role, 'PHOTOS_SHRUNK', 'photos', null, `shrunk ${Number(b.count) || 0} photo(s), saved about ${Math.round((Number(b.savedBytes) || 0) / 1048576)} MB`, clientIp(req));
+  return res.status(200).json({ ok: true });
+});
+
 // ---------- Automatic daily backups (kept inside this school's own database, last 30) ----------
 // Every night (about 02:30 India time) the whole database is dumped the same way as the Admin's "Download Backup",
 // squeezed (gzip) and stored in the `auto_backups` table. Only the newest 30 are kept. The Admin can list them,

@@ -71,6 +71,68 @@
       box.innerHTML = h;
     }catch(e){ box.innerHTML = '<span style="color:#b3261e;">Could not read the health check (' + esc(e.message) + ').</span>'; }
   }
+
+  /* ---- Photo shrinker: shrinks old full-size photos (students + staff) so the database and backups stay small ---- */
+  const PS = { scan: null, running: false };
+  const mb = b => (b / 1048576).toFixed(1) + ' MB';
+  function shrinkDataUrl(src, maxDim, quality){
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try{
+          let w = img.width, h = img.height;
+          if(w > maxDim || h > maxDim){ if(w >= h){ h = Math.round(h * maxDim / w); w = maxDim; } else { w = Math.round(w * maxDim / h); h = maxDim; } }
+          const c = document.createElement('canvas'); c.width = w; c.height = h;
+          const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, w, h); x.drawImage(img, 0, 0, w, h);
+          resolve(c.toDataURL('image/jpeg', quality));
+        }catch(e){ reject(e); }
+      };
+      img.onerror = () => reject(new Error('unreadable image'));
+      img.src = src;
+    });
+  }
+  async function psApi(method, url, body){
+    const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    const j = await r.json().catch(() => ({})); if(!r.ok) throw new Error(j.error || ('HTTP ' + r.status)); return j;
+  }
+  async function psScan(box){
+    box.innerHTML = 'Checking photos…';
+    try{
+      const d = await psApi('GET', '/api/photo-shrink/scan'); PS.scan = d;
+      const big = (d.students.bigCount + d.staff.bigCount), bigBytes = d.students.bigBytes + d.staff.bigBytes;
+      if(!big){ box.innerHTML = '✅ All ' + (d.students.photos + d.staff.photos) + ' photos are already small. Nothing to shrink.'; return; }
+      box.innerHTML = '<b>' + big + '</b> photos (' + d.students.bigCount + ' student, ' + d.staff.bigCount + ' staff) take <b>' + mb(bigBytes) + '</b>. After shrinking they would take about <b>' + mb(big * 30000) + '</b>. ' +
+        'Shrinking cannot be undone, so a fresh backup is saved first.' +
+        '<div style="margin-top:8px;"><button class="btn btn-primary btn-sm" id="psGo">Shrink ' + big + ' photos</button></div><div id="psProg" style="margin-top:8px;"></div>';
+      box.querySelector('#psGo').onclick = () => psRun(box);
+    }catch(e){ box.innerHTML = '<span style="color:#b3261e;">' + esc(e.message) + '</span>'; }
+  }
+  async function psRun(box){
+    if(PS.running) return;
+    let go = true; try{ go = await showConfirmDialog('Shrink the large photos now? A fresh backup is saved first. Keep this page open until it finishes.'); }catch(e){}
+    if(!go) return;
+    PS.running = true; const prog = box.querySelector('#psProg'), btn = box.querySelector('#psGo'); btn.disabled = true;
+    try{
+      prog.textContent = 'Saving a fresh backup first…';
+      await psApi('POST', '/api/backup/auto/run');
+      const jobs = []; ['students', 'staff'].forEach(t => PS.scan[t].bigIds.forEach(id => jobs.push({ t, id })));
+      let done = 0, saved = 0, failed = 0, shrunk = 0;
+      for(const j of jobs){
+        try{
+          const cur = await psApi('GET', '/api/photo-shrink/photo?table=' + j.t + '&id=' + encodeURIComponent(j.id));
+          let q = 0.82, out = await shrinkDataUrl(cur.photo, 480, q);
+          if(out.length > 90000){ out = await shrinkDataUrl(cur.photo, 400, 0.7); }
+          const r = await psApi('POST', '/api/photo-shrink/save', { table: j.t, id: j.id, photo: out });
+          if(!r.skipped){ shrunk++; saved += (r.before - r.after); }
+        }catch(e){ failed++; }
+        done++;
+        if(done % 5 === 0 || done === jobs.length) prog.innerHTML = 'Working… ' + done + ' of ' + jobs.length + ' (saved ' + mb(saved) + ')';
+      }
+      try{ await psApi('POST', '/api/photo-shrink/done', { count: shrunk, savedBytes: saved }); }catch(e){}
+      prog.innerHTML = '<b style="color:#0b7a5a;">✓ Done.</b> ' + shrunk + ' photos shrunk, ' + mb(saved) + ' saved' + (failed ? ' · ' + failed + ' could not be shrunk and were left as they were' : '') + '. Press <b>Take one now</b> in the backup card to see the smaller backup size. Older backups stay big until they rotate out.';
+    }catch(e){ prog.innerHTML = '<span style="color:#b3261e;">Stopped: ' + esc(e.message) + '. Nothing was lost; photos not yet shrunk are unchanged.</span>'; }
+    PS.running = false;
+  }
   function buildHealth(after){
     if(document.getElementById('siteHealthCard')) return;
     const hc = document.createElement('div');
@@ -79,10 +141,12 @@
     hc.innerHTML = '<h3 style="margin:0 0 4px;">Site health</h3>' +
       '<div style="font-size:0.8rem;color:var(--ink-soft);margin-bottom:8px;">A quick look at whether everything is working. You also get a phone alert if a nightly backup fails. To be told when the whole site is <b>down</b>, point a free uptime monitor at this address:</div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;"><code style="padding:4px 8px;background:#f1f4fa;border-radius:8px;word-break:break-all;">' + esc(url) + '</code><button class="btn btn-sm" id="siteHealthCopy">Copy address</button><button class="btn btn-sm" id="siteHealthRefresh">Refresh</button></div>' +
-      '<div id="siteHealthBody" style="font-size:0.85rem;">Checking…</div>';
+      '<div id="siteHealthBody" style="font-size:0.85rem;">Checking…</div>' +
+      '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border,#e1e6f0);font-size:0.85rem;"><b>Photo size</b><div style="color:var(--ink-soft);margin:2px 0 6px;">Old photos were saved at full camera size, which makes the database and every backup large. This shrinks them to a small, sharp size.</div><div id="psBox"><button class="btn btn-sm" id="psCheck">Check photo sizes</button></div></div>';
     after.insertAdjacentElement('beforebegin', hc);
     hc.querySelector('#siteHealthCopy').onclick = async () => { try{ await navigator.clipboard.writeText(url); if(window.showToast) showToast('Address copied.'); }catch(e){ if(window.showToast) showToast('Could not copy.'); } };
     hc.querySelector('#siteHealthRefresh').onclick = () => loadHealth(hc);
+    hc.querySelector('#psCheck').onclick = () => psScan(hc.querySelector('#psBox'));
     loadHealth(hc);
   }
   function build(anchor){

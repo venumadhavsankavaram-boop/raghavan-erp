@@ -336,10 +336,10 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     if(document.getElementById('twofaCard')) loadTwofaCard();
   }
   function previewMyAccountPhoto(e){
-    readImageFileWithSizeLimit(e, dataUrl => {
+    readAndCompressImage(e, dataUrl => {
       myAccountPhotoData = dataUrl;
       renderMyAccountBody();
-    });
+    }, { maxDim: 480, quality: 0.82 });
   }
   function removeMyAccountPhoto(){
     myAccountPhotoData = '';

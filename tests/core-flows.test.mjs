@@ -124,6 +124,25 @@ try {
   const hd = await call('GET', '/api/health/details', A.ck);
   ok('admin sees the detailed health report', hd.s === 200 && hd.j.db.ok === true && typeof hd.j.problemsLast24h === 'number' && 'backup' in hd.j && Array.isArray(hd.j.biggestTables), hd.j);
 
+  // ================= PHOTO SHRINKER =================
+  console.log('\nPhoto shrinker');
+  await call('POST', '/api/students', A.ck, { id: 'zph1', firstName: 'Photo', lastName: 'Big', className: '3rd Class', section: 'B', status: 'Active', admissionNo: 'ZZ-ph1', photo: 'data:image/jpeg;base64,' + 'A'.repeat(90000) });
+  ok('a teacher cannot scan photos', (await call('GET', '/api/photo-shrink/scan', T.ck)).s === 403);
+  const sc = await call('GET', '/api/photo-shrink/scan', A.ck);
+  ok('admin sees the big photo in the scan', sc.s === 200 && sc.j.students.bigIds.includes('zph1'), sc.j);
+  const small = 'data:image/jpeg;base64,' + 'B'.repeat(20000);
+  ok('a teacher cannot replace a photo', (await call('POST', '/api/photo-shrink/save', T.ck, { table: 'students', id: 'zph1', photo: small })).s === 403);
+  ok('a non-image replacement is refused', (await call('POST', '/api/photo-shrink/save', A.ck, { table: 'students', id: 'zph1', photo: 'hello' })).s === 400);
+  ok('an unknown table is refused', (await call('POST', '/api/photo-shrink/save', A.ck, { table: 'users', id: 'zph1', photo: small })).s === 400);
+  const sv = await call('POST', '/api/photo-shrink/save', A.ck, { table: 'students', id: 'zph1', photo: small });
+  ok('the shrunk photo is saved', sv.s === 200 && sv.j.before > sv.j.after, sv.j);
+  const sc2 = await call('GET', '/api/photo-shrink/scan', A.ck);
+  ok('it no longer counts as big', !sc2.j.students.bigIds.includes('zph1'), sc2.j);
+  const bigger = await call('POST', '/api/photo-shrink/save', A.ck, { table: 'students', id: 'zph1', photo: 'data:image/jpeg;base64,' + 'C'.repeat(60000) });
+  ok('a bigger photo never replaces a smaller one', bigger.s === 200 && bigger.j.skipped === true, bigger.j);
+  const stu = await call('GET', '/api/students', A.ck);
+  ok('other fields of the student are untouched', (stu.j.find(x => x.id === 'zph1') || {}).firstName === 'Photo');
+
   // ================= MARKS RELEASE =================
   console.log('\nMarks release');
   const setRel = async (rel, ck) => call('PUT', '/api/kv/exam-releases', ck, rel);

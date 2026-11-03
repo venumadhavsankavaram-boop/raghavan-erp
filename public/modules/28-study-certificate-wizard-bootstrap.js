@@ -24,12 +24,12 @@ const WIZARD_TABS = ['new','parent','previous','transport'];
   }
 
   function previewPhoto(e){
-    readImageFileWithSizeLimit(e, dataUrl => {
+    readAndCompressImage(e, dataUrl => {
       wizardPhotoData = dataUrl;
       document.getElementById('photoPreview').src = wizardPhotoData;
       document.getElementById('photoPreview').style.display = 'block';
       document.getElementById('photoPlaceholder').style.display = 'none';
-    });
+    }, { maxDim: 480, quality: 0.82 });
   }
 
   // The sibling picker used to be one giant <select> listing every enrolled

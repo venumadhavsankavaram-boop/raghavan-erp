@@ -400,12 +400,12 @@ let saSelectedTeacherId = '';
   }
 
   function previewStaffPhoto(e){
-    readImageFileWithSizeLimit(e, dataUrl => {
+    readAndCompressImage(e, dataUrl => {
       staffPhotoData = dataUrl;
       document.getElementById('staffPhotoPreview').src = staffPhotoData;
       document.getElementById('staffPhotoPreview').style.display = 'block';
       document.getElementById('staffPhotoPlaceholder').style.display = 'none';
-    });
+    }, { maxDim: 480, quality: 0.82 });
   }
 
   function previewStaffSignature(e){
