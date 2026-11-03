@@ -43,7 +43,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
       '<div class="blk-btns"><button class="btn btn-primary" id="blkCreate">Create logins</button>' +
       '<button class="btn" id="blkPrint">🖨️ Print login slips</button></div>' +
       '<div class="blk-hint" id="blkPush" style="margin:10px 0 0;"></div>' +
-      '<div class="blk-btns" style="margin-top:6px;"><button class="btn" id="blkNotif">🔔 Who has notifications on?</button></div>' +
+      '<div class="blk-btns" style="margin-top:6px;"><button class="btn" id="blkNotif">🔔 Who has notifications on?</button> <button class="btn btn-primary" id="blkAdopt">📊 Parent adoption board</button></div>' +
       '<div class="blk-out" id="blkOut">' + keepOut + '</div>';
     pushLine(card);
     card.querySelector('#blkCls').onchange = e => { S.cls = e.target.value; S.sec = ''; draw(card); preview(card); };
@@ -53,6 +53,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     card.querySelector('#blkCreate').onclick = () => create(card);
     card.querySelector('#blkPrint').onclick = () => printSlips(card);
     card.querySelector('#blkNotif').onclick = () => notifStatus(card);
+    card.querySelector('#blkAdopt').onclick = () => adoption(card);
   }
   async function notifStatus(card){
     try{
@@ -70,6 +71,86 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
       const txt = 'Parents without notifications (' + where + '):\n' + off.map(x => x.name + ' - ' + x.className + ' ' + (x.section || '')).join('\n');
       const c = card.querySelector('#blkNCopy'); if(c) c.onclick = async () => { try{ await navigator.clipboard.writeText(txt); toast('List copied.'); }catch(e){ toast('Could not copy.'); } };
       const pr = card.querySelector('#blkNPrint'); if(pr) pr.onclick = () => printHtml('<!doctype html><html><head><meta charset="utf-8"><title>Notifications not on</title><style>body{font:14px Arial;padding:20px}li{margin:3px 0}</style></head><body><h3>Parents without notifications — ' + esc(where) + '</h3><ol>' + off.map(x => '<li>' + esc(x.name) + ' — ' + esc(x.className) + ' ' + esc(x.section || '') + '</li>').join('') + '</ol></body></html>');
+    }catch(e){ out(card, '<span style="color:#b3261e;">' + esc(e.message) + '</span>'); }
+  }
+
+  /* ---------- Parent adoption board: who has a login, signed in, installed the app, has notifications ---------- */
+  let AD = { all: [], rows: [], filter: 'all', cls: '', sec: '' };
+  function adStage(x){
+    if(!x.hasLogin) return 'nologin';
+    if(!x.signedIn) return 'never';
+    if(!x.installed || !x.notifications) return 'partial';
+    return 'full';
+  }
+  const AD_LABEL = { nologin: ['No login yet', '#6b7280'], never: ['Never signed in', '#b3261e'], partial: ['Signed in, not fully set up', '#b7791f'], full: ['Fully set up', '#0b7a5a'] };
+  function ago(iso){
+    if(!iso) return '-';
+    const d = (Date.now() - new Date(iso).getTime()) / 86400000;
+    if(d < 1) return 'today'; if(d < 2) return 'yesterday'; if(d < 30) return Math.floor(d) + ' days ago'; return new Date(iso).toLocaleDateString('en-IN');
+  }
+  function bar(n, t, color){
+    const pc = t ? Math.round(100 * n / t) : 0;
+    return '<div style="min-width:150px;flex:1 1 150px;background:#f6f8fd;border:1px solid #e1e6f0;border-radius:12px;padding:10px 12px;">' +
+      '<div style="font-size:1.35rem;font-weight:800;color:' + color + ';">' + n + '<span style="font-size:.8rem;color:#5b6784;font-weight:600;"> of ' + t + '</span></div>' +
+      '<div style="height:7px;border-radius:6px;background:#dfe5f1;margin-top:6px;overflow:hidden;"><div style="height:7px;width:' + pc + '%;background:' + color + ';"></div></div>' +
+      '<div style="font-size:.72rem;color:#5b6784;margin-top:4px;">' + pc + '%</div></div>';
+  }
+  function adLabel(r){ return [r.className, r.section].filter(Boolean).join(' '); }
+  function adDraw(card){
+    const allRows = AD.all;
+    const clsList = Array.from(new Set(allRows.map(r => r.className).filter(Boolean))).sort((a, b) => num(a) - num(b) || String(a).localeCompare(String(b)));
+    const secList = Array.from(new Set(allRows.filter(r => !AD.cls || r.className === AD.cls).map(r => r.section).filter(Boolean))).sort();
+    const rows = allRows.filter(r => (!AD.cls || r.className === AD.cls) && (!AD.sec || r.section === AD.sec)); AD.rows = rows;
+    const T = rows.length;
+    const withLogin = rows.filter(r => r.hasLogin), signed = rows.filter(r => r.signedIn), inst = rows.filter(r => r.installed), noti = rows.filter(r => r.notifications);
+    const where = AD.cls ? (AD.cls + (AD.sec ? ' ' + AD.sec : '')) : 'all classes';
+    const cnt = k => rows.filter(r => adStage(r) === k).length;
+    let h = '<div class="blk-row" style="margin-top:6px;align-items:flex-end;"><label class="blk-f">View class<select id="adCls">' + opts(clsList, AD.cls, 'All classes') + '</select></label>' +
+      '<label class="blk-f">Section<select id="adSec">' + opts(secList, AD.sec, 'All sections') + '</select></label>' +
+      '<div style="padding-bottom:10px;"><b>Parent adoption — ' + esc(where) + '</b> <span style="color:#5b6784;">(' + T + ' students)</span></div></div>' +
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">' + bar(withLogin.length, T, '#3b5bdb') + bar(signed.length, T, '#0b7a5a') + bar(inst.length, T, '#7c3aed') + bar(noti.length, T, '#d97706') + '</div>' +
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;font-size:.7rem;color:#5b6784;font-weight:700;text-transform:uppercase;"><span style="flex:1 1 150px;min-width:150px;">Login given</span><span style="flex:1 1 150px;min-width:150px;">Signed in</span><span style="flex:1 1 150px;min-width:150px;">App installed</span><span style="flex:1 1 150px;min-width:150px;">Notifications on</span></div>';
+    // per-class table (only when looking at more than one section)
+    const groups = new Map(); rows.forEach(r => { const k = adLabel(r); if(!groups.has(k)) groups.set(k, []); groups.get(k).push(r); });
+    if(groups.size > 1){
+      h += '<div style="margin-top:12px;max-height:240px;overflow:auto;border:1px solid #e1e6f0;border-radius:10px;"><table style="width:100%;border-collapse:collapse;font-size:.8rem;"><tr style="background:#f6f8fd;text-align:left;"><th style="padding:6px 8px;">Class</th><th>Students</th><th>Signed in</th><th>Installed</th><th>Notifications</th><th>Not signed in</th></tr>' +
+        Array.from(groups.entries()).map(([k, g]) => { const si = g.filter(x => x.signedIn).length, ins = g.filter(x => x.installed).length, nt = g.filter(x => x.notifications).length, nv = g.length - si;
+          return '<tr style="border-top:1px solid #eef1f7;cursor:pointer;" data-adcls="' + esc(k) + '"><td style="padding:6px 8px;font-weight:700;">' + esc(k) + '</td><td>' + g.length + '</td><td>' + si + '</td><td>' + ins + '</td><td>' + nt + '</td><td style="color:' + (nv ? '#b3261e' : '#0b7a5a') + ';font-weight:700;">' + nv + '</td></tr>'; }).join('') + '</table></div>';
+    }
+    h += '<div class="blk-btns" id="adChips" style="margin-top:12px;">' +
+      [['all', 'All (' + T + ')'], ['never', '🔴 Never signed in (' + (cnt('never') + cnt('nologin')) + ')'], ['partial', '🟡 Signed in, not fully set up (' + cnt('partial') + ')'], ['full', '🟢 Fully set up (' + cnt('full') + ')']]
+      .map(([k, l]) => '<button class="btn' + (AD.filter === k ? ' btn-primary' : '') + '" data-adf="' + k + '">' + l + '</button>').join('') + '</div>';
+    const needPick = !AD.cls && AD.filter === 'all' && T > 60;
+    const shown = needPick ? [] : rows.filter(r => AD.filter === 'all' || (AD.filter === 'never' ? ['never', 'nologin'].includes(adStage(r)) : adStage(r) === AD.filter));
+    h += '<div style="margin-top:8px;max-height:300px;overflow:auto;border:1px solid #e1e6f0;border-radius:10px;"><table style="width:100%;border-collapse:collapse;font-size:.8rem;"><tr style="background:#f6f8fd;text-align:left;"><th style="padding:6px 8px;">Student</th><th>Class</th><th>Status</th><th>Installed</th><th>Notif.</th><th>Last seen</th></tr>' +
+      (shown.length ? shown.slice(0, 400).map(r => { const st = adStage(r), L = AD_LABEL[st];
+        return '<tr style="border-top:1px solid #eef1f7;"><td style="padding:5px 8px;font-weight:600;">' + esc(r.name) + (r.admissionNo ? ' <span style="color:#7a859e;font-weight:400;">#' + esc(r.admissionNo) + '</span>' : '') + '</td><td>' + esc(adLabel(r)) + '</td><td style="color:' + L[1] + ';font-weight:700;">' + L[0] + '</td><td>' + (r.installed ? '✅' : '—') + '</td><td>' + (r.notifications ? '✅' : '—') + '</td><td>' + (r.hasLogin ? ago(r.lastSeen) : '-') + '</td></tr>'; }).join('')
+        : '<tr><td colspan="6" style="padding:12px;' + (needPick ? 'color:#5b6784;">Pick a class above (or tap a class in the table) to see its students. Or use the red / yellow buttons to see who needs a nudge across the whole school.' : 'color:#0b7a5a;font-weight:700;">Nobody here. 🎉') + '</td></tr>') + '</table></div>' +
+      '<div class="blk-hint" style="margin:8px 0 0;">“Installed”, “Last seen” and the exact first sign-in are recorded from the day this board was added; a parent shows as signed in earlier if they have already chosen their own password. They fill in as families open the app.</div>' +
+      '<div class="blk-btns"><button class="btn" id="adCopy">Copy chase list</button><button class="btn" id="adPrint">🖨️ Print chase list</button><button class="btn" id="adCsv">⬇️ Download (Excel)</button></div>';
+    out(card, h);
+    card.querySelector('#adCls').onchange = e => { AD.cls = e.target.value; AD.sec = ''; AD.filter = 'all'; adDraw(card); };
+    card.querySelector('#adSec').onchange = e => { AD.sec = e.target.value; AD.filter = 'all'; adDraw(card); };
+    card.querySelectorAll('[data-adf]').forEach(b => b.onclick = () => { AD.filter = b.dataset.adf; adDraw(card); });
+    card.querySelectorAll('[data-adcls]').forEach(tr => tr.onclick = () => { const v = tr.dataset.adcls; const row = AD.rows.find(r => adLabel(r) === v); if(row){ AD.cls = row.className; AD.sec = row.section || ''; AD.filter = 'all'; adDraw(card); } });
+    const chase = rows.filter(r => ['never', 'nologin'].includes(adStage(r)));
+    const txt = 'Parents who have not signed in (' + where + '):\n' + chase.map(r => r.name + ' - ' + adLabel(r) + (r.hasLogin ? '' : ' (no login yet)')).join('\n');
+    card.querySelector('#adCopy').onclick = async () => { try{ await navigator.clipboard.writeText(txt); toast('List copied.'); }catch(e){ toast('Could not copy.'); } };
+    card.querySelector('#adPrint').onclick = () => printHtml('<!doctype html><html><head><meta charset="utf-8"><title>Parents not signed in</title><style>body{font:14px Arial;padding:20px}h2{margin:0 0 4px}li{margin:3px 0}</style></head><body><h2>Parents who have not signed in</h2><div>' + esc(where) + ' · ' + new Date().toLocaleDateString('en-IN') + '</div><ol>' +
+      chase.map(r => '<li>' + esc(r.name) + ' — ' + esc(adLabel(r)) + (r.hasLogin ? '' : ' <i>(no login yet)</i>') + '</li>').join('') + '</ol></body></html>');
+    card.querySelector('#adCsv').onclick = () => {
+      const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+      const lines = [['Student', 'Admission no', 'Class', 'Section', 'Username', 'Login given', 'Signed in', 'Own password set', 'App installed', 'Notifications on', 'First sign-in', 'Last seen'].map(q).join(',')]
+        .concat(rows.map(r => [r.name, r.admissionNo, r.className, r.section, r.username, r.hasLogin ? 'Yes' : 'No', r.signedIn ? 'Yes' : 'No', r.ownPassword ? 'Yes' : 'No', r.installed ? 'Yes' : 'No', r.notifications ? 'Yes' : 'No', r.firstLogin ? r.firstLogin.slice(0, 10) : '', r.lastSeen ? r.lastSeen.slice(0, 10) : ''].map(q).join(',')));
+      const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'parent-adoption-' + new Date().toISOString().slice(0, 10) + '.csv'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+    };
+  }
+  async function adoption(card){
+    out(card, 'Loading…');
+    try{
+      const j = await api('GET', '/api/student-logins/adoption');
+      AD.all = j.students || []; AD.filter = 'all'; AD.cls = S.cls || ''; AD.sec = S.cls ? (S.sec || '') : ''; adDraw(card);
     }catch(e){ out(card, '<span style="color:#b3261e;">' + esc(e.message) + '</span>'); }
   }
   async function pushLine(card){
@@ -222,4 +303,22 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
   let t = null;
   new MutationObserver(() => { if(t) return; t = setTimeout(async () => { t = null; if(!isParent()) return; if(state === null) await check(); paint(); }, 400); })
     .observe(document.documentElement, { childList: true, subtree: true });
+})();
+
+/* ---------- Parent/Student: tell the school the app is installed on this phone (once) ---------- */
+(function(){
+  const isParent = () => typeof currentUser !== 'undefined' && currentUser && ['Parent', 'Student'].includes(currentUser.role);
+  let sent = false;
+  async function report(){
+    if(sent || !isParent()) return;
+    sent = true;
+    try{ await fetch('/api/app-installed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); }catch(e){ sent = false; }
+  }
+  const standalone = () => { try{ return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true; }catch(e){ return false; } };
+  window.addEventListener('appinstalled', () => { try{ localStorage.setItem('appInstalledFlag', '1'); }catch(e){} report(); });
+  const t = setInterval(() => {
+    if(!isParent()) return;
+    let flag = false; try{ flag = localStorage.getItem('appInstalledFlag') === '1'; }catch(e){}
+    if(standalone() || flag){ clearInterval(t); report(); } else if(document.readyState === 'complete' && (window.__adoptTicks = (window.__adoptTicks || 0) + 1) > 40) clearInterval(t);
+  }, 3000);
 })();

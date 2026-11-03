@@ -298,6 +298,10 @@ async function ensureSchema() {
   await addColumnIfMissing('users', 'must_change_password TINYINT DEFAULT 0');
   // Starting password written on a printed login slip; cleared the moment the parent sets their own. Never sent by the generic users API.
   await addColumnIfMissing('users', 'initial_pw VARCHAR(100)');
+  await addColumnIfMissing('users', 'first_login_at DATETIME NULL');
+  await addColumnIfMissing('users', 'last_login_at DATETIME NULL');
+  await addColumnIfMissing('users', 'last_seen_at DATETIME NULL');
+  await addColumnIfMissing('users', 'installed_at DATETIME NULL');
   // A user's own "My Account" profile photo (base64 data URL, capped at 2MB
   // client-side — see PHOTO_UPLOAD_MAX_BYTES in index.html, well under this
   // server's 25mb JSON body limit). This column didn't exist before, so the
@@ -1163,6 +1167,9 @@ async function createSession(req, res, user) {
     INSERT INTO sessions (id, user_id, role, name, expires_at, must_change)
     VALUES (${hashSessionToken(token)}, ${user.id}, ${user.role}, ${user.name}, ${expiresAt.toISOString()}, ${user.must_change_password ? 1 : 0})
   `;
+  if (user.role === 'Parent' || user.role === 'Student') {
+    sql`UPDATE users SET first_login_at = COALESCE(first_login_at, now()), last_login_at = now(), last_seen_at = now() WHERE id = ${user.id}`.catch(() => {});
+  }
   const secureFlag = isHttpsRequest(req) ? '; Secure' : '';
   res.setHeader('Set-Cookie', `sid=${token}; HttpOnly${secureFlag}; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_ABSOLUTE_MAX_MS / 1000)}`);
 }
@@ -1245,6 +1252,7 @@ async function userNeeds2faSetup(userId) {
   return true;
 }
 
+const parentSeenAt = new Map();
 app.use(async (req, res, next) => {
   if (!req.path.startsWith('/api/')) return next(); // static files / the app shell itself stay open
   if (req.method === 'OPTIONS' || isPublicApiRoute(req)) return next();
@@ -1268,6 +1276,11 @@ app.use(async (req, res, next) => {
     // so an app left running in the background still signs out after the idle time.
     if (req.headers['x-background'] !== '1') sql`UPDATE sessions SET expires_at = ${newExpires.toISOString()}, last_seen_at = now() WHERE id = ${idHash}`.catch(() => {});
     req.authUser = { id: session.user_id, role: session.role, name: session.name, impersonatedBy: session.impersonated_by || null };
+    // Parents/students: note "last seen" at most once every 10 minutes (feeds the Parent adoption board).
+    if ((session.role === 'Parent' || session.role === 'Student') && !session.impersonated_by && req.headers['x-background'] !== '1') {
+      const lastNote = parentSeenAt.get(session.user_id) || 0;
+      if (now - lastNote > 10 * 60 * 1000) { parentSeenAt.set(session.user_id, now); sql`UPDATE users SET last_seen_at = now() WHERE id = ${session.user_id}`.catch(() => {}); }
+    }
     // After an Admin reset, the user must choose their own password before anything else works.
     if (session.must_change && !['/api/me', '/api/logout', '/api/account/password'].includes(req.path)) {
       return res.status(403).json({ error: 'Please set a new password first.', code: 'MUST_CHANGE_PASSWORD' });
@@ -6101,7 +6114,7 @@ app.post('/api/account/password', async (req, res) => {
     if (!ok) return res.status(400).json({ error: 'Current password is incorrect.' });
     if (next === current) return res.status(400).json({ error: 'Choose a new password that is different from the current one.' });
     const hash = await bcrypt.hash(next, 10);
-    await sql`UPDATE users SET password = ${hash}, must_change_password = 0, initial_pw = NULL WHERE id = ${req.authUser.id}`;
+    await sql`UPDATE users SET password = ${hash}, must_change_password = 0, initial_pw = NULL, first_login_at = COALESCE(first_login_at, now()) WHERE id = ${req.authUser.id}`;
     await sql`UPDATE sessions SET must_change = 0 WHERE user_id = ${req.authUser.id}`.catch(() => {});
     // Anyone else signed in with the old password (another device, a stolen session) is signed out; this device stays in.
     const mine = parseCookies(req).sid ? hashSessionToken(parseCookies(req).sid) : '';
@@ -7285,6 +7298,40 @@ app.get('/api/student-logins/push-status', async (req, res) => {
       .map(r => ({ studentId: r.id, name: ((r.first_name || '') + ' ' + (r.last_name || '')).trim(), className: r.class_name, section: r.section, admissionNo: r.admission_no || '', username: r.username, on: Number(r.devices) > 0 }));
     return res.status(200).json({ pushConfigured: webPushConfigured(), total: list.length, on: list.filter(x => x.on).length, students: list });
   } catch (err) { console.error('push status error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+
+// POST /api/app-installed  (Parent/Student, signed in) -> remembers that this family has the app on a phone's home screen.
+app.post('/api/app-installed', async (req, res) => {
+  try {
+    if (!req.authUser || !['Parent', 'Student'].includes(req.authUser.role) || req.authUser.impersonatedBy) return res.status(200).json({ ok: true });
+    await sql`UPDATE users SET installed_at = COALESCE(installed_at, now()) WHERE id = ${req.authUser.id}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) { return res.status(200).json({ ok: true }); }
+});
+// GET /api/student-logins/adoption?className=&section=  -> for every active student: login given? signed in? installed? notifications? last seen.
+app.get('/api/student-logins/adoption', async (req, res) => {
+  try {
+    if (!req.authUser || !['Admin', 'Principal'].includes(req.authUser.role)) return res.status(403).json({ error: 'Only an Admin or Principal can view this.' });
+    const className = String(req.query.className || '').trim(), section = String(req.query.section || '').trim();
+    const kids = await sql`SELECT id, first_name, last_name, class_name, section, admission_no FROM students
+      WHERE deleted_at IS NULL AND (status IS NULL OR LOWER(status) = 'active') ORDER BY class_name, section, first_name, last_name`;
+    const us = await sql`SELECT u.id, u.username, u.linked_student_id AS sid, u.created_at, u.first_login_at, u.last_login_at, u.last_seen_at, u.installed_at,
+        (u.initial_pw IS NULL OR u.initial_pw = '') AS own_pw,
+        (SELECT COUNT(*) FROM push_subscriptions p WHERE p.user_id = u.id) AS devices
+      FROM users u WHERE u.deleted_at IS NULL AND u.role IN ('Student', 'Parent') AND u.linked_student_id IS NOT NULL AND u.linked_student_id <> ''`;
+    const bySid = new Map(); us.forEach(u => { const cur = bySid.get(u.sid); if (!cur || (u.last_seen_at && (!cur.last_seen_at || u.last_seen_at > cur.last_seen_at))) bySid.set(u.sid, u); });
+    const iso = d => d ? new Date(d).toISOString() : '';
+    const list = kids.filter(k => (!className || k.class_name === className) && (!section || k.section === section)).map(k => {
+      const u = bySid.get(k.id);
+      const name = ((k.first_name || '') + ' ' + (k.last_name || '')).trim();
+      if (!u) return { studentId: k.id, name, className: k.class_name, section: k.section, admissionNo: k.admission_no || '', hasLogin: false, signedIn: false, ownPassword: false, installed: false, notifications: false, firstLogin: '', lastSeen: '', username: '' };
+      const own = !!Number(u.own_pw);
+      return { studentId: k.id, name, className: k.class_name, section: k.section, admissionNo: k.admission_no || '', username: u.username, hasLogin: true,
+        signedIn: !!u.first_login_at || own, signedInKnown: !!u.first_login_at, ownPassword: own, installed: !!u.installed_at, notifications: Number(u.devices) > 0,
+        firstLogin: iso(u.first_login_at), lastSeen: iso(u.last_seen_at || u.last_login_at) };
+    });
+    return res.status(200).json({ total: list.length, students: list, trackingSince: iso((await sql`SELECT MIN(first_login_at) AS m FROM users`)[0].m) });
+  } catch (err) { console.error('adoption error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 
 // ---------- Site health: a public "is it alive" address for an outside monitor + an Admin health card ----------

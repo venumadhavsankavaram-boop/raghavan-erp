@@ -115,6 +115,23 @@ try {
   const ps = await call('GET', '/api/student-logins/push-status?className=3rd%20Class&section=B', A.ck);
   ok('admin sees the notification status (nobody has subscribed yet)', ps.s === 200 && ps.j.total === 3 && ps.j.on === 0 && ps.j.students.every(x => x.on === false), ps.j);
 
+
+  // ---- Parent adoption board ----
+  console.log('\nParent adoption board');
+  ok('a parent cannot open the adoption board', (await call('GET', '/api/student-logins/adoption', P1.ck)).s === 403);
+  const ad1 = await call('GET', '/api/student-logins/adoption?className=3rd%20Class&section=B', A.ck);
+  const byName = n => (ad1.j.students || []).find(x => x.name === n);
+  ok('the board lists every student of the class with their login state', ad1.s === 200 && ad1.j.total === 3 && ad1.j.students.every(x => x.hasLogin), ad1.j);
+  ok('a parent who signed in and chose a password shows as signed in', byName('Ravi Kumar') && ad1.j.students.filter(x => x.signedIn).length === 1 && ad1.j.students.find(x => x.username === 'ravikumar').signedInKnown === true, ad1.j);
+  ok('a parent who never signed in shows as not signed in', ad1.j.students.find(x => x.username === 'sitadevirao').signedIn === false);
+  ok('nobody is marked installed or notified yet', ad1.j.students.every(x => !x.installed && !x.notifications));
+  const rl = await login('ravikumar', 'MyOwn#Pass9'); ok('the parent signs in again with the new password', rl.s === 200, rl.s);
+  ok('the app reports it is installed', (await call('POST', '/api/app-installed', rl.ck, {})).s === 200);
+  const ad2 = await call('GET', '/api/student-logins/adoption?className=3rd%20Class&section=B', A.ck);
+  const rk = ad2.j.students.find(x => x.username === 'ravikumar');
+  ok('the board now shows installed and a last-seen time', rk.installed === true && !!rk.firstLogin && !!rk.lastSeen, rk);
+  ok('a student with no login at all is still listed (as no login)', (await (async () => { await call('POST', '/api/students', A.ck, { id: 'zb4', firstName: 'Nolo', lastName: 'Gin', className: '3rd Class', section: 'B', status: 'Active', admissionNo: 'ZZ-zb4' }); const r = await call('GET', '/api/student-logins/adoption?className=3rd%20Class&section=B', A.ck); const n = r.j.students.find(x => x.name === 'Nolo Gin'); return n && n.hasLogin === false && n.signedIn === false; })()));
+
   // ================= SITE HEALTH =================
   console.log('\nSite health');
   const hp = await call('GET', '/api/health', null);
