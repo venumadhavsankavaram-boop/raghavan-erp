@@ -404,7 +404,7 @@ function fpExportCheques(){
 function fpDiscountAmount(d){
   if(d.mode !== 'percentage') return Number(d.value) || 0;
   const s = students.find(x => x.id === d.studentId); if(!s) return 0;
-  const exp = d.appliesTo === 'hostel' ? (s.isBoarder === 'Yes' ? studentHostelFee(s) : 0) : d.appliesTo === 'bus' ? (s.needsTransport === 'Yes' ? studentBusFare(s) : 0) : (Number(classStruct(s.className)[d.appliesTo]) || 0);
+  const exp = d.appliesTo === 'hostel' ? (s.isBoarder === 'Yes' ? studentHostelFee(s) : 0) : d.appliesTo === 'bus' ? studentBusExpected(s) : (Number(classStruct(s.className)[d.appliesTo]) || 0);
   return Math.round(exp * (Number(d.value) || 0) / 100);
 }
 function fpPaintConcessionReport(host){

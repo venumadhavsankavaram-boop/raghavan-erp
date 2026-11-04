@@ -40,7 +40,7 @@
       let discount = c === 'stock' ? 0 : pays.reduce((a, p) => a + num(p.discount), 0);
       let expected = 0;
       if(c === 'hostel') expected = s.isBoarder === 'Yes' ? num(studentHostelFee(s)) : 0;
-      else if(c === 'bus') expected = s.needsTransport === 'Yes' ? num(studentBusFare(s)) : 0;
+      else if(c === 'bus') expected = num(studentBusExpected(s));
       else expected = num((classStruct(s.className) || {})[c]);
       studentDiscounts.filter(d => d.studentId === s.id && d.status === 'Approved' && d.appliesTo === c).forEach(d => {
         discount += d.mode === 'percentage' ? Math.round(expected * num(d.value) / 100) : num(d.value);

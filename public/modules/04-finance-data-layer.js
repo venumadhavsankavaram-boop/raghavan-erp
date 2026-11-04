@@ -298,6 +298,15 @@ const SETTINGS_KEY = "finance-settings";
     }
     return Number(classStruct(s.className).bus) || 0;
   }
+  // What a student is billed for Bus Fee. A rider pays the full fare; a rider who STOPPED transport
+  // part-way (Stop transport, in Fees > Refunds) is billed only for the period used (pro-rata), so a refund
+  // of the unused part never comes back as a balance. The stop applies only to the class it was made in.
+  function studentBusExpected(s){
+    if(s.needsTransport === 'Yes') return studentBusFare(s);
+    const te = s.transportEnd;
+    if(te && (!te.className || te.className === s.className)) return Number(te.amount) || 0;
+    return 0;
+  }
   function studentHostelFee(s){
     if(s.hostelRoomId){
       const room = hostelRooms.find(r => r.id === s.hostelRoomId);
@@ -318,7 +327,7 @@ const SETTINGS_KEY = "finance-settings";
       if(c === 'hostel'){
         expected = activeStudents.filter(s => s.isBoarder==='Yes').reduce((sum,s) => sum + studentHostelFee(s), 0);
       }else if(c === 'bus'){
-        expected = activeStudents.filter(s => s.needsTransport==='Yes').reduce((sum,s) => sum + studentBusFare(s), 0);
+        expected = activeStudents.reduce((sum,s) => sum + studentBusExpected(s), 0);
       }else{
         CLASS_LEVELS.forEach(cls => {
           const rate = Number(classStruct(cls)[c]) || 0;
@@ -341,7 +350,7 @@ const SETTINGS_KEY = "finance-settings";
           const approved = studentDiscounts.filter(d => d.studentId===s.id && d.status==='Approved' && d.appliesTo===c);
           if(!approved.length) return;
           const catExpectedForStudent = c==='hostel' ? (s.isBoarder==='Yes' ? studentHostelFee(s) : 0)
-            : c==='bus' ? (s.needsTransport==='Yes' ? studentBusFare(s) : 0)
+            : c==='bus' ? studentBusExpected(s)
             : Number(classStruct(s.className)[c]) || 0;
           approved.forEach(d => {
             discount += d.mode === 'percentage' ? Math.round(catExpectedForStudent * (Number(d.value)||0) / 100) : (Number(d.value)||0);
@@ -374,7 +383,7 @@ const SETTINGS_KEY = "finance-settings";
       if(c === 'hostel'){
         expected = s.isBoarder === 'Yes' ? studentHostelFee(s) : 0;
       }else if(c === 'bus'){
-        expected = s.needsTransport === 'Yes' ? studentBusFare(s) : 0;
+        expected = studentBusExpected(s);
       }else{
         expected = Number(classStruct(s.className)[c]) || 0;
       }

@@ -279,7 +279,7 @@ async function rfPickStudent(sid){
   const refundable = group.filter(x => payRefundable(x) > 0);
   const head = `<section class="sf-card" style="padding:14px 16px;margin-bottom:14px;"><b>${escapeHtml(rfStudentName(sid))}</b>
     <div style="font-size:.85rem;color:var(--ink-soft);">${escapeHtml(s.admissionNo || '')} · ${escapeHtml(s.className || '')} — Section ${escapeHtml(s.section || '')}</div></section>
-    ${rfCreditBannerHtml(sid)}`;
+    ${rfCreditBannerHtml(sid)}${rfStopBannerHtml(s)}`;
   if(!refundable.length){
     box.innerHTML = head + `<div class="empty-state"><b>Nothing to refund</b>This student has no paid fee left that can be refunded.</div>`;
     return;
@@ -660,4 +660,84 @@ async function initRefundPolicyPage(){
       <p style="font-size:.82rem;margin:10px 0 0;opacity:.8;">Admin approves any amount, and an Admin's own refunds need no second approval. Refunds are started from <em>Manage Fee → Refunds → New Refund</em>. Who may request / approve / cancel / print is set per role in <em>Roles &amp; Permissions → Manage Fee → Fee Refunds</em>.</p>
       ${isAdmin ? `<div style="margin-top:12px;">${sfBtn('primary', 'check', 'Save policy', 'saveRefundPolicy()')}</div>` : ''}
     </div>`;
+}
+
+
+/* ---------- Stop transport (pro-rata) ----------
+   The standard school-ERP way to handle a rider who leaves the bus part-way: do NOT delete the Bus Fee or
+   void the receipt. Record the stop with the months actually used; the bill becomes fare x months/12.
+   Whatever was paid above that is the refund due (done through the normal refund flow), and anything
+   below it stays payable. So after the refund the Bus Fee balance is exactly zero.  */
+function rfStopBannerHtml(s){
+  if(!s) return '';
+  const te = s.transportEnd && (!s.transportEnd.className || s.transportEnd.className === s.className) ? s.transportEnd : null;
+  if(s.needsTransport === 'Yes'){
+    return `<div class="sf-kpi sf-kpi--warn" style="margin:0 0 14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:space-between;">
+      <div><span>Bus rider</span><b>${fmtMoney(studentBusFare(s))} / year</b><small>If this student has stopped using the bus, stop transport so only the months used are billed.</small></div>
+      ${sfBtn('primary', 'check', 'Stop transport', `openStopTransport('${s.id}')`)}</div>`;
+  }
+  if(te){
+    return `<div class="sf-kpi sf-kpi--plain" style="margin:0 0 14px;"><div><span>Transport stopped ${escapeHtml(te.date || '')}</span><b>Billed ${fmtMoney(te.amount)} (${te.months} month${te.months == 1 ? '' : 's'})</b><small>${escapeHtml(te.reason || '')} ${te.by ? '· by ' + escapeHtml(te.by) : ''}</small></div></div>`;
+  }
+  return '';
+}
+function rfStopCalc(sid){
+  const s = students.find(x => x.id === sid); if(!s) return null;
+  const fare = Number(studentBusFare(s)) || 0;
+  const months = Math.min(12, Math.max(0, Number((document.getElementById('stMonths') || {}).value)));
+  const customEl = document.getElementById('stCharge');
+  let charge = Math.round(fare * months / 12);
+  if(customEl && customEl.dataset.touched === '1') charge = Math.max(0, Math.round(Number(customEl.value) || 0));
+  const paid = payments.filter(p => p.studentId === sid && p.category === 'bus' && !p.voided && (p.classAtPayment === s.className || !p.classAtPayment)).reduce((a, p) => a + payNet(p), 0);
+  return { s, fare, months, charge, paid, diff: paid - charge };
+}
+function rfStopUpdate(fromCharge){
+  const sid = document.getElementById('stSid').value;
+  const el = document.getElementById('stCharge');
+  if(fromCharge) el.dataset.touched = '1';
+  else { el.dataset.touched = ''; const s = students.find(x => x.id === sid); el.value = Math.round((Number(studentBusFare(s)) || 0) * Math.min(12, Math.max(0, Number(document.getElementById('stMonths').value))) / 12); }
+  const c = rfStopCalc(sid); if(!c) return;
+  const box = document.getElementById('stResult');
+  box.innerHTML = c.diff > 0
+    ? `Paid so far <b>${fmtMoney(c.paid)}</b> − billed <b>${fmtMoney(c.charge)}</b> = <b style="color:#0a7a3d;">${fmtMoney(c.diff)} refund due</b>. After you refund it, the Bus Fee balance will be ₹0.`
+    : c.diff < 0
+      ? `Paid so far <b>${fmtMoney(c.paid)}</b>, billed <b>${fmtMoney(c.charge)}</b> → <b style="color:#b3261e;">${fmtMoney(-c.diff)} still payable</b>.`
+      : `Paid <b>${fmtMoney(c.paid)}</b> = billed <b>${fmtMoney(c.charge)}</b>. Nothing to refund and nothing pending.`;
+}
+function openStopTransport(sid){
+  if(!refundPerm('create')){ showToast("You don't have permission to change transport billing."); return; }
+  const s = students.find(x => x.id === sid); if(!s) return;
+  const fare = Number(studentBusFare(s)) || 0;
+  const opts = [...Array(13).keys()].map(m => `<option value="${m}"${m === 6 ? ' selected' : ''}>${m} month${m === 1 ? '' : 's'}</option>`).join('');
+  rfOpenModal(`<h3 style="margin:0 0 6px;">Stop transport — ${escapeHtml(rfStudentName(sid))}</h3>
+    <div style="font-size:.85rem;color:var(--ink-soft);margin-bottom:12px;">${escapeHtml(s.className || '')} — ${escapeHtml(s.section || '')} · Bus fare ${fmtMoney(fare)} / year</div>
+    <input type="hidden" id="stSid" value="${escapeHtml(sid)}">
+    <div class="f-field" style="margin-bottom:10px;"><label>Date transport stopped</label><input type="date" id="stDate" value="${new Date().toISOString().slice(0, 10)}"></div>
+    <div class="f-field" style="margin-bottom:10px;"><label>Months of bus service used (billed)</label><select id="stMonths" onchange="rfStopUpdate(false)">${opts}</select></div>
+    <div class="f-field" style="margin-bottom:10px;"><label>Bus fee to keep (₹) <small>— auto = fare × months ÷ 12; change only if your school rounds differently</small></label><input type="number" min="0" id="stCharge" oninput="rfStopUpdate(true)"></div>
+    <div class="f-field" style="margin-bottom:10px;"><label>Reason</label><input type="text" id="stReason" value="Discontinued transport"></div>
+    <div id="stResult" style="background:var(--surface-2,#f4f1f8);border-radius:10px;padding:12px;font-size:.9rem;margin-bottom:14px;"></div>
+    <div class="modal-actions" style="display:flex;gap:10px;justify-content:flex-end;">
+      <button type="button" class="btn btn-ghost" onclick="rfCloseModal()">Cancel</button>
+      <button type="button" class="btn btn-primary" onclick="submitStopTransport()">Save &amp; stop transport</button></div>`);
+  rfStopUpdate(false);
+}
+async function submitStopTransport(){
+  if(rfBusy) return; rfBusy = true;
+  try{
+    await rfEnsureAll();
+    const sid = document.getElementById('stSid').value;
+    const c = rfStopCalc(sid); if(!c) return;
+    const s = c.s;
+    const date = document.getElementById('stDate').value || new Date().toISOString().slice(0, 10);
+    const reason = document.getElementById('stReason').value.trim() || 'Discontinued transport';
+    s.transportEnd = { className: s.className, date, months: c.months, amount: c.charge, fare: c.fare, reason, by: currentUser.name, at: new Date().toISOString() };
+    s.needsTransport = 'No';
+    await persist();
+    rfCloseModal();
+    const msg = c.diff > 0 ? `Transport stopped. Refund due ${fmtMoney(c.diff)} — choose the bus fee to refund below.` : c.diff < 0 ? `Transport stopped. ${fmtMoney(-c.diff)} still payable for the months used.` : 'Transport stopped. Nothing pending.';
+    showToast(msg);
+    if(rfView === 'create') rfPickStudent(sid);
+    else if(typeof renderRefundsTab === 'function' && document.getElementById('feeBody')) renderRefundsTab(document.getElementById('feeBody'));
+  }finally{ rfBusy = false; }
 }

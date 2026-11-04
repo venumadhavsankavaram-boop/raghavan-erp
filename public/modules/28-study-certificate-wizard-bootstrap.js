@@ -436,7 +436,7 @@ const WIZARD_TABS = ['new','parent','previous','transport'];
       if(existing && existing.needsTransport === 'Yes' && data.needsTransport !== 'Yes'){
         const paidBus = payments.filter(p => p.studentId === editId && p.category === 'bus' && !p.voided).reduce((sum,p) => sum + payNet(p), 0);
         if(paidBus > 0){
-          showToast(`Can't turn off Needs Transport — ${fmtMoney(paidBus)} has already been collected as Bus Fee for this student. Void or Refund that payment first (Fee ledger → Payment History), then update Transport here.`);
+          showToast(`Can't turn off Needs Transport here — ${fmtMoney(paidBus)} has already been collected as Bus Fee. Use Fees → Refunds → "Stop transport" (it bills only the months used and shows any refund due).`);
           return false;
         }
       }
@@ -445,6 +445,7 @@ const WIZARD_TABS = ['new','parent','previous','transport'];
     if(editId){
       const idx = students.findIndex(s => s.id === editId);
       students[idx] = { ...students[idx], ...data };
+      if(students[idx].needsTransport === 'Yes' && students[idx].transportEnd) delete students[idx].transportEnd; // riding again: full fare applies
       showToast('Student record updated.');
     }else{
       // Duplicate check: Aadhaar match (if entered) is a strong signal regardless of
