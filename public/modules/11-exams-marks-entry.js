@@ -642,6 +642,44 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     return admitCardTemplates.find(t => t.id === admitCardsTemplateId) || admitCardTemplates.find(t => t.isDefault) || admitCardTemplates[0];
   }
 
+  // ---- Exam timings + automatic exam choice ----
+  function acFmtTime(t){ if(!t) return ''; const [h, m] = String(t).split(':').map(Number); if(isNaN(h)) return ''; return ((h % 12) || 12) + ':' + String(m || 0).padStart(2, '0') + ' ' + (h < 12 ? 'AM' : 'PM'); }
+  function acTimeText(sub, exam){
+    const a = (sub && sub.startTime) || (exam && exam.defaultStart) || '', b = (sub && sub.endTime) || (exam && exam.defaultEnd) || '';
+    return a ? acFmtTime(a) + (b ? ' – ' + acFmtTime(b) : '') : '';
+  }
+  // The exam running today, else the next one coming up, else the most recent one, else the first.
+  function acCurrentExam(){
+    const today = new Date().toISOString().slice(0, 10);
+    const dated = examDefs.filter(e => e.startDate);
+    const running = dated.filter(e => e.startDate <= today && (e.endDate || e.startDate) >= today).sort((a, b) => a.startDate.localeCompare(b.startDate))[0];
+    if(running) return running;
+    const next = dated.filter(e => e.startDate > today).sort((a, b) => a.startDate.localeCompare(b.startDate))[0];
+    if(next) return next;
+    return dated.sort((a, b) => b.startDate.localeCompare(a.startDate))[0] || examDefs[0];
+  }
+  function acExamTag(e){
+    const today = new Date().toISOString().slice(0, 10);
+    if(!e.startDate) return '';
+    if(e.startDate <= today && (e.endDate || e.startDate) >= today) return ' — running now';
+    return e.startDate > today ? ' — upcoming' : ' — finished';
+  }
+  async function acSaveDefaultTimes(){
+    const exam = examDefs.find(e => e.id === admitCardsExamId); if(!exam) return;
+    const st = document.getElementById('acDefStart').value, en = document.getElementById('acDefEnd').value;
+    if(st && en && en <= st){ showToast('The end time must be after the start time.'); return; }
+    exam.defaultStart = st; exam.defaultEnd = en;
+    await storageSet(EXAM_DEFS_KEY, examDefs);
+    showToast(st ? 'Exam timings saved — they print on every admit card of this exam.' : 'Exam timings cleared.');
+    renderResultBody();
+  }
+  // Prints every section of one class (each with its own subjects) in a single go.
+  function printAdmitCardsClass(cls){
+    const secs = SECTIONS.filter(sec => students.some(s => s.className === cls && s.section === sec && isActive(s)));
+    if(!secs.length){ showToast('No students in ' + cls + '.'); return; }
+    printAdmitCards(cls, secs, null);
+  }
+
   let expandedAdmitClass = '';
   function toggleAdmitClassExpand(cls){
     expandedAdmitClass = (expandedAdmitClass === cls) ? '' : cls;
@@ -652,8 +690,8 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
       body.innerHTML = `<div class="empty-state"><b>No exams yet</b>Create an exam under the "Exams" tab first.</div>`;
       return;
     }
-    if(!admitCardsExamId || !examDefs.find(e => e.id === admitCardsExamId)) admitCardsExamId = examDefs[0].id;
-    const examOptions = examDefs.map(ex => `<option value="${ex.id}" ${admitCardsExamId===ex.id?'selected':''}>${ex.name}</option>`).join('');
+    if(!admitCardsExamId || !examDefs.find(e => e.id === admitCardsExamId)) admitCardsExamId = acCurrentExam().id;
+    const examOptions = examDefs.map(ex => `<option value="${ex.id}" ${admitCardsExamId===ex.id?'selected':''}>${ex.name}${acExamTag(ex)}</option>`).join('');
     const raCfg = roomAllotConfigFor(admitCardsExamId);
     const visibleClasses = (raCfg.selectedClasses && raCfg.selectedClasses.length) ? raCfg.selectedClasses : CLASS_LEVELS;
     const gridHtml = buildModernClassGrid(
@@ -664,13 +702,34 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
       cls => expandedAdmitClass === cls
     );
     body.innerHTML = `
-      <div class="f-field" style="max-width:320px; margin-bottom:20px;">
+      <div class="f-field" style="max-width:320px; margin-bottom:12px;">
         <label>Exam</label>
         <select id="admitExamSelect" onchange="admitCardsExamId=this.value; renderResultBody();">${examOptions}</select>
       </div>
+      ${acHeaderHtml(raCfg, visibleClasses)}
       ${(raCfg.selectedClasses && raCfg.selectedClasses.length) ? `<p style="font-size:0.78rem; color:var(--ink-soft); margin:-10px 0 16px;">Showing only the classes selected for this exam under <a onclick="switchResultTab('roomallotment')" style="color:var(--magenta); cursor:pointer; font-weight:600;">Room Allotment → Select Classes</a>.</p>` : ''}
       ${gridHtml}
     `;
+  }
+  function acHeaderHtml(raCfg, visibleClasses){
+    const exam = examDefs.find(e => e.id === admitCardsExamId); if(!exam) return '';
+    const period = exam.startDate ? exam.startDate + (exam.endDate && exam.endDate !== exam.startDate ? ' – ' + exam.endDate : '') : 'dates not set';
+    const canPrint = getResultTabAccess(currentUser.role, 'result_admitcards', 'print');
+    const classBtns = visibleClasses.filter(c => students.some(s => s.className === c && isActive(s))).map(c => {
+      const secs = SECTIONS.filter(sec => students.some(s => s.className === c && s.section === sec && isActive(s)));
+      const bad = secs.filter(sec => { const sj = getExamSubjects(exam, c, sec); return !sj.length || sj.some(x => !x.date); }).length;
+      return `<button class="btn btn-ghost btn-sm" style="margin:2px;" ${(!canPrint || bad) ? 'disabled' : ''} title="${bad ? bad + ' section(s) still need subjects or exam dates' : 'Print every section'}" onclick="printAdmitCardsClass('${c}')">${c}${bad ? ' ⚠' : ''}</button>`;
+    }).join('');
+    return `<div style="border:1px solid var(--border); border-radius:12px; padding:12px 14px; margin-bottom:16px; background:var(--surface-2,#f7f5fb);">
+      <div style="font-weight:700;">${exam.name} <span style="font-weight:400; color:var(--ink-soft);">· ${period}${acExamTag(exam)}</span></div>
+      <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin:10px 0 6px;">
+        <div class="f-field" style="margin:0;"><label>Exam starts</label><input type="time" id="acDefStart" value="${exam.defaultStart || ''}"></div>
+        <div class="f-field" style="margin:0;"><label>Exam ends</label><input type="time" id="acDefEnd" value="${exam.defaultEnd || ''}"></div>
+        <button class="btn btn-primary btn-sm" onclick="acSaveDefaultTimes()">Save timings</button>
+        <span style="font-size:.78rem; color:var(--ink-soft); max-width:300px;">Used for every subject that has no time of its own. A subject's own time (set in the Exams tab) wins.</span>
+      </div>
+      ${canPrint ? `<div style="margin-top:8px; font-size:.82rem;"><b>Print a whole class</b> (all its sections):</div><div>${classBtns || '<small>No classes with students.</small>'}</div>` : ''}
+    </div>`;
   }
   function openAdmitCardsRoster(cls, sec){
     window.scrollTo({top:0,left:0,behavior:'instant'});
@@ -732,16 +791,10 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     `;
   }
 
-  function printAdmitCards(cls, sec, singleStudentId){
+  function printAdmitCards(cls, secArg, singleStudentId){
     const exam = examDefs.find(e => e.id === admitCardsExamId);
     if(!exam) return;
-    const subjects = getExamSubjects(exam, cls, sec).slice().sort((a,b) => (a.date||'').localeCompare(b.date||''));
-    if(subjects.length === 0){ showToast('No subjects configured for this class & section yet.'); return; }
-    const missingDates = subjects.filter(s => !s.date);
-    if(missingDates.length > 0){ showToast(`Set an exam date for: ${missingDates.map(s=>s.name).join(', ')} — every subject needs a date before hall tickets can be generated.`); return; }
-    let list = students.filter(s => s.className===cls && s.section===sec && isActive(s));
-    if(singleStudentId) list = list.filter(s => s.id === singleStudentId);
-    if(list.length === 0) return;
+    const secList = Array.isArray(secArg) ? secArg : [secArg];
     const logoSrc = document.querySelector('.sb-brand img').src;
     const examPeriod = exam.startDate ? exam.startDate + (exam.endDate && exam.endDate!==exam.startDate ? ' – '+exam.endDate : '') : 'To be announced';
     const tmpl = currentAdmitCardTemplate();
@@ -749,14 +802,28 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     const principalSig = schoolInfo.principalSignature || '';
     const cardTitle = (tmpl.titleOverride||'').trim() || 'Admit Card';
     const instructions = (tmpl.instructionsText||'').split('\n').map(l=>l.trim()).filter(Boolean);
-    const ctx = { exam, subjects, list, logoSrc, examPeriod, tmpl, roomMap, principalSig, cardTitle, instructions };
-
-    // Layout is template-driven: 'strip' (Classic Strip, unchanged), 'grid4'
-    // (Modern Card, 4-up 2x2 on A4) or 'full' (Full Board-Style, one candidate
-    // per A4 sheet with a full instructions block) — see admitCardTemplates.
-    const built = tmpl.layout === 'full' ? buildAdmitCardsFull(ctx)
-                : tmpl.layout === 'grid4' ? buildAdmitCardsGrid4(ctx)
-                : buildAdmitCardsStrip(ctx);
+    const parts = []; let firstList = null, builtCss = '';
+    for(const sec of secList){
+      const subjects = getExamSubjects(exam, cls, sec).slice().sort((a,b) => (a.date||'').localeCompare(b.date||''));
+      if(subjects.length === 0){ showToast('No subjects configured for ' + cls + ' ' + sec + ' yet.'); return; }
+      const missingDates = subjects.filter(s => !s.date);
+      if(missingDates.length > 0){ showToast(`Set an exam date for: ${missingDates.map(s=>s.name).join(', ')} (${cls} ${sec}) — every subject needs a date before hall tickets can be generated.`); return; }
+      let list = students.filter(s => s.className===cls && s.section===sec && isActive(s)).sort(compareByRoll);
+      if(singleStudentId) list = list.filter(s => s.id === singleStudentId);
+      if(list.length === 0) continue;
+      if(!firstList) firstList = list;
+      const ctx = { exam, subjects, list, logoSrc, examPeriod, tmpl, roomMap, principalSig, cardTitle, instructions };
+      // Layout is template-driven: 'strip' (Classic Strip, unchanged), 'grid4'
+      // (Modern Card, 4-up 2x2 on A4) or 'full' (Full Board-Style, one candidate
+      // per A4 sheet with a full instructions block) — see admitCardTemplates.
+      const built = tmpl.layout === 'full' ? buildAdmitCardsFull(ctx)
+                  : tmpl.layout === 'grid4' ? buildAdmitCardsGrid4(ctx)
+                  : buildAdmitCardsStrip(ctx);
+      builtCss = built.css; parts.push(built.html);
+    }
+    if(!parts.length) return;
+    const list = firstList;
+    const built = { css: builtCss, html: parts.join('<div style="page-break-after:always;"></div>') };
 
     // Smart print filename: this becomes the print popup's document title, which
     // browsers use to suggest a filename in the native "Save as PDF" dialog —
@@ -764,7 +831,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     const safe = str => (str||'').replace(/[^\w-]+/g,'_').replace(/^_+|_+$/g,'');
     const fileTitle = singleStudentId
       ? `AdmitCard_${safe(list[0].admissionNo)}_${safe((list[0].firstName||'')+(list[0].lastName||''))}_${safe(exam.name)}`
-      : `AdmitCards_${safe(cls)}_${safe(sec)}_${safe(exam.name)}`;
+      : `AdmitCards_${safe(cls)}_${secList.length > 1 ? 'AllSections' : safe(secList[0])}_${safe(exam.name)}`;
 
     const w = window.open('', '_blank');
     w.document.write(`
@@ -818,9 +885,9 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
         <div class="ac-col-subjects">
           <div class="ac-subj-title">SUBJECT-WISE SCHEDULE — sign daily before the exam begins</div>
           <table class="ac-subj-table">
-            <thead><tr><th>Subject</th><th class="date-col">Date</th><th class="sign-col">Invigilator's Signature</th></tr></thead>
+            <thead><tr><th>Subject</th><th class="date-col">Date</th>${subjects.some(x => acTimeText(x, exam)) ? '<th class="time-col">Time</th>' : ''}<th class="sign-col">Invigilator's Signature</th></tr></thead>
             <tbody>
-            ${subjects.map(sub => `<tr><td>${sub.name}</td><td class="date-cell">${sub.date||'TBA'}</td><td class="sign-cell">&nbsp;</td></tr>`).join('')}
+            ${subjects.map(sub => `<tr><td>${sub.name}</td><td class="date-cell">${sub.date||'TBA'}</td>${subjects.some(x => acTimeText(x, exam)) ? `<td class="time-cell">${acTimeText(sub, exam) || '—'}</td>` : ''}<td class="sign-cell">&nbsp;</td></tr>`).join('')}
             </tbody>
           </table>
         </div>
@@ -875,6 +942,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
         .ac-subj-table td{ padding:2mm 3px; border:1px solid #ddd; line-height:1; }
         .ac-subj-table th.sign-col, .ac-subj-table td.sign-cell{ width:26mm; }
         .ac-subj-table th.date-col, .ac-subj-table td.date-cell{ width:18mm; }
+        .ac-subj-table th.time-col, .ac-subj-table td.time-cell{ width:25mm; }
 
         .ac-col-sign{ width:20mm; border-left:1px solid #333; padding:2mm 1.6mm; flex-shrink:0; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; }
         .ac-sign-line{ width:100%; border-top:1px solid #555; text-align:center; font-size:5.6px; color:#666; padding-top:1mm; }
@@ -909,7 +977,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
           <tr><td>Hall Ticket No.</td><td>${ht&&ht.htNumber?ht.htNumber:'—'}</td></tr>
           <tr><td>Room</td><td>${roomInfo?roomInfo.room:'—'}</td></tr>
         </table>
-        <div class="acg-subjcount">${subjects.length} subject${subjects.length===1?'':'s'} — see notice board / class teacher for the full subject-wise date sheet.</div>
+        <div class="acg-subjcount">${subjects.length} subject${subjects.length===1?'':'s'}${subjects.some(x => acTimeText(x, exam)) ? ' · ' + (acTimeText(subjects[0], exam) || '') : ''} — see notice board / class teacher for the full subject-wise date sheet.</div>
         ${tmpl.footerNote ? `<div class="acg-footnote">${tmpl.footerNote}</div>` : ''}
         <div class="acg-signrow">
           <div class="acg-sign">Student's Signature</div>
@@ -985,9 +1053,9 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
           </div>
           <div class="acf-subj-title">SUBJECT-WISE SCHEDULE</div>
           <table class="acf-subj-table">
-            <thead><tr><th>Subject</th><th>Date</th><th>Max Marks</th><th>Invigilator's Signature</th></tr></thead>
+            <thead><tr><th>Subject</th><th>Date</th>${subjects.some(x => acTimeText(x, exam)) ? '<th>Time</th>' : ''}<th>Max Marks</th><th>Invigilator's Signature</th></tr></thead>
             <tbody>
-            ${subjects.map(sub => `<tr><td>${sub.name}</td><td>${sub.date||'TBA'}</td><td>${sub.maxMarks||''}</td><td>&nbsp;</td></tr>`).join('')}
+            ${subjects.map(sub => `<tr><td>${sub.name}</td><td>${sub.date||'TBA'}</td>${subjects.some(x => acTimeText(x, exam)) ? `<td>${acTimeText(sub, exam) || '—'}</td>` : ''}<td>${sub.maxMarks||''}</td><td>&nbsp;</td></tr>`).join('')}
             </tbody>
           </table>
           ${instructions.length ? `

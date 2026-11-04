@@ -559,6 +559,15 @@ const ROOMS_KEY = "exam-rooms";
     document.getElementById('subjMaxMarks').value = existing ? existing.maxMarks : 100;
     if(typeof subjSplitLoad === 'function') subjSplitLoad('subj', existing);
     document.getElementById('subjDate').value = existing ? (existing.date||'') : (exam.startDate||'');
+    // Exam timings (printed on admit cards). Added here so no page markup has to change.
+    if(!document.getElementById('subjStartTime')){
+      const dateField = document.getElementById('subjDate').closest('.f-field');
+      const box = document.createElement('div'); box.className = 'form-grid';
+      box.innerHTML = '<div class="f-field"><label>Exam starts at</label><input type="time" id="subjStartTime"></div><div class="f-field"><label>Exam ends at</label><input type="time" id="subjEndTime"></div>';
+      dateField.parentElement.insertAdjacentElement('afterend', box);
+    }
+    document.getElementById('subjStartTime').value = existing ? (existing.startTime||'') : (exam.defaultStart||'');
+    document.getElementById('subjEndTime').value = existing ? (existing.endTime||'') : (exam.defaultEnd||'');
     document.getElementById('subjCountable').checked = existing ? (existing.countable !== false) : true;
     document.getElementById('subjElective').checked = existing ? !!existing.elective : false;
 
@@ -617,6 +626,8 @@ const ROOMS_KEY = "exam-rooms";
     const split = (typeof subjSplitRead === 'function') ? subjSplitRead('subj') : { internalMax: 0 };
     if(split.error){ showToast(split.error); return false; }
     const dateVal = document.getElementById('subjDate').value;
+    { const st = (document.getElementById('subjStartTime')||{}).value, en = (document.getElementById('subjEndTime')||{}).value;
+      if(st && en && en <= st){ showToast('The exam end time must be after the start time.'); return false; } }
     if(!dateVal){ showToast('Set an exam date for this subject — it\'s required before hall tickets can be generated.'); return false; }
     const clashingHoliday = holidayFor(dateVal);
     if(clashingHoliday && !await showConfirmDialog(`${dateVal} is marked as a holiday (${clashingHoliday.name}). Schedule the exam on this date anyway?`)) return false;
@@ -626,6 +637,7 @@ const ROOMS_KEY = "exam-rooms";
       name, code: masterMatch ? (masterMatch.code||'') : '', maxMarks: Number(document.getElementById('subjMaxMarks').value) || 100,
       internalMax: split.internalMax,
       date: dateVal,
+      startTime: (document.getElementById('subjStartTime')||{}).value || '', endTime: (document.getElementById('subjEndTime')||{}).value || '',
       staffIds, countable: document.getElementById('subjCountable').checked,
       elective: document.getElementById('subjElective').checked,
     };
