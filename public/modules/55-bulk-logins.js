@@ -185,7 +185,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         '<datalist id="sbList">' + active().slice(0, 1500).map(x => '<option value="' + esc(((x.firstName || '') + ' ' + (x.lastName || '')).trim() + ' · ' + x.className + ' ' + (x.section || '') + ' · #' + (x.admissionNo || x.id)) + '"></option>').join('') + '</datalist>';
       h += '<div style="font-weight:700;margin:12px 0 4px;">Families already linked (' + fams.length + ')</div>';
       h += fams.length ? '<div style="max-height:220px;overflow:auto;border:1px solid #e1e6f0;border-radius:10px;padding:6px 10px;">' + fams.map(f =>
-          '<div style="padding:6px 0;border-top:1px solid #eef1f7;"><span style="color:#5b6784;font-size:.78rem;">login ' + esc(f.username) + '</span><br>' +
+          '<div style="padding:6px 0;border-top:1px solid #eef1f7;"><span style="color:#5b6784;font-size:.78rem;">login ' + esc(f.username) + '</span> <button class="btn" style="padding:2px 8px;font-size:.72rem;" data-sbc="' + esc(f.userId) + '">Check this family</button><div id="sbc-' + esc(f.userId) + '"></div>' +
           f.children.map(c => esc(c.name) + ' <span style="color:#5b6784;">' + esc(c.className) + ' ' + esc(c.section || '') + '</span> <button class="btn" style="padding:2px 8px;font-size:.72rem;" data-sbu="' + esc(f.userId) + '|' + esc(c.id) + '">Unlink</button>').join('<br>') + '</div>').join('') + '</div>'
         : '<div class="blk-hint">None yet.</div>';
       out(card, h); bindToggle();
@@ -202,6 +202,17 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
       card.querySelectorAll('[data-sbu]').forEach(b => b.onclick = async () => {
         const [uid, sid] = b.dataset.sbu.split('|');
         try{ const j = await api('POST', '/api/student-logins/unlink-sibling', { userId: uid, studentId: sid }); toast('Unlinked' + (j.restored ? '; their own login is back.' : '.')); siblings(card); }catch(e){ toast(e.message); }
+      });
+      card.querySelectorAll('[data-sbc]').forEach(b => b.onclick = async () => {
+        const box = card.querySelector('#sbc-' + b.dataset.sbc); if(!box) return;
+        box.innerHTML = '<span style="color:#5b6784;font-size:.8rem;">Checking…</span>';
+        try{
+          const j = await api('GET', '/api/student-logins/family-check?userId=' + encodeURIComponent(b.dataset.sbc));
+          box.innerHTML = '<div style="margin:6px 0;padding:8px 10px;border-radius:10px;background:' + (j.ok ? '#e8f6ee' : '#fdecea') + ';font-size:.82rem;">' +
+            '<b>' + (j.ok ? '✅ Everything is in order — the parent can switch between the children.' : '⚠️ Something needs fixing:') + '</b>' +
+            j.checks.map(x => '<div>' + (x.ok ? '✔' : '✖') + ' ' + esc(x.label) + (x.ok ? '' : ' — <b>' + esc(x.fix) + '</b>') + '</div>').join('') +
+            '<div style="margin-top:4px;color:#5b6784;">' + j.children.map(k => esc(k.name) + ' (' + esc(k.className) + ' ' + esc(k.section || '') + '): ' + k.payments + ' fee receipt(s)' + (k.current ? ' · open now' : '')).join('<br>') + '</div></div>';
+        }catch(e){ box.innerHTML = '<span style="color:#b3261e;">' + esc(e.message) + '</span>'; }
       });
       card.querySelector('#sbManual').onclick = () => {
         const find = t => active().find(x => (((x.firstName || '') + ' ' + (x.lastName || '')).trim() + ' · ' + x.className + ' ' + (x.section || '') + ' · #' + (x.admissionNo || x.id)) === t.trim());

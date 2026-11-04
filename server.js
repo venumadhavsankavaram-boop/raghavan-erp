@@ -7468,6 +7468,40 @@ app.post('/api/student-logins/link-siblings', async (req, res) => {
     return res.status(200).json({ ok: true, keepUsername: keep.username, children: list.length, disabled });
   } catch (err) { console.error('link siblings error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
+// GET /api/student-logins/family-check?userId=  (Admin) -> a plain checklist of everything a family login needs, so a
+// problem can be found WITHOUT the parent's password. Read-only.
+app.get('/api/student-logins/family-check', async (req, res) => {
+  try {
+    if (!sibAdminOnly(req, res)) return;
+    const uid = String(req.query.userId || '');
+    const u = (await sql`SELECT id, username, role, linked_student_id AS sid, sibling_ids, deleted_at, must_change_password FROM users WHERE id = ${uid}`)[0];
+    if (!u) return res.status(404).json({ error: 'Login not found.' });
+    const checks = []; const add = (ok, label, fix) => checks.push({ ok: !!ok, label, fix: ok ? '' : (fix || '') });
+    add(!u.deleted_at, 'The login is active (not switched off)', 'Unlink and link again so this login is the kept one.');
+    add(u.role === 'Parent', 'The login type is Parent', 'The child switcher works only on Parent logins.');
+    const on = await siblingsEnabled();
+    add(on, 'The sibling feature is ON', 'Turn the sibling feature on.');
+    const ids = parseSibs(u.sibling_ids);
+    add(ids.length >= 2, 'The login covers ' + ids.length + ' children', 'Link the children again.');
+    add(!u.sid || ids.includes(u.sid), 'The child currently open is one of the linked children', 'Link the children again (this resets the open child).');
+    const ph = ids.length ? ids.map((_, i) => `$${i + 1}`).join(', ') : "''";
+    const kids = ids.length ? await sql.query(`SELECT id, first_name, last_name, class_name, section, status, deleted_at FROM students WHERE id IN (${ph})`, ids) : [];
+    const children = [];
+    for (const id of ids) {
+      const k = kids.find(x => x.id === id);
+      const name = k ? ((k.first_name || '') + ' ' + (k.last_name || '')).trim() : id;
+      add(k && !k.deleted_at, name + ': the student record exists', 'Restore the student or unlink this child.');
+      if (!k || k.deleted_at) continue;
+      add(!k.status || String(k.status).toLowerCase() === 'active', name + ': the student is Active (status: ' + (k.status || 'Active') + ')', 'Make the student Active, or unlink.');
+      add(!!k.class_name && !!k.section, name + ': has a class and section (' + (k.class_name || '?') + ' ' + (k.section || '?') + ')', 'Set the class and section on the student.');
+      const pc = (await sql`SELECT COUNT(*) AS n FROM payments WHERE student_id = ${id}`)[0];
+      children.push({ id, name, className: k.class_name, section: k.section, payments: Number(pc.n) || 0, current: id === u.sid });
+    }
+    const dup = (await sql`SELECT COUNT(*) AS n FROM users WHERE deleted_at IS NULL AND role = 'Parent' AND id <> ${uid} AND linked_student_id IN (${ids.length ? ids : ['']})`)[0];
+    add(!Number(dup.n), 'No other active login points at these children (' + Number(dup.n) + ' found)', 'Another login still points at one of these children; unlink and link again with "switch off the extra login" ticked.');
+    return res.status(200).json({ ok: checks.every(c => c.ok), username: u.username, checks, children });
+  } catch (err) { console.error('family check error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
 // GET /api/student-logins/families -> the linked families (one login, 2+ children)
 app.get('/api/student-logins/families', async (req, res) => {
   try {

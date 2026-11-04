@@ -151,6 +151,10 @@ try {
   const fl = await login('amanverma', 'student@123'); ok('the family login signs in', fl.s === 200, fl.s);
   const fme = await call('GET', '/api/me', fl.ck);
   ok('the family login lists both children and starts on the first', fme.s === 200 && fme.j.children.length === 2 && fme.j.linkedStudentId === 'sib1', fme.j);
+  const famRow = ((await call('GET', '/api/student-logins/families', A.ck)).j.families || []).find(f => f.username === 'amanverma');
+  const fchk = await call('GET', '/api/student-logins/family-check?userId=' + (famRow && famRow.userId), A.ck);
+  ok('the family check passes for a good family and lists both children', fchk.s === 200 && fchk.j.ok === true && fchk.j.children.length === 2, fchk.j);
+  ok('a parent cannot run the family check', (await call('GET', '/api/student-logins/family-check?userId=' + (famRow && famRow.userId), fl.ck)).s === 403);
   ok('the portal shows only the current child', (await call('GET', '/api/students', fl.ck)).j.map(x => x.id).join() === 'sib1');
   await call('PUT', '/api/kv/fee-refunds', A.ck, [
     { id: 'r1', refundNo: 'RF-0001', studentId: 'sib1', status: 'processed', method: 'credit', total: 1500, bankAccountId: 'BANK-SECRET', note: 'private note', audit: [{ by: 'x' }], lines: [{ paymentId: 'pay1', amount: 1500 }] },
