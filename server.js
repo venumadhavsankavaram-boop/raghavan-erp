@@ -302,6 +302,7 @@ async function ensureSchema() {
   await addColumnIfMissing('users', 'last_login_at DATETIME NULL');
   await addColumnIfMissing('users', 'last_seen_at DATETIME NULL');
   await addColumnIfMissing('users', 'installed_at DATETIME NULL');
+  await addColumnIfMissing('users', 'sibling_ids TEXT NULL');
   // A user's own "My Account" profile photo (base64 data URL, capped at 2MB
   // client-side — see PHOTO_UPLOAD_MAX_BYTES in index.html, well under this
   // server's 25mb JSON body limit). This column didn't exist before, so the
@@ -4156,7 +4157,32 @@ function fmtMoneyServer(n) {
 // just one.
 async function getStudentContactUserIds(studentId) {
   const rows = await sql`SELECT id FROM users WHERE linked_student_id = ${studentId}`;
-  return rows.map(r => r.id);
+  const out = new Set(rows.map(r => r.id));
+  (await familyUserIdsFor([studentId])).forEach(id => out.add(id));
+  return Array.from(out);
+}
+// ---- Sibling families: ONE parent login can cover several children. users.linked_student_id is always the child currently
+// shown (so every existing screen keeps working unchanged); users.sibling_ids lists ALL the family's children (JSON array). ----
+function parseSibs(v) { if (!v) return []; try { const a = JSON.parse(v); return Array.isArray(a) ? a.map(String) : []; } catch (_) { return []; } }
+async function familyUserIdsFor(studentIds) {
+  const want = new Set(studentIds.map(String)); if (!want.size) return [];
+  const rows = await sql`SELECT id, sibling_ids FROM users WHERE sibling_ids IS NOT NULL AND sibling_ids <> '' AND deleted_at IS NULL`;
+  return rows.filter(r => parseSibs(r.sibling_ids).some(x => want.has(x))).map(r => r.id);
+}
+let sibEnabledCache = { v: true, at: 0 };
+async function siblingsEnabled() {
+  if (Date.now() - sibEnabledCache.at < 5000) return sibEnabledCache.v;
+  let v = true;
+  try { const r = await sql`SELECT value FROM kv_store WHERE \`key\` = 'sibling-links-enabled'`; if (r.length) { let x = r[0].value; if (typeof x === 'string') { try { x = JSON.parse(x); } catch (_) {} } v = !(x === false || x === 'false' || (x && x.enabled === false)); } } catch (_) {}
+  sibEnabledCache = { v, at: Date.now() }; return v;
+}
+async function childrenOfUser(userRow) {
+  const ids = parseSibs(userRow && userRow.sibling_ids);
+  if (ids.length < 2 || !(await siblingsEnabled())) return [];
+  const ph = ids.map((_, i) => `$${i + 1}`).join(', ');
+  const rows = await sql.query(`SELECT id, first_name, last_name, class_name, section FROM students WHERE id IN (${ph}) AND deleted_at IS NULL`, ids);
+  const by = new Map(rows.map(r => [r.id, r]));
+  return ids.filter(id => by.has(id)).map(id => { const r = by.get(id); return { id, name: ((r.first_name || '') + ' ' + (r.last_name || '')).trim(), className: r.class_name, section: r.section }; });
 }
 // Every Student/Parent login for every active student in a class (optionally
 // narrowed to one section) — used to notify a whole class about something
@@ -4172,7 +4198,9 @@ async function getClassSectionContactUserIds(className, section) {
   const ids = studentRows.map(r => r.id);
   const placeholders = ids.map((_, i) => `$${i + 1}`).join(', ');
   const userRows = await sql.query(`SELECT id FROM users WHERE linked_student_id IN (${placeholders})`, ids);
-  return userRows.map(r => r.id);
+  const outIds = new Set(userRows.map(r => r.id));
+  (await familyUserIdsFor(ids)).forEach(id => outIds.add(id));
+  return Array.from(outIds);
 }
 function getStudentParentPhone(student) {
   const extra = student.extra || {};
@@ -5335,6 +5363,7 @@ app.post('/api/notifications/broadcast', async (req, res) => {
       const placeholders = studentIds.map((_, i) => `$${i + 1}`).join(', ');
       const rows = await sql.query(`SELECT id FROM users WHERE linked_student_id IN (${placeholders})`, studentIds);
       rows.forEach(r => userIds.add(r.id));
+      (await familyUserIdsFor(studentIds)).forEach(id => userIds.add(id));
     }
     if (staffIds.length) {
       // staffIds here are staff.id (the roster this app already scopes
@@ -5850,6 +5879,7 @@ async function completeLogin(req, res, user) {
   // instead of role-driven. See checkPlanModuleAccess above for enforcement.
   shaped.moduleAccess = getModuleAccess();
   shaped.twofaEnabled = !!user.twofa_method;
+  delete shaped.siblingIds; shaped.children = await childrenOfUser(user).catch(() => []);
   shaped.mustSetup2fa = ['Admin', 'Principal'].includes(user.role) && !user.twofa_method && await require2faOn();
   shaped.mustChangePassword = !!Number(user.must_change_password || 0);
   await createSession(req, res, user);
@@ -7109,6 +7139,7 @@ app.get('/api/me', async (req, res) => {
     delete shaped.password;
     shaped.moduleAccess = getModuleAccess();
     shaped.mustChangePassword = !req.authUser.impersonatedBy && !!Number(rows[0].must_change_password || 0);
+    delete shaped.siblingIds; shaped.children = await childrenOfUser(rows[0]).catch(() => []);
     shaped.mustSetup2fa = !req.authUser.impersonatedBy && ['Admin', 'Principal'].includes(rows[0].role) && await userNeeds2faSetup(req.authUser.id);
     if (req.authUser.impersonatedBy) {
       const a = await sql`SELECT name FROM users WHERE id = ${req.authUser.impersonatedBy}`.catch(() => []);
@@ -7248,7 +7279,8 @@ app.post('/api/student-logins/bulk', async (req, res) => {
     const kids = section
       ? await sql`SELECT id, first_name, last_name, class_name, section, admission_no FROM students WHERE class_name = ${className} AND section = ${section} AND (status IS NULL OR LOWER(status) = 'active') AND deleted_at IS NULL ORDER BY first_name, last_name`
       : await sql`SELECT id, first_name, last_name, class_name, section, admission_no FROM students WHERE class_name = ${className} AND (status IS NULL OR LOWER(status) = 'active') AND deleted_at IS NULL ORDER BY section, first_name, last_name`;
-    const have = new Set((await sql`SELECT linked_student_id FROM users WHERE role IN ('Student', 'Parent') AND deleted_at IS NULL AND linked_student_id IS NOT NULL AND linked_student_id <> ''`).map(r => r.linked_student_id));
+    const haveRows = await sql`SELECT linked_student_id, sibling_ids FROM users WHERE role IN ('Student', 'Parent') AND deleted_at IS NULL AND ((linked_student_id IS NOT NULL AND linked_student_id <> '') OR (sibling_ids IS NOT NULL AND sibling_ids <> ''))`;
+    const have = new Set(); haveRows.forEach(r => { if (r.linked_student_id) have.add(r.linked_student_id); parseSibs(r.sibling_ids).forEach(x => have.add(x)); });
     const todo = kids.filter(k => !have.has(k.id));
     if (b.preview) return res.status(200).json({ students: kids.length, needLogin: todo.length, alreadyHave: kids.length - todo.length });
     if (!todo.length) return res.status(200).json({ created: [], students: kids.length, alreadyHave: kids.length });
@@ -7320,6 +7352,7 @@ app.get('/api/student-logins/adoption', async (req, res) => {
         (SELECT COUNT(*) FROM push_subscriptions p WHERE p.user_id = u.id) AS devices
       FROM users u WHERE u.deleted_at IS NULL AND u.role IN ('Student', 'Parent') AND u.linked_student_id IS NOT NULL AND u.linked_student_id <> ''`;
     const bySid = new Map(); us.forEach(u => { const cur = bySid.get(u.sid); if (!cur || (u.last_seen_at && (!cur.last_seen_at || u.last_seen_at > cur.last_seen_at))) bySid.set(u.sid, u); });
+    (await sql`SELECT id, sibling_ids FROM users WHERE sibling_ids IS NOT NULL AND sibling_ids <> '' AND deleted_at IS NULL`).forEach(f => { const u = us.find(x => x.id === f.id); if (u) parseSibs(f.sibling_ids).forEach(sid => { if (!bySid.has(sid)) bySid.set(sid, u); }); });
     const iso = d => d ? new Date(d).toISOString() : '';
     const list = kids.filter(k => (!className || k.class_name === className) && (!section || k.section === section)).map(k => {
       const u = bySid.get(k.id);
@@ -7332,6 +7365,126 @@ app.get('/api/student-logins/adoption', async (req, res) => {
     });
     return res.status(200).json({ total: list.length, students: list, trackingSince: iso((await sql`SELECT MIN(first_login_at) AS m FROM users`)[0].m) });
   } catch (err) { console.error('adoption error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+
+
+// ---------- Sibling families (one login, several children) ----------
+// POST /api/my-children/switch {studentId}  (the parent) -> the app now shows that child.
+app.post('/api/my-children/switch', async (req, res) => {
+  try {
+    if (!req.authUser || req.authUser.role !== 'Parent' || req.authUser.impersonatedBy) return res.status(403).json({ error: 'Not available for this account.' });
+    if (!(await siblingsEnabled())) return res.status(403).json({ error: 'Switching children is turned off for this school.' });
+    const sid = String((req.body || {}).studentId || '');
+    const u = (await sql`SELECT id, sibling_ids FROM users WHERE id = ${req.authUser.id} AND deleted_at IS NULL`)[0];
+    if (!u || !parseSibs(u.sibling_ids).includes(sid)) return res.status(403).json({ error: 'That child is not linked to this login.' });
+    const st = await sql`SELECT id FROM students WHERE id = ${sid} AND deleted_at IS NULL`;
+    if (!st.length) return res.status(404).json({ error: 'That student record is no longer available.' });
+    await sql`UPDATE users SET linked_student_id = ${sid} WHERE id = ${req.authUser.id}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) { console.error('switch child error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+function sibAdminOnly(req, res) { if (!req.authUser || req.authUser.role !== 'Admin') { res.status(403).json({ error: 'Only the Admin can link siblings.' }); return false; } return true; }
+// GET/PUT /api/student-logins/sibling-setting  -> the school-wide on/off switch for the sibling feature (default ON).
+app.get('/api/student-logins/sibling-setting', async (req, res) => {
+  try { if (!sibAdminOnly(req, res)) return; sibEnabledCache.at = 0; return res.status(200).json({ enabled: await siblingsEnabled() }); }
+  catch (err) { return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.put('/api/student-logins/sibling-setting', async (req, res) => {
+  try {
+    if (!sibAdminOnly(req, res)) return;
+    const on = !!(req.body && req.body.enabled);
+    await sql`INSERT INTO kv_store (\`key\`, value) VALUES ('sibling-links-enabled', ${JSON.stringify({ enabled: on })}) ON DUPLICATE KEY UPDATE value = VALUES(value)`;
+    sibEnabledCache = { v: on, at: Date.now() };
+    auditNote(req.authUser.name, req.authUser.role, 'SIBLING_SETTING', 'settings', null, on ? 'turned the sibling login feature ON' : 'turned the sibling login feature OFF', clientIp(req));
+    return res.status(200).json({ ok: true, enabled: on });
+  } catch (err) { console.error('sibling setting error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+// GET /api/student-logins/sibling-suggestions -> groups of 2+ active students who share a father's phone number and are not yet one family.
+app.get('/api/student-logins/sibling-suggestions', async (req, res) => {
+  try {
+    if (!sibAdminOnly(req, res)) return;
+    const kids = await sql`SELECT id, first_name, last_name, class_name, section, admission_no,
+        JSON_UNQUOTE(JSON_EXTRACT(extra, '$.fatherPhone')) AS fphone, JSON_UNQUOTE(JSON_EXTRACT(extra, '$.fatherName')) AS fname
+      FROM students WHERE deleted_at IS NULL AND (status IS NULL OR LOWER(status) = 'active')`;
+    const us = await sql`SELECT id, username, role, linked_student_id AS sid, sibling_ids FROM users WHERE deleted_at IS NULL AND role IN ('Parent', 'Student')`;
+    const famOf = new Map(); us.forEach(u => { if (u.sibling_ids) parseSibs(u.sibling_ids).forEach(x => famOf.set(x, u.id)); });
+    const loginOf = new Map(); us.forEach(u => { if (u.sid && !loginOf.has(u.sid)) loginOf.set(u.sid, u); });
+    const groups = new Map();
+    for (const k of kids) {
+      const ph = String(k.fphone || '').replace(/\D/g, '').slice(-10); if (ph.length < 10) continue;
+      if (!groups.has(ph)) groups.set(ph, []); groups.get(ph).push(k);
+    }
+    const out = [];
+    for (const [ph, g] of groups) {
+      if (g.length < 2) continue;
+      const fams = new Set(g.map(k => famOf.get(k.id) || ('s' + k.id)));
+      if (fams.size === 1) continue;   // already one family
+      out.push({ phone: ph.slice(0, 2) + 'xxxxx' + ph.slice(-3), father: g[0].fname || '', students: g.map(k => { const l = loginOf.get(k.id); return { studentId: k.id, name: ((k.first_name || '') + ' ' + (k.last_name || '')).trim(), className: k.class_name, section: k.section, admissionNo: k.admission_no || '', hasLogin: !!l, loginRole: l ? l.role : '', username: l ? l.username : '', linked: famOf.has(k.id) }; }) });
+    }
+    out.sort((a, b) => String(a.students[0].className).localeCompare(String(b.students[0].className)));
+    return res.status(200).json({ groups: out.slice(0, 300) });
+  } catch (err) { console.error('sibling suggestions error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+// POST /api/student-logins/link-siblings {studentIds:[..], keepStudentId?, disableExtraLogins}
+app.post('/api/student-logins/link-siblings', async (req, res) => {
+  try {
+    if (!sibAdminOnly(req, res)) return;
+    if (!(await siblingsEnabled())) return res.status(403).json({ error: 'The sibling feature is turned off. Turn it on first.' });
+    const b = req.body || {};
+    const ids = Array.from(new Set((Array.isArray(b.studentIds) ? b.studentIds : []).map(String).filter(Boolean)));
+    if (ids.length < 2) return res.status(400).json({ error: 'Choose at least two children.' });
+    const ph = ids.map((_, i) => `$${i + 1}`).join(', ');
+    const kids = await sql.query(`SELECT id FROM students WHERE id IN (${ph}) AND deleted_at IS NULL`, ids);
+    if (kids.length !== ids.length) return res.status(400).json({ error: 'One of those students could not be found.' });
+    const logins = await sql.query(`SELECT id, username, role, linked_student_id AS sid, sibling_ids FROM users WHERE deleted_at IS NULL AND role = 'Parent' AND linked_student_id IN (${ph})`, ids);
+    // every login that already covers one of these children (a family login covers all its children)
+    const covering = (await sql`SELECT id, username, role, linked_student_id AS sid, sibling_ids FROM users WHERE deleted_at IS NULL AND role = 'Parent' AND sibling_ids IS NOT NULL AND sibling_ids <> ''`).filter(f => parseSibs(f.sibling_ids).some(x => ids.includes(x)));
+    const pool = new Map(); logins.concat(covering).forEach(l => pool.set(l.id, l));
+    if (!pool.size) return res.status(400).json({ error: 'None of these children has a login yet. Create a login for one of them first.' });
+    const keepStudent = String(b.keepStudentId || ids[0]);
+    let keep = Array.from(pool.values()).find(l => l.sid === keepStudent) || Array.from(pool.values())[0];
+    const all = new Set(ids); pool.forEach(l => { parseSibs(l.sibling_ids).forEach(x => all.add(x)); if (l.sid) all.add(l.sid); });
+    const list = Array.from(all);
+    const disable = b.disableExtraLogins !== false;
+    let disabled = 0;
+    for (const l of pool.values()) {
+      if (l.id === keep.id) continue;
+      if (disable) { await sql`UPDATE users SET deleted_at = now(), deleted_by = ${'sibling-link:' + keep.id}, deleted_by_name = 'Linked as a sibling' WHERE id = ${l.id}`; disabled++; }
+    }
+    await sql`UPDATE users SET sibling_ids = ${JSON.stringify(list)} WHERE id = ${keep.id}`;
+    if (disable) for (const l of pool.values()) { if (l.id !== keep.id) await sql`DELETE FROM sessions WHERE user_id = ${l.id}`.catch(() => {}); }
+    auditNote(req.authUser.name, req.authUser.role, 'LINK_SIBLINGS', 'users', keep.id, `linked ${list.length} children to login ${keep.username}` + (disabled ? `; switched off ${disabled} extra login(s)` : ''), clientIp(req));
+    return res.status(200).json({ ok: true, keepUsername: keep.username, children: list.length, disabled });
+  } catch (err) { console.error('link siblings error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+// GET /api/student-logins/families -> the linked families (one login, 2+ children)
+app.get('/api/student-logins/families', async (req, res) => {
+  try {
+    if (!sibAdminOnly(req, res)) return;
+    const rows = await sql`SELECT id, username, linked_student_id AS sid, sibling_ids FROM users WHERE deleted_at IS NULL AND role = 'Parent' AND sibling_ids IS NOT NULL AND sibling_ids <> ''`;
+    const fams = [];
+    for (const r of rows) { const kids = await childrenOfUser(r); if (kids.length >= 1) fams.push({ userId: r.id, username: r.username, currentChild: r.sid, children: kids }); }
+    return res.status(200).json({ families: fams });
+  } catch (err) { console.error('families error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+// POST /api/student-logins/unlink-sibling {userId, studentId, restoreLogin} -> take one child out of a family; the login that was switched off for them comes back.
+app.post('/api/student-logins/unlink-sibling', async (req, res) => {
+  try {
+    if (!sibAdminOnly(req, res)) return;
+    const { userId, studentId } = req.body || {};
+    const u = (await sql`SELECT id, linked_student_id AS sid, sibling_ids FROM users WHERE id = ${String(userId || '')} AND deleted_at IS NULL`)[0];
+    if (!u) return res.status(404).json({ error: 'Login not found.' });
+    const list = parseSibs(u.sibling_ids); const sid = String(studentId || '');
+    if (!list.includes(sid)) return res.status(400).json({ error: 'That child is not in this family.' });
+    const rest = list.filter(x => x !== sid);
+    await sql`UPDATE users SET sibling_ids = ${rest.length >= 2 ? JSON.stringify(rest) : null} WHERE id = ${u.id}`;
+    if (u.sid === sid && rest.length) await sql`UPDATE users SET linked_student_id = ${rest[0]} WHERE id = ${u.id}`;
+    // bring back the login that was switched off for this child (if any)
+    const back = await sql`SELECT id FROM users WHERE linked_student_id = ${sid} AND deleted_by = ${'sibling-link:' + u.id} AND deleted_at IS NOT NULL`;
+    for (const r of back) await sql`UPDATE users SET deleted_at = NULL, deleted_by = NULL, deleted_by_name = NULL WHERE id = ${r.id}`;
+    auditNote(req.authUser.name, req.authUser.role, 'UNLINK_SIBLING', 'users', u.id, `removed a child from a family login` + (back.length ? '; restored their own login' : ''), clientIp(req));
+    return res.status(200).json({ ok: true, restored: back.length });
+  } catch (err) { console.error('unlink sibling error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 
 // ---------- Site health: a public "is it alive" address for an outside monitor + an Admin health card ----------

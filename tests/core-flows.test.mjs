@@ -132,6 +132,59 @@ try {
   ok('the board now shows installed and a last-seen time', rk.installed === true && !!rk.firstLogin && !!rk.lastSeen, rk);
   ok('a student with no login at all is still listed (as no login)', (await (async () => { await call('POST', '/api/students', A.ck, { id: 'zb4', firstName: 'Nolo', lastName: 'Gin', className: '3rd Class', section: 'B', status: 'Active', admissionNo: 'ZZ-zb4' }); const r = await call('GET', '/api/student-logins/adoption?className=3rd%20Class&section=B', A.ck); const n = r.j.students.find(x => x.name === 'Nolo Gin'); return n && n.hasLogin === false && n.signedIn === false; })()));
 
+
+  // ---- Sibling families: one login, several children ----
+  console.log('\nSibling families');
+  await call('POST', '/api/students', A.ck, { id: 'sib1', firstName: 'Aman', lastName: 'Verma', className: '4th Class', section: 'Z', status: 'Active', admissionNo: 'SB-1', fatherPhone: '9876543210', fatherName: 'Raj Verma' });
+  await call('POST', '/api/students', A.ck, { id: 'sib2', firstName: 'Anu', lastName: 'Verma', className: '2nd Class', section: 'Z', status: 'Active', admissionNo: 'SB-2', fatherPhone: '9876543210', fatherName: 'Raj Verma' });
+  await call('POST', '/api/students', A.ck, { id: 'sib3', firstName: 'Other', lastName: 'Family', className: '2nd Class', section: 'Z', status: 'Active', admissionNo: 'SB-3', fatherPhone: '9123456780', fatherName: 'Someone Else' });
+  await call('POST', '/api/student-logins/bulk', A.ck, { className: '4th Class', section: 'Z', password: 'student@123', forceChange: false });
+  await call('POST', '/api/student-logins/bulk', A.ck, { className: '2nd Class', section: 'Z', password: 'student@123', forceChange: false });
+  ok('a parent cannot see sibling suggestions', (await call('GET', '/api/student-logins/sibling-suggestions', P1.ck)).s === 403);
+  ok('a parent cannot link siblings', (await call('POST', '/api/student-logins/link-siblings', P1.ck, { studentIds: ['sib1', 'sib2'] })).s === 403);
+  const sg = await call('GET', '/api/student-logins/sibling-suggestions', A.ck);
+  const grp = (sg.j.groups || []).find(g => g.students.some(x => x.studentId === 'sib1'));
+  ok('children sharing a father phone are suggested as siblings (and others are not)', sg.s === 200 && grp && grp.students.length === 2 && grp.students.every(x => x.studentId !== 'sib3') && !JSON.stringify(sg.j).includes('9876543210'), sg.j);
+  const lk = await call('POST', '/api/student-logins/link-siblings', A.ck, { studentIds: ['sib1', 'sib2'], keepStudentId: 'sib1', disableExtraLogins: true });
+  ok('admin links the two children to one login', lk.s === 200 && lk.j.children === 2 && lk.j.disabled === 1 && lk.j.keepUsername === 'amanverma', lk.j);
+  ok('the extra login (Anu) no longer signs in', (await login('anuverma', 'student@123')).s === 401);
+  const fl = await login('amanverma', 'student@123'); ok('the family login signs in', fl.s === 200, fl.s);
+  const fme = await call('GET', '/api/me', fl.ck);
+  ok('the family login lists both children and starts on the first', fme.s === 200 && fme.j.children.length === 2 && fme.j.linkedStudentId === 'sib1', fme.j);
+  ok('the portal shows only the current child', (await call('GET', '/api/students', fl.ck)).j.map(x => x.id).join() === 'sib1');
+  ok('a parent cannot switch to a child that is not theirs', (await call('POST', '/api/my-children/switch', fl.ck, { studentId: 'sib3' })).s === 403);
+  ok('the parent switches to the second child', (await call('POST', '/api/my-children/switch', fl.ck, { studentId: 'sib2' })).s === 200);
+  ok('the portal now shows the second child only', (await call('GET', '/api/students', fl.ck)).j.map(x => x.id).join() === 'sib2');
+  const pv2 = await call('POST', '/api/student-logins/bulk', A.ck, { className: '2nd Class', section: 'Z', password: 'student@123', preview: true });
+  ok('bulk create does not make a second login for a covered child', pv2.s === 200 && pv2.j.needLogin === 0 && pv2.j.alreadyHave === 2, pv2.j);
+  await call('POST', '/api/notifications/broadcast', A.ck, { title: 'Sibling test notice', body: 'for sib1', studentIds: ['sib1'] });
+  const fn = await call('GET', '/api/notifications', fl.ck);
+  ok('a notice for the OTHER child still reaches the family login', fn.s === 200 && JSON.stringify(fn.j).includes('Sibling test notice'), fn.j);
+  const fam = await call('GET', '/api/student-logins/families', A.ck);
+  ok('the family appears in the linked-families list', fam.s === 200 && fam.j.families.some(f => f.username === 'amanverma' && f.children.length === 2), fam.j);
+  const ad3 = await call('GET', '/api/student-logins/adoption?className=2nd%20Class&section=Z', A.ck);
+  ok('the adoption board counts the covered child as having a login', ad3.j.students.find(x => x.studentId === 'sib2').hasLogin === true, ad3.j);
+  const ul2 = await call('POST', '/api/student-logins/unlink-sibling', A.ck, { userId: fme.j.id, studentId: 'sib2' });
+  ok('admin can unlink a child; their own login comes back', ul2.s === 200 && ul2.j.restored === 1, ul2.j);
+  ok('the restored login signs in again', (await login('anuverma', 'student@123')).s === 200);
+  const fme2 = await call('GET', '/api/me', (await login('amanverma', 'student@123')).ck);
+  ok('the family login is back to one child (no switcher)', fme2.j.children.length === 0 && fme2.j.linkedStudentId === 'sib1', fme2.j);
+
+  // ---- Sibling feature on/off switch ----
+  ok('a parent cannot change the sibling switch', (await call('PUT', '/api/student-logins/sibling-setting', P1.ck, { enabled: false })).s === 403);
+  ok('the switch is ON by default', (await call('GET', '/api/student-logins/sibling-setting', A.ck)).j.enabled === true);
+  await call('POST', '/api/student-logins/link-siblings', A.ck, { studentIds: ['sib1', 'sib2'], keepStudentId: 'sib1', disableExtraLogins: false });
+  const offr = await call('PUT', '/api/student-logins/sibling-setting', A.ck, { enabled: false });
+  ok('admin turns the sibling feature OFF', offr.s === 200 && offr.j.enabled === false, offr.j);
+  const fOff = await login('amanverma', 'student@123');
+  const meOff = await call('GET', '/api/me', fOff.ck);
+  ok('with it OFF the parent sees no child switcher', meOff.s === 200 && meOff.j.children.length === 0, meOff.j);
+  ok('with it OFF switching a child is refused', (await call('POST', '/api/my-children/switch', fOff.ck, { studentId: 'sib2' })).s === 403);
+  ok('with it OFF linking is refused', (await call('POST', '/api/student-logins/link-siblings', A.ck, { studentIds: ['sib1', 'sib3'] })).s === 403);
+  await call('PUT', '/api/student-logins/sibling-setting', A.ck, { enabled: true });
+  const meOn = await call('GET', '/api/me', (await login('amanverma', 'student@123')).ck);
+  ok('turned back ON, the switcher returns with the same family', meOn.j.children.length === 2, meOn.j);
+
   // ================= SITE HEALTH =================
   console.log('\nSite health');
   const hp = await call('GET', '/api/health', null);

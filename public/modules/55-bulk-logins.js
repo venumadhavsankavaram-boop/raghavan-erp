@@ -43,7 +43,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
       '<div class="blk-btns"><button class="btn btn-primary" id="blkCreate">Create logins</button>' +
       '<button class="btn" id="blkPrint">🖨️ Print login slips</button></div>' +
       '<div class="blk-hint" id="blkPush" style="margin:10px 0 0;"></div>' +
-      '<div class="blk-btns" style="margin-top:6px;"><button class="btn" id="blkNotif">🔔 Who has notifications on?</button> <button class="btn btn-primary" id="blkAdopt">📊 Parent adoption board</button></div>' +
+      '<div class="blk-btns" style="margin-top:6px;"><button class="btn" id="blkNotif">🔔 Who has notifications on?</button> <button class="btn btn-primary" id="blkAdopt">📊 Parent adoption board</button> <button class="btn" id="blkSib">👨‍👩‍👧 Link siblings</button></div>' +
       '<div class="blk-out" id="blkOut">' + keepOut + '</div>';
     pushLine(card);
     card.querySelector('#blkCls').onchange = e => { S.cls = e.target.value; S.sec = ''; draw(card); preview(card); };
@@ -54,6 +54,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     card.querySelector('#blkPrint').onclick = () => printSlips(card);
     card.querySelector('#blkNotif').onclick = () => notifStatus(card);
     card.querySelector('#blkAdopt').onclick = () => adoption(card);
+    card.querySelector('#blkSib').onclick = () => siblings(card);
   }
   async function notifStatus(card){
     try{
@@ -151,6 +152,63 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     try{
       const j = await api('GET', '/api/student-logins/adoption');
       AD.all = j.students || []; AD.filter = 'all'; AD.cls = S.cls || ''; AD.sec = S.cls ? (S.sec || '') : ''; adDraw(card);
+    }catch(e){ out(card, '<span style="color:#b3261e;">' + esc(e.message) + '</span>'); }
+  }
+
+  /* ---------- Link siblings: one parent login for all of a family's children ---------- */
+  async function siblings(card){
+    out(card, 'Loading…');
+    try{
+      const setting = await api('GET', '/api/student-logins/sibling-setting');
+      const toggle = '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;border-radius:12px;background:' + (setting.enabled ? '#e8f6ee' : '#fdecea') + ';margin:6px 0 10px;"><b>Sibling feature: ' + (setting.enabled ? '<span style="color:#0b7a5a;">ON</span>' : '<span style="color:#b3261e;">OFF</span>') + '</b><button class="btn" id="sbToggle">' + (setting.enabled ? 'Turn off' : 'Turn on') + '</button></div>';
+      const bindToggle = () => { const t = card.querySelector('#sbToggle'); if(t) t.onclick = async () => {
+        if(setting.enabled){ let go = true; try{ go = await showConfirmDialog('Turn the sibling feature OFF? Families already linked will see only the child they last viewed, and nobody can link new siblings. (Unlink a family first if you want their separate logins back.)'); }catch(e){} if(!go) return; }
+        try{ await api('PUT', '/api/student-logins/sibling-setting', { enabled: !setting.enabled }); toast('Sibling feature turned ' + (setting.enabled ? 'off.' : 'on.')); siblings(card); }catch(e){ toast(e.message); }
+      }; };
+      if(!setting.enabled){
+        out(card, '<b>One login for brothers and sisters</b>' + toggle + '<div class="blk-hint">The sibling feature is switched off. Parents do not see a child switcher and siblings cannot be linked. Turn it on whenever you want to use it.</div>');
+        bindToggle(); return;
+      }
+      const [sg, fm] = await Promise.all([api('GET', '/api/student-logins/sibling-suggestions'), api('GET', '/api/student-logins/families')]);
+      const groups = sg.groups || [], fams = fm.families || [];
+      const kidLine = k => esc(k.name) + ' <span style="color:#5b6784;">· ' + esc(k.className) + ' ' + esc(k.section || '') + '</span> ' +
+        (k.hasLogin ? (k.linked ? '<span style="color:#0b7a5a;">(in a family login)</span>' : '<span style="color:#5b6784;">(has own login)</span>') : '<span style="color:#b7791f;">(no login yet)</span>');
+      let h = '<b>One login for brothers and sisters</b>' + toggle + '<div class="blk-hint" style="margin:4px 0 8px;">The parent signs in once and taps a child’s name at the top to switch. Marks, fees and alerts for every child arrive on one phone. The extra login is switched off (you can bring it back any time by unlinking).</div>' +
+        '<label class="blk-chk" style="margin:0 0 8px;"><input type="checkbox" id="sbOff" checked> Switch off the extra login(s) when linking (recommended)</label>';
+      h += '<div style="font-weight:700;margin:8px 0 4px;">Likely sisters/brothers (same father’s phone number)</div>';
+      h += groups.length ? '<div style="max-height:260px;overflow:auto;border:1px solid #e1e6f0;border-radius:10px;padding:6px 10px;">' + groups.map((g, i) =>
+          '<div style="padding:8px 0;border-top:' + (i ? '1px solid #eef1f7' : '0') + ';"><div style="font-size:.78rem;color:#5b6784;">' + esc(g.father || 'Parent') + ' · phone ' + esc(g.phone) + '</div>' +
+          g.students.map(k => '<div>' + kidLine(k) + '</div>').join('') +
+          '<div class="blk-btns" style="margin-top:6px;"><button class="btn btn-primary" data-sbl="' + i + '"' + (g.students.some(k => k.loginRole === 'Student') ? ' disabled title="One child has a Student login"' : '') + '>Link these ' + g.students.length + '</button></div></div>').join('') + '</div>'
+        : '<div class="blk-ok" style="font-weight:600;">No more likely siblings found. 🎉</div>';
+      h += '<div style="font-weight:700;margin:12px 0 4px;">Link by hand</div><div class="blk-row"><label class="blk-f">First child<input type="text" id="sbA" list="sbList" placeholder="type a name"></label><label class="blk-f">Second child<input type="text" id="sbB" list="sbList" placeholder="type a name"></label><button class="btn" id="sbManual">Link</button></div>' +
+        '<datalist id="sbList">' + active().slice(0, 1500).map(x => '<option value="' + esc(((x.firstName || '') + ' ' + (x.lastName || '')).trim() + ' · ' + x.className + ' ' + (x.section || '') + ' · #' + (x.admissionNo || x.id)) + '"></option>').join('') + '</datalist>';
+      h += '<div style="font-weight:700;margin:12px 0 4px;">Families already linked (' + fams.length + ')</div>';
+      h += fams.length ? '<div style="max-height:220px;overflow:auto;border:1px solid #e1e6f0;border-radius:10px;padding:6px 10px;">' + fams.map(f =>
+          '<div style="padding:6px 0;border-top:1px solid #eef1f7;"><span style="color:#5b6784;font-size:.78rem;">login ' + esc(f.username) + '</span><br>' +
+          f.children.map(c => esc(c.name) + ' <span style="color:#5b6784;">' + esc(c.className) + ' ' + esc(c.section || '') + '</span> <button class="btn" style="padding:2px 8px;font-size:.72rem;" data-sbu="' + esc(f.userId) + '|' + esc(c.id) + '">Unlink</button>').join('<br>') + '</div>').join('') + '</div>'
+        : '<div class="blk-hint">None yet.</div>';
+      out(card, h); bindToggle();
+      const off = () => card.querySelector('#sbOff').checked;
+      const doLink = async (ids, keep) => {
+        try{
+          const j = await api('POST', '/api/student-logins/link-siblings', { studentIds: ids, keepStudentId: keep, disableExtraLogins: off() });
+          toast('Linked ' + j.children + ' children to login “' + j.keepUsername + '”' + (j.disabled ? ' (' + j.disabled + ' extra login switched off).' : '.'));
+          try{ users = await (await fetch('/api/users')).json(); if(typeof refreshUserListViews === 'function') refreshUserListViews(); }catch(e){}
+          siblings(card);
+        }catch(e){ toast(e.message); }
+      };
+      card.querySelectorAll('[data-sbl]').forEach(b => b.onclick = () => { const g = groups[+b.dataset.sbl]; doLink(g.students.map(k => k.studentId), (g.students.find(k => k.hasLogin) || g.students[0]).studentId); });
+      card.querySelectorAll('[data-sbu]').forEach(b => b.onclick = async () => {
+        const [uid, sid] = b.dataset.sbu.split('|');
+        try{ const j = await api('POST', '/api/student-logins/unlink-sibling', { userId: uid, studentId: sid }); toast('Unlinked' + (j.restored ? '; their own login is back.' : '.')); siblings(card); }catch(e){ toast(e.message); }
+      });
+      card.querySelector('#sbManual').onclick = () => {
+        const find = t => active().find(x => (((x.firstName || '') + ' ' + (x.lastName || '')).trim() + ' · ' + x.className + ' ' + (x.section || '') + ' · #' + (x.admissionNo || x.id)) === t.trim());
+        const a = find(card.querySelector('#sbA').value), b = find(card.querySelector('#sbB').value);
+        if(!a || !b || a.id === b.id){ toast('Pick two different children from the list that appears as you type.'); return; }
+        doLink([a.id, b.id], a.id);
+      };
     }catch(e){ out(card, '<span style="color:#b3261e;">' + esc(e.message) + '</span>'); }
   }
   async function pushLine(card){
@@ -321,4 +379,34 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     let flag = false; try{ flag = localStorage.getItem('appInstalledFlag') === '1'; }catch(e){}
     if(standalone() || flag){ clearInterval(t); report(); } else if(document.readyState === 'complete' && (window.__adoptTicks = (window.__adoptTicks || 0) + 1) > 40) clearInterval(t);
   }, 3000);
+})();
+
+/* ---------- Parent with several children: switch bar on the home screen ---------- */
+(function(){
+  const lang = () => { try{ return localStorage.getItem('portalLang') === 'te' ? 'te' : 'en'; }catch(e){ return 'en'; } };
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  const kids = () => (typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'Parent' && Array.isArray(currentUser.children)) ? currentUser.children : [];
+  function paint(){
+    const hero = document.getElementById('ppHero');
+    const list = kids();
+    const old = document.getElementById('ppKids');
+    if(!hero || list.length < 2){ if(old && list.length < 2) old.remove(); return; }
+    if(old) return;
+    const d = document.createElement('div'); d.id = 'ppKids';
+    d.style.cssText = 'margin:12px 0;padding:10px 12px;border-radius:14px;background:#eef3ff;border:1px solid #c9d6f5;display:flex;gap:8px;align-items:center;flex-wrap:wrap;';
+    d.innerHTML = '<span style="font-weight:700;color:#233a7a;">' + (lang() === 'te' ? 'పిల్లలను మార్చండి:' : 'Your children:') + '</span>' +
+      list.map(c => '<button type="button" class="btn' + (c.id === currentUser.linkedStudentId ? ' btn-primary' : '') + '" data-kid="' + esc(c.id) + '">' + esc(c.name) + ' · ' + esc(c.className) + ' ' + esc(c.section || '') + '</button>').join('');
+    hero.insertAdjacentElement('beforebegin', d);
+    d.querySelectorAll('[data-kid]').forEach(b => b.onclick = async () => {
+      if(b.dataset.kid === currentUser.linkedStudentId) return;
+      b.disabled = true;
+      try{
+        const r = await fetch('/api/my-children/switch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ studentId: b.dataset.kid }) });
+        if(!r.ok) throw new Error('switch failed');
+        location.reload();
+      }catch(e){ b.disabled = false; try{ showToast('Could not switch child. Please try again.'); }catch(_){} }
+    });
+  }
+  let t = null;
+  new MutationObserver(() => { if(t) return; t = setTimeout(() => { t = null; paint(); }, 400); }).observe(document.documentElement, { childList: true, subtree: true });
 })();

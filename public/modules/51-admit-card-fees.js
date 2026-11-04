@@ -192,7 +192,10 @@
       let allowedIds = []; try{ const r = await fetch('/api/my-admit-card-status', { credentials: 'include' }); if(r.ok) allowedIds = (await r.json()).allowedExamIds || []; }catch(e){}
       try{ await ensureDataLoaded('exams', loadExams); }catch(e){}
       const today = new Date().toISOString().slice(0, 10);
-      const next = (examDefs || []).filter(e => (e.endDate || e.startDate || '') >= today && (e.startDate || e.endDate)).sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''))[0];
+      const upcoming = (examDefs || []).filter(e => (e.endDate || e.startDate || '') >= today && (e.startDate || e.endDate));
+      // the child's own exams first (an exam only for other classes must not be named on this child's banner)
+      const forChild = upcoming.filter(e => e.classSubjects && Object.keys(e.classSubjects).some(k => String(k).split('||')[0] === s.className));
+      const next = (forChild.length ? forChild : upcoming).sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''))[0];
       if(!$('myProfileBody') || $('acHoldBanner')) return;
       const approved = next && allowedIds.includes(next.id);
       const html = approved
