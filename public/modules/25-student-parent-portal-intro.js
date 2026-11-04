@@ -123,7 +123,7 @@ let myProfileTab = 'notifications';
         items.push({
           icon:'📅', tag:'Exam Schedule', date: dates[0],
           title: `Exam schedule: ${ex.name}`,
-          detail: dates.length>1 ? `${dates[0]} – ${dates[dates.length-1]}` : dates[0],
+          detail: (dates.length>1 ? `${dates[0]} – ${dates[dates.length-1]}` : dates[0]) + '\n' + subjects.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(d => `${d.date} · ${d.name}`).join('\n'),
         });
       }
       if(examResults.some(r => r.examId===ex.id && r.studentId===s.id)){
@@ -206,6 +206,38 @@ let myProfileTab = 'notifications';
      from the same staffList/timetableEntries data the office already
      maintains elsewhere (Staff Directory, Timetable → Class Timetable);
      nothing new is stored per-student. --- */
+  /* --- Full exam schedule for the child's class: every exam, subject by subject (date, day, time). --- */
+  function myExamScheduleHtml(s){
+    const today = new Date().toISOString().slice(0,10);
+    const esc2 = v => String(v==null?'':v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const rows = [];
+    (examDefs||[]).forEach(ex => {
+      let subs = [];
+      try{ subs = getExamSubjects(ex, s.className, s.section) || []; }catch(e){}
+      subs = subs.filter(x => x.date).sort((a,b) => (a.date+(a.startTime||'')).localeCompare(b.date+(b.startTime||'')));
+      if(!subs.length) return;
+      const first = subs[0].date, last = subs[subs.length-1].date;
+      const state = last < today ? 'Finished' : first <= today ? 'Running now' : 'Upcoming';
+      rows.push({ex, subs, first, last, state});
+    });
+    const rank = {'Running now':0,'Upcoming':1,'Finished':2};
+    rows.sort((a,b) => rank[a.state]-rank[b.state] || (a.state==='Finished' ? b.first.localeCompare(a.first) : a.first.localeCompare(b.first)));
+    if(!rows.length) return `<div class="empty-state" style="margin-bottom:20px;"><b>No exam schedule yet</b>It will appear here as soon as the school publishes dates for ${esc2(s.className)} — Section ${esc2(s.section)}.</div>`;
+    const col = {'Running now':'#e53935','Upcoming':'#2e7d32','Finished':'#757575'};
+    return rows.map(r => `
+      <div class="profile-card" style="margin-bottom:14px;">
+        <div style="display:flex; justify-content:space-between; gap:8px; align-items:center; flex-wrap:wrap;">
+          <h4 style="margin:0;">📅 ${esc2(r.ex.name)}</h4>
+          <span class="pill" style="font-size:0.66rem; background:${col[r.state]}; color:#fff;">${r.state}</span>
+        </div>
+        <div style="font-size:0.78rem; color:var(--ink-soft); margin:4px 0 8px;">${r.first}${r.last!==r.first ? ' – '+r.last : ''}</div>
+        <div class="table-wrap"><table><thead><tr><th>Date</th><th>Day</th><th>Subject</th><th>Time</th></tr></thead><tbody>
+          ${r.subs.map(x => { let day=''; try{ day = new Date(x.date+'T00:00:00').toLocaleDateString('en-IN',{weekday:'short'}); }catch(e){}
+            let tm=''; try{ tm = (typeof acTimeText==='function') ? acTimeText(x, r.ex, s.className) : (x.startTime||''); }catch(e){}
+            return `<tr><td>${x.date}</td><td>${day}</td><td style="font-weight:600;">${esc2(x.name)}</td><td>${esc2(tm)||'—'}</td></tr>`; }).join('')}
+        </tbody></table></div>
+      </div>`).join('');
+  }
   function renderMyClassInfoTab(body, s){
     const teacher = staffList.find(st => st.classTeacherClass===s.className && st.classTeacherSection===s.section && staffIsActive(st));
     const teacherCard = teacher ? `
@@ -247,6 +279,8 @@ let myProfileTab = 'notifications';
 
     body.innerHTML = `
       ${teacherCard}
+      <div class="dash-section-title"><div><h3>Exam Schedule — ${s.className}, Section ${s.section}</h3></div></div>
+      ${myExamScheduleHtml(s)}
       <div class="dash-section-title"><div><h3>Weekly Timetable — ${s.className}, Section ${s.section}</h3></div></div>
       ${timetableBlock}
     `;

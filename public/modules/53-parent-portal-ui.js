@@ -17,7 +17,7 @@
     ['fees',          '💳', '#e53935', 'Fees',               'ఫీజులు',          'View and pay',            'చెల్లింపులు చూడండి'],
     ['marks',         '📝', '#2f6fed', 'Marks',              'మార్కులు',        'Results and report cards', 'ఫలితాలు & రిపోర్టులు'],
     ['syllabushw',    '📔', '#e8710a', 'Homework',           'హోంవర్క్',        'Homework and syllabus',   'హోంవర్క్ & సిలబస్'],
-    ['classinfo',     '🗓️', '#455a64', 'Timetable',          'టైమ్‌టేబుల్',      'Classes and teachers',    'తరగతులు & టీచర్లు'],
+    ['classinfo',     '🗓️', '#455a64', 'Timetable & Exams',   'టైమ్‌టేబుల్ & పరీక్షలు', 'Exam dates and classes',    'తరగతులు & టీచర్లు'],
     ['onlineexam',    '⏱️', '#00838f', 'Online Exams',       'ఆన్‌లైన్ పరీక్షలు', 'Take your tests',         'పరీక్షలు రాయండి'],
     ['material',      '📚', '#7b3fe4', 'Study Material',     'స్టడీ మెటీరియల్', 'Notes and videos',         'నోట్స్ & వీడియోలు'],
     ['contact',       '💬', '#3949ab', 'Messages',           'సందేశాలు',        'Talk to a teacher',       'టీచర్‌తో మాట్లాడండి'],
