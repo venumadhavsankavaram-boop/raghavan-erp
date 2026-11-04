@@ -46,7 +46,7 @@
       try{ return fn.apply(this, arguments); } finally{ window.open = real; }
     };
   }
-  ['printAdmitCards', 'printFinalRoomAllotment', 'printNoticeBoard'].forEach(n => { if(typeof window[n] === 'function') window[n] = withPrintFallback(window[n]); });
+  ['printAdmitCards', 'printAdmitCardPairs', 'printFinalRoomAllotment', 'printNoticeBoard'].forEach(n => { if(typeof window[n] === 'function') window[n] = withPrintFallback(window[n]); });
 
   /* ---------- 2. fee hold ---------- */
   let policy = { hold: false, minDue: 0 }, exc = {};
@@ -105,6 +105,22 @@
       return;
     }
     window.printAdmitCards(cls, sec, null);
+  };
+
+  // Printing several classes/sections at once (Admit Cards screen): same fee-hold rule as printing one section.
+  window.acPrintPairsGuarded = async function(pairs){
+    await load();
+    if(policy.hold && !hasFees()){ showToast('While the fee hold is on, admit cards are printed by roles that can see fees.'); return; }
+    const exam = admitCardsExamId;
+    const held = policy.hold ? pairs.reduce((a, p) => a.concat(listFor(p.cls, p.sec)), []).filter(s => isHeld(exam, s)) : [];
+    if(held.length){
+      await showInfoDialog(held.length + ' student' + (held.length === 1 ? ' is' : 's are') + ' on hold because fees are due and will be skipped:\n' + held.slice(0, 8).map(s => '• ' + s.firstName + ' ' + s.lastName).join('\n') + (held.length > 8 ? '\n…and ' + (held.length - 8) + ' more' : '') + (isMgr() ? '\n\nOpen the class and use "Allow" next to a name to include them.' : '\n\nAsk the Admin or Principal to allow them.'), { title: 'Some admit cards are on hold' });
+      const ids = new Set(held.map(s => s.id)), saved = students;
+      students = students.filter(s => !ids.has(s.id));
+      try{ window.printAdmitCardPairs(pairs); } finally{ students = saved; }
+      return;
+    }
+    window.printAdmitCardPairs(pairs);
   };
 
   async function decorateGrid(body){

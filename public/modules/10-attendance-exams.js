@@ -566,8 +566,9 @@ const ROOMS_KEY = "exam-rooms";
       box.innerHTML = '<div class="f-field"><label>Exam starts at</label><input type="time" id="subjStartTime"></div><div class="f-field"><label>Exam ends at</label><input type="time" id="subjEndTime"></div>';
       dateField.parentElement.insertAdjacentElement('afterend', box);
     }
-    document.getElementById('subjStartTime').value = existing ? (existing.startTime||'') : (exam.defaultStart||'');
-    document.getElementById('subjEndTime').value = existing ? (existing.endTime||'') : (exam.defaultEnd||'');
+    // Left empty for a new subject, so the exam-wide / class-group time (set on the Admit Cards screen) applies unless a time is typed here.
+    document.getElementById('subjStartTime').value = existing ? (existing.startTime||'') : '';
+    document.getElementById('subjEndTime').value = existing ? (existing.endTime||'') : '';
     document.getElementById('subjCountable').checked = existing ? (existing.countable !== false) : true;
     document.getElementById('subjElective').checked = existing ? !!existing.elective : false;
 

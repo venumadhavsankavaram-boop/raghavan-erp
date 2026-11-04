@@ -644,8 +644,11 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
 
   // ---- Exam timings + automatic exam choice ----
   function acFmtTime(t){ if(!t) return ''; const [h, m] = String(t).split(':').map(Number); if(isNaN(h)) return ''; return ((h % 12) || 12) + ':' + String(m || 0).padStart(2, '0') + ' ' + (h < 12 ? 'AM' : 'PM'); }
-  function acTimeText(sub, exam){
-    const a = (sub && sub.startTime) || (exam && exam.defaultStart) || '', b = (sub && sub.endTime) || (exam && exam.defaultEnd) || '';
+  // Time for a subject: its own time first, then the time set for its class group, then the exam-wide time.
+  function acTimeText(sub, exam, cls){
+    if(sub && sub.startTime) return acFmtTime(sub.startTime) + (sub.endTime ? ' – ' + acFmtTime(sub.endTime) : '');
+    const g = cls && exam && (exam.classTimes || []).find(x => x.start && (x.classes || []).includes(cls));
+    const a = g ? g.start : (exam && exam.defaultStart) || '', b = g ? g.end : (exam && exam.defaultEnd) || '';
     return a ? acFmtTime(a) + (b ? ' – ' + acFmtTime(b) : '') : '';
   }
   // The exam running today, else the next one coming up, else the most recent one, else the first.
@@ -664,20 +667,67 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     if(e.startDate <= today && (e.endDate || e.startDate) >= today) return ' — running now';
     return e.startDate > today ? ' — upcoming' : ' — finished';
   }
+  // ---- Timings editor: one exam-wide time, plus different times for groups of classes ----
+  let acDraft = null;
+  function acDraftFor(exam){
+    if(!acDraft || acDraft.examId !== exam.id) acDraft = { examId: exam.id, start: exam.defaultStart || '', end: exam.defaultEnd || '', groups: (exam.classTimes || []).map(g => ({ classes: (g.classes || []).slice(), start: g.start || '', end: g.end || '' })) };
+    return acDraft;
+  }
+  function acReadTimes(){
+    if(!acDraft) return;
+    acDraft.start = document.getElementById('acDefStart').value; acDraft.end = document.getElementById('acDefEnd').value;
+    document.querySelectorAll('.ac-grp').forEach(el => {
+      const g = acDraft.groups[+el.dataset.i]; if(!g) return;
+      g.start = el.querySelector('.ac-gs').value; g.end = el.querySelector('.ac-ge').value;
+      g.classes = [...el.querySelectorAll('.ac-gc:checked')].map(c => c.value);
+    });
+  }
+  function acAddGroup(){ if(!acDraft) acPaintTimes(); acReadTimes(); acDraft.groups.push({ classes: [], start: '', end: '' }); acPaintTimes(); }
+  function acRemoveGroup(i){ if(!acDraft) acPaintTimes(); acReadTimes(); acDraft.groups.splice(i, 1); acPaintTimes(); }
+  function acPaintTimes(){
+    const box = document.getElementById('acTimesBox'); if(!box) return;
+    const exam = examDefs.find(e => e.id === admitCardsExamId); if(!exam) return;
+    const d = acDraftFor(exam);
+    const raCfg = roomAllotConfigFor(admitCardsExamId);
+    const classes = (raCfg.selectedClasses && raCfg.selectedClasses.length) ? raCfg.selectedClasses : CLASS_LEVELS;
+    box.innerHTML = `
+      <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin:10px 0 6px;">
+        <div class="f-field" style="margin:0;"><label>All classes — starts</label><input type="time" id="acDefStart" value="${d.start}"></div>
+        <div class="f-field" style="margin:0;"><label>ends</label><input type="time" id="acDefEnd" value="${d.end}"></div>
+      </div>
+      ${d.groups.map((g, i) => `<div class="ac-grp" data-i="${i}" style="border:1px dashed var(--border); border-radius:10px; padding:8px 10px; margin:8px 0;">
+        <div style="font-size:.8rem; font-weight:700; margin-bottom:4px;">Different time for these classes:</div>
+        <div style="display:flex; gap:4px 12px; flex-wrap:wrap; margin-bottom:6px;">${classes.map(c => `<label style="font-size:.8rem;"><input type="checkbox" class="ac-gc" value="${c}" ${g.classes.includes(c) ? 'checked' : ''}> ${c}</label>`).join('')}</div>
+        <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+          <div class="f-field" style="margin:0;"><label>starts</label><input type="time" class="ac-gs" value="${g.start}"></div>
+          <div class="f-field" style="margin:0;"><label>ends</label><input type="time" class="ac-ge" value="${g.end}"></div>
+          <button class="btn btn-ghost btn-sm" onclick="acRemoveGroup(${i})">Remove</button>
+        </div></div>`).join('')}
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;">
+        <button class="btn btn-ghost btn-sm" onclick="acAddGroup()">＋ Different time for some classes</button>
+        <button class="btn btn-primary btn-sm" onclick="acSaveDefaultTimes()">Save timings</button>
+      </div>
+      <div style="font-size:.78rem; color:var(--ink-soft); margin-top:6px;">A subject's own time (Exams tab) wins, then the time for its class group, then the "All classes" time.</div>`;
+  }
   async function acSaveDefaultTimes(){
     const exam = examDefs.find(e => e.id === admitCardsExamId); if(!exam) return;
-    const st = document.getElementById('acDefStart').value, en = document.getElementById('acDefEnd').value;
-    if(st && en && en <= st){ showToast('The end time must be after the start time.'); return; }
-    exam.defaultStart = st; exam.defaultEnd = en;
+    acReadTimes();
+    const bad = t => t.start && t.end && t.end <= t.start;
+    if(bad(acDraft) || acDraft.groups.some(bad)){ showToast('An end time must be after its start time.'); return; }
+    const groups = acDraft.groups.filter(g => g.start && g.classes.length);
+    const seen = new Set();
+    for(const g of groups) for(const c of g.classes){ if(seen.has(c)){ showToast(c + ' is in two groups — put each class in only one.'); return; } seen.add(c); }
+    exam.defaultStart = acDraft.start; exam.defaultEnd = acDraft.end; exam.classTimes = groups;
     await storageSet(EXAM_DEFS_KEY, examDefs);
-    showToast(st ? 'Exam timings saved — they print on every admit card of this exam.' : 'Exam timings cleared.');
+    acDraft = null;
+    showToast('Exam timings saved — they print on every admit card of this exam.');
     renderResultBody();
   }
   // Prints every section of one class (each with its own subjects) in a single go.
   function printAdmitCardsClass(cls){
     const secs = SECTIONS.filter(sec => students.some(s => s.className === cls && s.section === sec && isActive(s)));
     if(!secs.length){ showToast('No students in ' + cls + '.'); return; }
-    printAdmitCards(cls, secs, null);
+    acRunPrint(secs.map(sec => ({ cls, sec })));
   }
 
   let expandedAdmitClass = '';
@@ -710,26 +760,50 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
       ${(raCfg.selectedClasses && raCfg.selectedClasses.length) ? `<p style="font-size:0.78rem; color:var(--ink-soft); margin:-10px 0 16px;">Showing only the classes selected for this exam under <a onclick="switchResultTab('roomallotment')" style="color:var(--magenta); cursor:pointer; font-weight:600;">Room Allotment → Select Classes</a>.</p>` : ''}
       ${gridHtml}
     `;
+    acPaintTimes();
   }
+  function acReady(exam, c, sec){ const sj = getExamSubjects(exam, c, sec); return sj.length > 0 && sj.every(x => x.date); }
   function acHeaderHtml(raCfg, visibleClasses){
     const exam = examDefs.find(e => e.id === admitCardsExamId); if(!exam) return '';
     const period = exam.startDate ? exam.startDate + (exam.endDate && exam.endDate !== exam.startDate ? ' – ' + exam.endDate : '') : 'dates not set';
     const canPrint = getResultTabAccess(currentUser.role, 'result_admitcards', 'print');
-    const classBtns = visibleClasses.filter(c => students.some(s => s.className === c && isActive(s))).map(c => {
-      const secs = SECTIONS.filter(sec => students.some(s => s.className === c && s.section === sec && isActive(s)));
-      const bad = secs.filter(sec => { const sj = getExamSubjects(exam, c, sec); return !sj.length || sj.some(x => !x.date); }).length;
-      return `<button class="btn btn-ghost btn-sm" style="margin:2px;" ${(!canPrint || bad) ? 'disabled' : ''} title="${bad ? bad + ' section(s) still need subjects or exam dates' : 'Print every section'}" onclick="printAdmitCardsClass('${c}')">${c}${bad ? ' ⚠' : ''}</button>`;
-    }).join('');
+    const rows = visibleClasses.map(c => ({ c, secs: SECTIONS.filter(sec => students.some(s => s.className === c && s.section === sec && isActive(s))) })).filter(r => r.secs.length);
+    const printPanel = !canPrint ? '' : `<div style="margin-top:12px;"><div style="font-weight:700; font-size:.9rem; margin-bottom:6px;">Print admit cards</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+        <button class="btn btn-primary btn-sm" onclick="acPrintEverything()">Print ALL classes &amp; sections</button>
+        <button class="btn btn-ghost btn-sm" onclick="acTickAll(true)">Tick all</button>
+        <button class="btn btn-ghost btn-sm" onclick="acTickAll(false)">Clear</button>
+        <button class="btn btn-primary btn-sm" onclick="acPrintSelected()">Print ticked</button>
+      </div>
+      <div style="max-height:260px; overflow:auto; border:1px solid var(--border); border-radius:10px; padding:6px 10px;">
+        ${rows.map(r => `<div style="padding:4px 0; border-top:1px solid var(--border);">
+          <label style="font-weight:700; font-size:.85rem; margin-right:10px;"><input type="checkbox" class="ac-pc" value="${r.c}" onchange="acTickClass(this)"> ${r.c}</label>
+          ${r.secs.map(sec => { const ok = acReady(exam, r.c, sec); return `<label style="font-size:.82rem; margin-right:10px;${ok ? '' : ' opacity:.55;'}" title="${ok ? '' : 'Subjects or exam dates missing'}"><input type="checkbox" class="ac-ps" data-c="${r.c}" value="${sec}" ${ok ? '' : 'disabled'}> Sec ${sec}${ok ? '' : ' ⚠'}</label>`; }).join('')}
+        </div>`).join('') || '<small>No classes with students.</small>'}
+      </div>
+      <div style="font-size:.76rem; color:var(--ink-soft); margin-top:4px;">Tick a class to tick all its sections, or tick single sections. Sections marked ⚠ are not ready (no subjects or exam dates) and are skipped. To print one student, open that section from the grid below.</div></div>`;
     return `<div style="border:1px solid var(--border); border-radius:12px; padding:12px 14px; margin-bottom:16px; background:var(--surface-2,#f7f5fb);">
       <div style="font-weight:700;">${exam.name} <span style="font-weight:400; color:var(--ink-soft);">· ${period}${acExamTag(exam)}</span></div>
-      <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin:10px 0 6px;">
-        <div class="f-field" style="margin:0;"><label>Exam starts</label><input type="time" id="acDefStart" value="${exam.defaultStart || ''}"></div>
-        <div class="f-field" style="margin:0;"><label>Exam ends</label><input type="time" id="acDefEnd" value="${exam.defaultEnd || ''}"></div>
-        <button class="btn btn-primary btn-sm" onclick="acSaveDefaultTimes()">Save timings</button>
-        <span style="font-size:.78rem; color:var(--ink-soft); max-width:300px;">Used for every subject that has no time of its own. A subject's own time (set in the Exams tab) wins.</span>
-      </div>
-      ${canPrint ? `<div style="margin-top:8px; font-size:.82rem;"><b>Print a whole class</b> (all its sections):</div><div>${classBtns || '<small>No classes with students.</small>'}</div>` : ''}
+      <div id="acTimesBox"></div>
+      ${printPanel}
     </div>`;
+  }
+  function acTickClass(el){ document.querySelectorAll('.ac-ps[data-c="' + el.value + '"]:not(:disabled)').forEach(x => x.checked = el.checked); }
+  function acTickAll(on){ document.querySelectorAll('.ac-pc').forEach(x => x.checked = on); document.querySelectorAll('.ac-ps:not(:disabled)').forEach(x => x.checked = on); }
+  function acRunPrint(pairs){ const seen = new Set(); pairs = pairs.filter(p => { const k = p.cls + '|' + p.sec; if(seen.has(k)) return false; seen.add(k); return true; }); if(typeof window.acPrintPairsGuarded === 'function') window.acPrintPairsGuarded(pairs); else printAdmitCardPairs(pairs); }
+  function acPrintSelected(){
+    const pairs = [...document.querySelectorAll('.ac-ps:checked')].map(x => ({ cls: x.dataset.c, sec: x.value }));
+    if(!pairs.length){ showToast('Tick at least one class or section first.'); return; }
+    acRunPrint(pairs);
+  }
+  function acPrintEverything(){
+    const exam = examDefs.find(e => e.id === admitCardsExamId); if(!exam) return;
+    const raCfg = roomAllotConfigFor(admitCardsExamId);
+    const classes = (raCfg.selectedClasses && raCfg.selectedClasses.length) ? raCfg.selectedClasses : CLASS_LEVELS;
+    const pairs = [];
+    classes.forEach(c => SECTIONS.forEach(sec => { if(students.some(s => s.className === c && s.section === sec && isActive(s))) pairs.push({ cls: c, sec }); }));
+    if(!pairs.length){ showToast('No students to print for.'); return; }
+    acRunPrint(pairs);
   }
   function openAdmitCardsRoster(cls, sec){
     window.scrollTo({top:0,left:0,behavior:'instant'});
@@ -792,9 +866,15 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
   }
 
   function printAdmitCards(cls, secArg, singleStudentId){
-    const exam = examDefs.find(e => e.id === admitCardsExamId);
-    if(!exam) return;
     const secList = Array.isArray(secArg) ? secArg : [secArg];
+    printAdmitCardPairs(secList.map(sec => ({ cls, sec })), singleStudentId);
+  }
+  // Prints any mix of classes/sections in one go. One section = strict (tells you what is missing); several = prints every
+  // section that is ready and lists the ones it skipped.
+  function printAdmitCardPairs(pairs, singleStudentId){
+    const exam = examDefs.find(e => e.id === admitCardsExamId);
+    if(!exam || !pairs.length) return;
+    const strict = pairs.length === 1;
     const logoSrc = document.querySelector('.sb-brand img').src;
     const examPeriod = exam.startDate ? exam.startDate + (exam.endDate && exam.endDate!==exam.startDate ? ' – '+exam.endDate : '') : 'To be announced';
     const tmpl = currentAdmitCardTemplate();
@@ -802,16 +882,17 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     const principalSig = schoolInfo.principalSignature || '';
     const cardTitle = (tmpl.titleOverride||'').trim() || 'Admit Card';
     const instructions = (tmpl.instructionsText||'').split('\n').map(l=>l.trim()).filter(Boolean);
-    const parts = []; let firstList = null, builtCss = '';
-    for(const sec of secList){
+    const parts = [], skipped = []; let firstList = null, builtCss = '', cnt = 0;
+    for(const { cls, sec } of pairs){
       const subjects = getExamSubjects(exam, cls, sec).slice().sort((a,b) => (a.date||'').localeCompare(b.date||''));
-      if(subjects.length === 0){ showToast('No subjects configured for ' + cls + ' ' + sec + ' yet.'); return; }
+      if(subjects.length === 0){ if(strict){ showToast('No subjects configured for ' + cls + ' ' + sec + ' yet.'); return; } skipped.push(cls + ' ' + sec + ' (no subjects)'); continue; }
       const missingDates = subjects.filter(s => !s.date);
-      if(missingDates.length > 0){ showToast(`Set an exam date for: ${missingDates.map(s=>s.name).join(', ')} (${cls} ${sec}) — every subject needs a date before hall tickets can be generated.`); return; }
+      if(missingDates.length > 0){ if(strict){ showToast(`Set an exam date for: ${missingDates.map(s=>s.name).join(', ')} (${cls} ${sec}) — every subject needs a date before hall tickets can be generated.`); return; } skipped.push(cls + ' ' + sec + ' (exam dates missing)'); continue; }
       let list = students.filter(s => s.className===cls && s.section===sec && isActive(s)).sort(compareByRoll);
       if(singleStudentId) list = list.filter(s => s.id === singleStudentId);
       if(list.length === 0) continue;
       if(!firstList) firstList = list;
+      cnt += list.length;
       const ctx = { exam, subjects, list, logoSrc, examPeriod, tmpl, roomMap, principalSig, cardTitle, instructions };
       // Layout is template-driven: 'strip' (Classic Strip, unchanged), 'grid4'
       // (Modern Card, 4-up 2x2 on A4) or 'full' (Full Board-Style, one candidate
@@ -821,6 +902,8 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
                   : buildAdmitCardsStrip(ctx);
       builtCss = built.css; parts.push(built.html);
     }
+    if(skipped.length) showToast('Skipped: ' + skipped.join(', ') + '. Printing the rest (' + cnt + ' cards).');
+    const cls = pairs[0].cls, secList = pairs.map(p => p.sec);
     if(!parts.length) return;
     const list = firstList;
     const built = { css: builtCss, html: parts.join('<div style="page-break-after:always;"></div>') };
@@ -831,7 +914,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     const safe = str => (str||'').replace(/[^\w-]+/g,'_').replace(/^_+|_+$/g,'');
     const fileTitle = singleStudentId
       ? `AdmitCard_${safe(list[0].admissionNo)}_${safe((list[0].firstName||'')+(list[0].lastName||''))}_${safe(exam.name)}`
-      : `AdmitCards_${safe(cls)}_${secList.length > 1 ? 'AllSections' : safe(secList[0])}_${safe(exam.name)}`;
+      : `AdmitCards_${pairs.length === 1 ? safe(cls) + '_' + safe(secList[0]) : (new Set(pairs.map(p => p.cls)).size > 1 ? 'MultiClass' : safe(cls) + '_AllSections')}_${safe(exam.name)}`;
 
     const w = window.open('', '_blank');
     w.document.write(`
@@ -885,9 +968,9 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
         <div class="ac-col-subjects">
           <div class="ac-subj-title">SUBJECT-WISE SCHEDULE — sign daily before the exam begins</div>
           <table class="ac-subj-table">
-            <thead><tr><th>Subject</th><th class="date-col">Date</th>${subjects.some(x => acTimeText(x, exam)) ? '<th class="time-col">Time</th>' : ''}<th class="sign-col">Invigilator's Signature</th></tr></thead>
+            <thead><tr><th>Subject</th><th class="date-col">Date</th>${subjects.some(x => acTimeText(x, exam, list[0].className)) ? '<th class="time-col">Time</th>' : ''}<th class="sign-col">Invigilator's Signature</th></tr></thead>
             <tbody>
-            ${subjects.map(sub => `<tr><td>${sub.name}</td><td class="date-cell">${sub.date||'TBA'}</td>${subjects.some(x => acTimeText(x, exam)) ? `<td class="time-cell">${acTimeText(sub, exam) || '—'}</td>` : ''}<td class="sign-cell">&nbsp;</td></tr>`).join('')}
+            ${subjects.map(sub => `<tr><td>${sub.name}</td><td class="date-cell">${sub.date||'TBA'}</td>${subjects.some(x => acTimeText(x, exam, list[0].className)) ? `<td class="time-cell">${acTimeText(sub, exam, list[0].className) || '—'}</td>` : ''}<td class="sign-cell">&nbsp;</td></tr>`).join('')}
             </tbody>
           </table>
         </div>
@@ -977,7 +1060,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
           <tr><td>Hall Ticket No.</td><td>${ht&&ht.htNumber?ht.htNumber:'—'}</td></tr>
           <tr><td>Room</td><td>${roomInfo?roomInfo.room:'—'}</td></tr>
         </table>
-        <div class="acg-subjcount">${subjects.length} subject${subjects.length===1?'':'s'}${subjects.some(x => acTimeText(x, exam)) ? ' · ' + (acTimeText(subjects[0], exam) || '') : ''} — see notice board / class teacher for the full subject-wise date sheet.</div>
+        <div class="acg-subjcount">${subjects.length} subject${subjects.length===1?'':'s'}${subjects.some(x => acTimeText(x, exam, list[0].className)) ? ' · ' + (acTimeText(subjects[0], exam, list[0].className) || '') : ''} — see notice board / class teacher for the full subject-wise date sheet.</div>
         ${tmpl.footerNote ? `<div class="acg-footnote">${tmpl.footerNote}</div>` : ''}
         <div class="acg-signrow">
           <div class="acg-sign">Student's Signature</div>
@@ -1053,9 +1136,9 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
           </div>
           <div class="acf-subj-title">SUBJECT-WISE SCHEDULE</div>
           <table class="acf-subj-table">
-            <thead><tr><th>Subject</th><th>Date</th>${subjects.some(x => acTimeText(x, exam)) ? '<th>Time</th>' : ''}<th>Max Marks</th><th>Invigilator's Signature</th></tr></thead>
+            <thead><tr><th>Subject</th><th>Date</th>${subjects.some(x => acTimeText(x, exam, list[0].className)) ? '<th>Time</th>' : ''}<th>Max Marks</th><th>Invigilator's Signature</th></tr></thead>
             <tbody>
-            ${subjects.map(sub => `<tr><td>${sub.name}</td><td>${sub.date||'TBA'}</td>${subjects.some(x => acTimeText(x, exam)) ? `<td>${acTimeText(sub, exam) || '—'}</td>` : ''}<td>${sub.maxMarks||''}</td><td>&nbsp;</td></tr>`).join('')}
+            ${subjects.map(sub => `<tr><td>${sub.name}</td><td>${sub.date||'TBA'}</td>${subjects.some(x => acTimeText(x, exam, list[0].className)) ? `<td>${acTimeText(sub, exam, list[0].className) || '—'}</td>` : ''}<td>${sub.maxMarks||''}</td><td>&nbsp;</td></tr>`).join('')}
             </tbody>
           </table>
           ${instructions.length ? `
