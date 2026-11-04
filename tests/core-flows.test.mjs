@@ -152,6 +152,13 @@ try {
   const fme = await call('GET', '/api/me', fl.ck);
   ok('the family login lists both children and starts on the first', fme.s === 200 && fme.j.children.length === 2 && fme.j.linkedStudentId === 'sib1', fme.j);
   ok('the portal shows only the current child', (await call('GET', '/api/students', fl.ck)).j.map(x => x.id).join() === 'sib1');
+  await call('PUT', '/api/kv/fee-refunds', A.ck, [
+    { id: 'r1', refundNo: 'RF-0001', studentId: 'sib1', status: 'processed', method: 'credit', total: 1500, bankAccountId: 'BANK-SECRET', note: 'private note', audit: [{ by: 'x' }], lines: [{ paymentId: 'pay1', amount: 1500 }] },
+    { id: 'r2', refundNo: 'RF-0002', studentId: 'sib3', status: 'processed', method: 'Cash', total: 900, lines: [{ paymentId: 'pay9', amount: 900 }] }]);
+  const prf = await call('GET', '/api/kv/fee-refunds', fl.ck);
+  ok('a parent sees only their own child refund, without bank or notes', prf.s === 200 && Array.isArray(prf.j) && prf.j.length === 1 && prf.j[0].studentId === 'sib1' && prf.j[0].lines[0].amount === 1500 && !JSON.stringify(prf.j).includes('BANK-SECRET') && !JSON.stringify(prf.j).includes('private note') && !JSON.stringify(prf.j).includes('audit'), prf.j);
+  ok('a parent cannot change refunds', (await call('PUT', '/api/kv/fee-refunds', fl.ck, [])).s === 403);
+  await call('PUT', '/api/kv/fee-refunds', A.ck, []);
   ok('a parent cannot switch to a child that is not theirs', (await call('POST', '/api/my-children/switch', fl.ck, { studentId: 'sib3' })).s === 403);
   ok('the parent switches to the second child', (await call('POST', '/api/my-children/switch', fl.ck, { studentId: 'sib2' })).s === 200);
   ok('the portal now shows the second child only', (await call('GET', '/api/students', fl.ck)).j.map(x => x.id).join() === 'sib2');

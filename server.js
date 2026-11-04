@@ -5716,7 +5716,7 @@ const PARENT_SHARED_REFERENCE_RESOURCES = ['fee-structure', 'exam-defs', 'subjec
 // office sees (it holds only dates and percentages, nothing per-student).
 // The timetable's period times and working days are the same for everyone. 'timetable-entries' is also let through,
 // but only the student's OWN class and section is returned (see parentScopedKvValue), never the whole school's.
-const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings', 'syllabus-topics', 'fee-schedule', 'grading-scale', 'grading-schemes', 'timetable-periods', 'timetable-days', 'timetable-entries', 'exam-releases', 'portal-settings', 'admit-card-policy'];
+const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings', 'syllabus-topics', 'fee-schedule', 'grading-scale', 'grading-schemes', 'timetable-periods', 'timetable-days', 'timetable-entries', 'exam-releases', 'portal-settings', 'admit-card-policy', 'fee-refunds'];
 // A Teacher can always READ the timetable (periods, working days and entries) so My Day and My Timetable can show their own
 // periods, even when the role's Roles & Permissions only switch on a timetable sub-tab. Writing still needs the Timetable permission.
 function teacherReadsTimetable(req, key) {
@@ -5781,6 +5781,17 @@ async function linkedStudentClass(userId) {
 }
 // A Student/Parent login only ever receives its own class's timetable rows.
 async function parentScopedKvValue(req, key, value) {
+  if (key === 'fee-refunds' && req.authUser && PARENT_LOGIN_ROLES.includes(req.authUser.role)) {
+    // A parent sees only refunds of their OWN child, and only what the fee screen needs (no bank account, notes or audit trail).
+    let list = value; if (typeof list === 'string') { try { list = JSON.parse(list); } catch (_) { list = []; } }
+    if (!Array.isArray(list)) return [];
+    const me = await getLinkedStudent(req.authUser.id);
+    if (!me) return [];
+    return list.filter(r => r && r.studentId === me.id).map(r => ({
+      id: r.id, refundNo: r.refundNo, studentId: r.studentId, status: r.status, method: r.method, total: r.total,
+      date: r.date || r.processedAt || r.createdAt || '', lines: (r.lines || []).map(l => ({ paymentId: l.paymentId, amount: l.amount })),
+    }));
+  }
   if (key !== 'timetable-entries' || !req.authUser || !PARENT_LOGIN_ROLES.includes(req.authUser.role)) return value;
   let v = value; if (typeof v === 'string') { try { v = JSON.parse(v); } catch (_) { v = []; } }
   if (!Array.isArray(v)) return [];
