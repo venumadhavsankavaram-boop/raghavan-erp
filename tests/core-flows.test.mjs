@@ -142,6 +142,8 @@ try {
   await call('POST', '/api/student-logins/bulk', A.ck, { className: '2nd Class', section: 'Z', password: 'student@123', forceChange: false });
   ok('a parent cannot see sibling suggestions', (await call('GET', '/api/student-logins/sibling-suggestions', P1.ck)).s === 403);
   ok('a parent cannot link siblings', (await call('POST', '/api/student-logins/link-siblings', P1.ck, { studentIds: ['sib1', 'sib2'] })).s === 403);
+  ok('a parent can read the school holiday list (so the app can say Holiday today)', (await call('GET', '/api/holidays', P1.ck)).s === 200);
+  ok('a parent cannot add or change a holiday', (await call('POST', '/api/holidays', P1.ck, { id: 'zhol1', date: '2030-01-01', name: 'Probe' })).s === 403);
   const sg = await call('GET', '/api/student-logins/sibling-suggestions', A.ck);
   const grp = (sg.j.groups || []).find(g => g.students.some(x => x.studentId === 'sib1'));
   ok('children sharing a father phone are suggested as siblings (and others are not)', sg.s === 200 && grp && grp.students.length === 2 && grp.students.every(x => x.studentId !== 'sib3') && !JSON.stringify(sg.j).includes('9876543210'), sg.j);

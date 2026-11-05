@@ -34,7 +34,8 @@
   const T = {
     hello: ['Hello', 'నమస్కారం'], yourChild: ['Your child', 'మీ బిడ్డ'],
     att: ['Attendance', 'హాజరు'], present: ['Present today', 'ఈరోజు హాజరయ్యారు'], absent: ['Absent today', 'ఈరోజు గైర్హాజరు'],
-    notMarked: ['Not marked yet today', 'ఈరోజు హాజరు ఇంకా నమోదు కాలేదు'], sunday: ['No school today', 'ఈరోజు పాఠశాల లేదు'], last30: ['last 30 days', 'గత 30 రోజులు'],
+    notMarked: ['Not marked yet today', 'ఈరోజు హాజరు ఇంకా నమోదు కాలేదు'],
+    holidayToday: ['Holiday today', 'ఈరోజు సెలవు'], closedToday: ['School is closed today', 'ఈరోజు పాఠశాలకు సెలవు'], tomorrowHol: ['Tomorrow is a holiday', 'రేపు సెలవు'], nextHol: ['Next holiday', 'తదుపరి సెలవు'], sunday: ['No school today', 'ఈరోజు పాఠశాల లేదు'], last30: ['last 30 days', 'గత 30 రోజులు'],
     fees: ['Fees', 'ఫీజులు'], feePending: ['fee pending', 'ఫీజు చెల్లించాలి'], feeOk: ['All fees are paid 🎉', 'అన్ని ఫీజులు చెల్లించారు 🎉'], viewPay: ['View & pay', 'చూడండి'],
     marks: ['Marks', 'మార్కులు'], latest: ['Latest result', 'తాజా ఫలితాలు'], noMarks: ['No results yet', 'ఇంకా ఫలితాలు రాలేదు'], soon: ['marks will be published soon', 'మార్కులు త్వరలో వస్తాయి'], seeMarks: ['See marks', 'మార్కులు చూడండి'],
     hw: ['Homework', 'హోంవర్క్'], hwDue: ['due this week', 'ఈ వారం గడువు'], hwOver: ['overdue', 'గడువు దాటినవి'], hwNone: ['No homework pending 🎉', 'హోంవర్క్ లేదు 🎉'], seeHw: ['See homework', 'హోంవర్క్ చూడండి'],
@@ -72,6 +73,9 @@
       .sh-lang{border:1px solid var(--border,#e3e8f3);background:#fff;border-radius:999px;padding:8px 16px;font-weight:700;cursor:pointer;font-size:.95rem;color:var(--navy,#14325c);}
       .sh-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;}
       .sh-card{background:#fff;border:1px solid var(--border,#e3e8f3);border-radius:18px;padding:18px 20px;display:flex;flex-direction:column;gap:8px;border-left:6px solid #cfd8ea;}
+      .sh-card.hol{border-left-color:#e91e63;background:linear-gradient(120deg,#fff6dc,#ffe6f2 60%,#efe4ff);border-color:#f3c6dc;animation:shHol 2.4s ease-in-out infinite;}
+      .sh-card.hol .sh-big{color:#a3135a;}
+      @keyframes shHol{0%,100%{box-shadow:0 4px 14px rgba(233,30,99,.12)}50%{box-shadow:0 6px 22px rgba(233,30,99,.32)}}
       .sh-card.ok{border-left-color:#1d9b4d;} .sh-card.warn{border-left-color:#f0a000;} .sh-card.bad{border-left-color:#d93025;} .sh-card.info{border-left-color:#2F80ED;}
       .sh-h{display:flex;align-items:center;gap:10px;font-weight:700;color:var(--navy,#14325c);font-size:1.05rem;} .sh-h i{font-style:normal;font-size:1.5rem;}
       .sh-big{font-size:1.45rem;font-weight:800;color:var(--navy,#14325c);line-height:1.25;} .sh-sub{font-size:1rem;color:var(--ink-soft,#556);line-height:1.4;}
@@ -140,11 +144,28 @@
     const recs = attendanceRecords.filter(r => r.studentId === s.id && r.date >= cutStr);
     const pres = recs.filter(r => r.status === 'Present' || r.status === 'Late').length;
     const pct = recs.length ? Math.round(pres / recs.length * 100) : null;
-    let aBig, aTone;
-    if(!todayRecs.length){ aBig = new Date().getDay() === 0 ? tr('sunday') : tr('notMarked'); aTone = 'info'; }
+    let aBig, aTone, aHolSub = '';
+    // Holidays first: the school's holiday calendar (manual holidays, exam holidays) and the weekly off days set under
+    // Attendance settings (Sunday by default) — the same rule the office uses when marking attendance.
+    let holToday = null, holNext = null, holTomorrow = null;
+    try{
+      if(typeof holidayFor === 'function'){
+        holToday = holidayFor(today);
+        const tm = new Date(); tm.setDate(tm.getDate() + 1); const h2 = holidayFor(localDateStr(tm)); if(h2 && !h2.auto) holTomorrow = h2;
+        if(typeof holidays !== 'undefined') holNext = holidays.filter(h => h.date > today).sort((a, b) => a.date.localeCompare(b.date))[0] || null;
+      }
+    }catch(e){}
+    const dShort = ds => { try{ return new Date(ds + 'T00:00:00').toLocaleDateString(lang() === 'te' ? 'te-IN' : 'en-IN', { day: 'numeric', month: 'short' }); }catch(e){ return ds; } };
+    if(!todayRecs.length && holToday){
+      aBig = '🏖️ ' + tr('holidayToday'); aTone = 'hol';
+      aHolSub = esc((holToday.name || '') + ' — ' + tr('closedToday'));
+    }
+    else if(!todayRecs.length){ aBig = tr('notMarked'); aTone = 'info'; }
     else if(todayRecs.some(r => r.status === 'Absent')){ aBig = '🚫 ' + tr('absent'); aTone = 'bad'; }
     else { aBig = '✅ ' + tr('present'); aTone = 'ok'; }
-    cards.push(card(aTone, '🧑‍🎓', tr('att'), esc(aBig), pct == null ? '' : esc(pct + '% · ' + tr('last30')), tr('history'), 'notifications'));
+    const aPct = pct == null ? '' : esc(pct + '% · ' + tr('last30'));
+    const aExtra = holTomorrow ? '<br>⏰ ' + esc(tr('tomorrowHol') + ': ' + (holTomorrow.name || '')) : (holNext && !(holToday && !holToday.auto) ? '<br>🗓️ ' + esc(tr('nextHol') + ': ' + (holNext.name || '') + ' (' + dShort(holNext.date) + ')') : '');
+    cards.push(card(aTone, aTone === 'hol' ? '🎉' : '🧑‍🎓', tr('att'), esc(aBig), (aHolSub ? aHolSub + (aPct ? '<br>' + aPct : '') : aPct) + aExtra, tr('history'), 'notifications'));
 
     // fees
     let owed = 0;

@@ -5701,7 +5701,8 @@ const PARENT_OWN_RECORD_RESOURCES = {
 // login has to be able to read homework (renderMySyllabusHomeworkTab) even
 // though their role has no 'syllabus' module permission — same reasoning as
 // fee-structure/exam-defs/subjects, nothing per-student to leak in a GET.
-const PARENT_SHARED_REFERENCE_RESOURCES = ['fee-structure', 'exam-defs', 'subjects', 'homework-items', 'attendance-settings'];
+// 'holidays' added: the school's holiday calendar is the same for every family (date, name, type — nothing per-student), and the parent home / Updates feed need it to show "Holiday today" instead of "attendance not marked".
+const PARENT_SHARED_REFERENCE_RESOURCES = ['fee-structure', 'exam-defs', 'subjects', 'homework-items', 'attendance-settings', 'holidays'];
 // Same idea, one level down, for the generic /api/kv/:key store — right now
 // just the late-fee policy (rate/grace period), which Fees needs to show an
 // accurate "Outstanding" figure instead of silently treating every family
