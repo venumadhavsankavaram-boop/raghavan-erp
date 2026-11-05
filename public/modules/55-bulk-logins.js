@@ -182,7 +182,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
           '<div class="blk-btns" style="margin-top:6px;"><button class="btn btn-primary" data-sbl="' + i + '"' + (g.students.some(k => k.loginRole === 'Student') ? ' disabled title="One child has a Student login"' : '') + '>Link these ' + g.students.length + '</button></div></div>').join('') + '</div>'
         : '<div class="blk-ok" style="font-weight:600;">No more likely siblings found. 🎉</div>';
       h += '<div style="font-weight:700;margin:12px 0 4px;">Link by hand</div><div class="blk-row"><label class="blk-f">First child<input type="text" id="sbA" list="sbList" placeholder="type a name"></label><label class="blk-f">Second child<input type="text" id="sbB" list="sbList" placeholder="type a name"></label><button class="btn" id="sbManual">Link</button></div>' +
-        '<datalist id="sbList">' + active().slice(0, 1500).map(x => '<option value="' + esc(((x.firstName || '') + ' ' + (x.lastName || '')).trim() + ' · ' + x.className + ' ' + (x.section || '') + ' · #' + (x.admissionNo || x.id)) + '"></option>').join('') + '</datalist>';
+        '<datalist id="sbList">' + active().slice(0, 1500).map(x => '<option value="' + esc(((x.lastName || '') + ' ' + (x.firstName || '')).trim() + ' · ' + x.className + ' ' + (x.section || '') + ' · #' + (x.admissionNo || x.id)) + '"></option>').join('') + '</datalist>';
       h += '<div style="font-weight:700;margin:12px 0 4px;">Families already linked (' + fams.length + ')</div>';
       h += fams.length ? '<div style="max-height:220px;overflow:auto;border:1px solid #e1e6f0;border-radius:10px;padding:6px 10px;">' + fams.map(f =>
           '<div style="padding:6px 0;border-top:1px solid #eef1f7;"><span style="color:#5b6784;font-size:.78rem;">login ' + esc(f.username) + '</span> <button class="btn" style="padding:2px 8px;font-size:.72rem;" data-sbc="' + esc(f.userId) + '">Check this family</button><div id="sbc-' + esc(f.userId) + '"></div>' +
@@ -215,7 +215,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         }catch(e){ box.innerHTML = '<span style="color:#b3261e;">' + esc(e.message) + '</span>'; }
       });
       card.querySelector('#sbManual').onclick = () => {
-        const find = t => active().find(x => (((x.firstName || '') + ' ' + (x.lastName || '')).trim() + ' · ' + x.className + ' ' + (x.section || '') + ' · #' + (x.admissionNo || x.id)) === t.trim());
+        const find = t => active().find(x => (((x.lastName || '') + ' ' + (x.firstName || '')).trim() + ' · ' + x.className + ' ' + (x.section || '') + ' · #' + (x.admissionNo || x.id)) === t.trim());
         const a = find(card.querySelector('#sbA').value), b = find(card.querySelector('#sbB').value);
         if(!a || !b || a.id === b.id){ toast('Pick two different children from the list that appears as you type.'); return; }
         doLink([a.id, b.id], a.id);

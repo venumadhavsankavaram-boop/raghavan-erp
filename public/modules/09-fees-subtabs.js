@@ -487,7 +487,7 @@ const ATTENDANCE_KEY = "attendance-records";
     if(secF) list = list.filter(s => s.section===secF);
     return list.map(s => {
       const stats = computeAttendanceStats(s.id, atReportsFrom || undefined, atReportsTo || undefined);
-      return { 'Student': s.firstName+' '+s.lastName, 'Admission No': s.admissionNo, 'Class': s.className, 'Section': s.section,
+      return { 'Student': s.lastName+' '+s.firstName, 'Admission No': s.admissionNo, 'Class': s.className, 'Section': s.section,
         'Present': stats.present, 'Absent': stats.absent, 'Late': stats.late, 'Leave': stats.leave, 'Total Days Marked': stats.total, '%': stats.pct };
     });
   }
@@ -909,7 +909,7 @@ const ATTENDANCE_KEY = "attendance-records";
     if(matches.length===0){ box.innerHTML = `<div class="sg-empty">No students match "${q}"</div>`; box.classList.add('open'); return; }
     box.innerHTML = matches.map(s => `<div class="sg-item" onmousedown="selectAttSuggestion('${s.id}')">
       <div class="sg-avatar">${s.photo?`<img src="${s.photo}">`:initials(s)}</div>
-      <div><div class="sg-name">${s.firstName} ${s.lastName}</div><div class="sg-meta">${s.admissionNo} · ${s.className} — Section ${s.section}</div></div>
+      <div><div class="sg-name">${s.lastName} ${s.firstName}</div><div class="sg-meta">${s.admissionNo} · ${s.className} — Section ${s.section}</div></div>
     </div>`).join('');
     box.classList.add('open');
   }

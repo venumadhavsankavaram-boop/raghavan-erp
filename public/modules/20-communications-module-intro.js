@@ -275,7 +275,7 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     const matches = students.filter(s => isActive(s) && ((s.firstName||'').toLowerCase().includes(ql) || (s.lastName||'').toLowerCase().includes(ql))).slice(0,8);
     box.innerHTML = matches.length ? matches.map(s => `<div class="sg-item" onmousedown="commsIndividualId='${s.id}'; hideCommsIndividualSuggestions(); renderCommsAudienceFields();">
       <div class="sg-avatar">${initials(s)}</div>
-      <div><div class="sg-name">${s.firstName} ${s.lastName}</div><div class="sg-meta">${s.admissionNo} · ${s.className} — Section ${s.section}</div></div>
+      <div><div class="sg-name">${s.lastName} ${s.firstName}</div><div class="sg-meta">${s.admissionNo} · ${s.className} — Section ${s.section}</div></div>
     </div>`).join('') : `<div class="sg-empty">No students match "${q}"</div>`;
     box.classList.add('open');
   }
@@ -308,7 +308,7 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     let msg = template;
     if(target.kind === 'student'){
       const s = target.student;
-      msg = msg.replace(/\{studentName\}/g, s.firstName+' '+s.lastName)
+      msg = msg.replace(/\{studentName\}/g, s.lastName+' '+s.firstName)
                 .replace(/\{className\}/g, s.className||'')
                 .replace(/\{section\}/g, s.section||'')
                 .replace(/\{amount\}/g, target.dueAmount!==undefined ? fmtMoney(target.dueAmount) : '');

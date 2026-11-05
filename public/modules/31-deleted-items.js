@@ -176,7 +176,7 @@
   function panelReceipts(){
     const rows = (DI.cache.receipts || []).filter(p => {
       const s = studentOf(p);
-      return match(`${receiptNo(p)} ${s ? s.firstName+' '+s.lastName : (p.studentName||'')} ${p.voidReason||''} ${p.voidedBy||''} ${p.category||''}`);
+      return match(`${receiptNo(p)} ${s ? s.lastName+' '+s.firstName : (p.studentName||'')} ${p.voidReason||''} ${p.voidedBy||''} ${p.category||''}`);
     }).sort((a,b) => String(b.voidedAt||'').localeCompare(String(a.voidedAt||'')));
     const note = `<div class="di-note">Receipts are never erased — a wrong receipt is <b>voided</b> with a reason and stays here for audit, and its receipt number is never reused. Voided receipts do not count in any total. An Admin can <b>Restore</b> a receipt that was voided by mistake (a reason is required and logged), or <b>Edit reason</b> to correct the wording. Refund-type voids cannot be restored here because a refund voucher was posted for them.</div>`;
     if(!rows.length) return note + empty('No voided receipts.');

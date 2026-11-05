@@ -127,7 +127,7 @@ let admissionsView = 'grid'; // grid | section | profile | search
     // so staff never have to add the same sibling pair from both sides.
     const siblingNames = getFamilyIds(s).filter(id => id !== s.id).map(sid => {
       const sib = students.find(x => x.id === sid);
-      return sib ? (sib.firstName + ' ' + sib.lastName) : null;
+      return sib ? (sib.lastName + ' ' + sib.firstName) : null;
     }).filter(Boolean);
     return `
       <div class="profile-grid">

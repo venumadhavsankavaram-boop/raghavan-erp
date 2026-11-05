@@ -58,9 +58,26 @@
       .sh-wrap .sh-top,.sh-wrap .sh-quick{display:none;}
       .sh-wrap .sh-card{border-radius:18px;box-shadow:0 2px 8px rgba(20,50,92,.05);}
       .pp-more>h3{margin:6px 0 10px;font-size:1.05rem;color:#14325c;}
+
+      .pp-child{display:inline-flex;align-items:center;gap:8px;margin-top:10px;background:rgba(255,255,255,.95);color:#14325c;border-radius:14px;padding:7px 12px;font-weight:700;font-size:.9rem;position:relative;z-index:1;}
+      .pp-child i{font-style:normal;width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#2f6fed,#7b3fe4);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:.8rem;}
+      .pp-child small{font-weight:500;color:#667;}
+      .pp-more>h3{margin:4px 0 10px;font-size:1.05rem;color:#14325c;}
+      #ppHero + .pp-more + .sh-grid{margin-bottom:20px;}
+      #view-myprofile .sh-card{box-shadow:0 4px 14px rgba(20,50,92,.07);border:1px solid #e9eef8;border-left-width:6px;}
+      #view-myprofile .sh-card .sh-big{font-size:1.7rem;font-weight:800;letter-spacing:-.01em;}
       #ppDock{display:none;}
       @media (max-width:760px){
-        .pp-grid{grid-template-columns:repeat(2,1fr);gap:10px;} .pp-tile{min-height:100px;padding:12px;}
+        .pp-grid{grid-template-columns:repeat(3,1fr);gap:8px;}
+        .pp-tile{min-height:104px;justify-content:flex-start;padding:12px 6px;align-items:center;text-align:center;gap:6px;border-radius:16px;}
+        .pp-tile span.pp-h{display:none;} .pp-tile b{font-size:.78rem;} .pp-ic{width:46px;height:46px;font-size:1.45rem;margin-bottom:0;}
+        #view-myprofile .topbar{display:none;}
+        #view-myprofile .sh-grid{grid-template-columns:1fr;gap:10px;}
+        #view-myprofile .sh-card{padding:12px 14px;border-radius:16px;gap:4px;}
+        #view-myprofile .sh-card .sh-big{font-size:1.3rem;line-height:1.2;}
+        #view-myprofile .sh-card .sh-h{font-size:.82rem;} #view-myprofile .sh-card .sh-h i{font-size:1.1rem;}
+        #view-myprofile .sh-card .sh-sub,#view-myprofile .sh-card p{font-size:.82rem;}
+        #view-myprofile .sh-card button{padding:8px 14px;font-size:.82rem;border-radius:10px;align-self:flex-start;}
         .pp-hero{padding:18px 16px;border-radius:18px;} .pp-hero h2{font-size:1.3rem;}
         #view-myprofile .mf-tabs{display:none;}
         body.pp-on{padding-bottom:74px;}
@@ -94,9 +111,24 @@
       chips.push(`<button type="button" class="pp-chip" onclick="ppLang()">🌐 ${lang() === 'te' ? 'English' : 'తెలుగు'}</button>`);
       const hero = `<div class="pp-hero" id="ppHero"><h2>${esc(name)} 👋</h2><div class="pp-sub">${esc(new Date().toLocaleDateString(lang() === 'te' ? 'te-IN' : 'en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }))}</div><div class="pp-chips">${chips.join('')}</div></div>`;
       const tiles = TILES.filter(t => tabOn(t[0]) && $('mptab-' + t[0])).map(t => `<button type="button" class="pp-tile" onclick="ppGo('${t[0]}')"><div class="pp-ic" style="background:${t[2]};">${t[1]}</div><b>${esc(pick(t[3], t[4]))}</b><span class="pp-h">${esc(pick(t[5], t[6]))}</span></button>`).join('');
-      wrap.insertAdjacentHTML('afterbegin', hero + `<div class="pp-sec" id="ppTiles"><h3>${esc(pick('What would you like to see?', 'మీరు ఏమి చూడాలనుకుంటున్నారు?'))}</h3><div class="pp-grid">${tiles}</div></div>`);
+      wrap.insertAdjacentHTML('afterbegin', hero + `<div class="pp-sec" id="ppTiles"><h3>${esc(pick('Quick links', 'త్వరిత లింకులు'))}</h3><div class="pp-grid">${tiles}</div></div>`);
       const g = wrap.querySelector('.sh-grid');
-      if(g && !wrap.querySelector('.pp-more')) g.insertAdjacentHTML('beforebegin', `<div class="pp-more"><h3>${esc(pick('Today at a glance', 'ఈరోజు ముఖ్యాంశాలు'))}</h3></div>`);
+      let more = wrap.querySelector('.pp-more');
+      if(g && !more){ g.insertAdjacentHTML('beforebegin', `<div class="pp-more"><h3>${esc(pick('Today at a glance', 'ఈరోజు ముఖ్యాంశాలు'))}</h3></div>`); more = wrap.querySelector('.pp-more'); }
+      // child's full name, surname first
+      try{
+        const stu = (typeof students !== 'undefined' && currentUser && currentUser.linkedStudentId) ? students.find(x => x.id === currentUser.linkedStudentId) : null;
+        const heroEl = $('ppHero');
+        if(stu && heroEl && !heroEl.querySelector('.pp-child')){
+          const full = ((stu.lastName || '') + ' ' + (stu.firstName || '')).trim();
+          const sub = heroEl.querySelector('.pp-sub');
+          const html = `<div class="pp-child"><i>${esc((stu.lastName || stu.firstName || '?').charAt(0).toUpperCase())}</i><span>${esc(full)}${stu.admissionNo ? ` <small>· ${esc(pick('Adm', 'అడ్మిషన్'))} ${esc(stu.admissionNo)}</small>` : ''}</span></div>`;
+          if(sub) sub.insertAdjacentHTML('afterend', html);
+        }
+      }catch(e){}
+      // facts first: hero, then today at a glance, then the quick links
+      const heroNode = $('ppHero');
+      if(heroNode && more && g){ heroNode.after(more); more.after(g); }
     }finally{ painting = false; }
   }
 

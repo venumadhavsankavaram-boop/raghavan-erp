@@ -275,7 +275,7 @@ function hsxRosterHtml(){
   let shown = 0;
   const cards = hostelRooms.filter(r => !hsxState.rblock || r.blockName === hsxState.rblock).map(r => {
     const all = hostelOccupants(r.id);
-    const occ = q ? all.filter(s => `${s.firstName} ${s.lastName} ${s.admissionNo} ${s.className} ${s.section}`.toLowerCase().includes(q)) : all;
+    const occ = q ? all.filter(s => `${s.lastName} ${s.firstName} ${s.admissionNo} ${s.className} ${s.section}`.toLowerCase().includes(q)) : all;
     const free = Math.max(r.capacity - all.length, 0);
     if(hsxState.rvac && free === 0) return '';
     if(q && !occ.length) return '';

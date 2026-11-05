@@ -54,17 +54,17 @@ let reportsTab = 'library';
   const REPORT_LIBRARY = [
     // Academic
     { id:'student_directory', category:'Academic', name:'Student Directory', icon:'🎓', scopable:'student', desc:'Every active student with class, section, and contact details.',
-      getRows(f){ return applyStudentScope(students.filter(isActive), f).map(s => ({ 'Admission No':s.admissionNo, 'Name':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Gender':s.gender||'', 'Father Name':s.fatherName||'', 'Phone':s.fatherPhone||s.motherPhone||'', 'Status':s.status||'Active' })); } },
+      getRows(f){ return applyStudentScope(students.filter(isActive), f).map(s => ({ 'Admission No':s.admissionNo, 'Name':s.lastName+' '+s.firstName, 'Class':s.className, 'Section':s.section, 'Gender':s.gender||'', 'Father Name':s.fatherName||'', 'Phone':s.fatherPhone||s.motherPhone||'', 'Status':s.status||'Active' })); } },
     { id:'new_admissions', category:'Academic', name:'New Admissions', icon:'🆕', scopable:'student', desc:'Students marked as New Admission this year.',
-      getRows(f){ return applyStudentScope(students.filter(s => s.isNewAdmission), f).map(s => ({ 'Admission No':s.admissionNo, 'Name':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Date of Joining':s.admDate||'', 'Status':s.status||'Active' })); } },
+      getRows(f){ return applyStudentScope(students.filter(s => s.isNewAdmission), f).map(s => ({ 'Admission No':s.admissionNo, 'Name':s.lastName+' '+s.firstName, 'Class':s.className, 'Section':s.section, 'Date of Joining':s.admDate||'', 'Status':s.status||'Active' })); } },
     { id:'student_roll', category:'Academic', name:'Student ID & Roll No Report', icon:'🪪', scopable:'student', desc:'Admission number and class/section for every student.',
-      getRows(f){ return applyStudentScope(students.filter(isActive), f).sort((a,b)=>(a.className+a.section+a.firstName).localeCompare(b.className+b.section+b.firstName)).map(s => ({ 'Admission No':s.admissionNo, 'Name':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section })); } },
+      getRows(f){ return applyStudentScope(students.filter(isActive), f).sort((a,b)=>(a.className+a.section+a.firstName).localeCompare(b.className+b.section+b.firstName)).map(s => ({ 'Admission No':s.admissionNo, 'Name':s.lastName+' '+s.firstName, 'Class':s.className, 'Section':s.section })); } },
     { id:'father_phone', category:'Academic', name:'Father Name & Phone Numbers', icon:'📞', scopable:'student', desc:"Every student's father's name and contact number.",
-      getRows(f){ return applyStudentScope(students.filter(isActive), f).map(s => ({ 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Father Name':s.fatherName||'', 'Father Phone':s.fatherPhone||'', 'Mother Phone':s.motherPhone||'' })); } },
+      getRows(f){ return applyStudentScope(students.filter(isActive), f).map(s => ({ 'Student':s.lastName+' '+s.firstName, 'Class':s.className, 'Section':s.section, 'Father Name':s.fatherName||'', 'Father Phone':s.fatherPhone||'', 'Mother Phone':s.motherPhone||'' })); } },
     { id:'address_report', category:'Academic', name:'Address Report', icon:'📍', scopable:'student', desc:'Full postal address for every active student.',
-      getRows(f){ return applyStudentScope(students.filter(isActive), f).map(s => ({ 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Address':s.fatherAddress||s.motherAddress||s.guardianAddress||'' })); } },
+      getRows(f){ return applyStudentScope(students.filter(isActive), f).map(s => ({ 'Student':s.lastName+' '+s.firstName, 'Class':s.className, 'Section':s.section, 'Address':s.fatherAddress||s.motherAddress||s.guardianAddress||'' })); } },
     { id:'contact_details_report', category:'Academic', name:'Student Contact & Parent Details', icon:'📇', scopable:'student', desc:'Student name, class, roll number, father name, phone, and address — all in one combined report.',
-      getRows(f){ return applyStudentScope(students.filter(isActive), f).map(s => ({ 'Student Name':s.firstName+' '+s.lastName, 'Admission No':s.admissionNo, 'Class':s.className, 'Section':s.section, 'Roll No':s.rollNo||'', 'Father Name':s.fatherName||'', 'Mother Name':s.motherName||'', 'Phone Number':s.fatherPhone||s.motherPhone||s.guardianPhone||'', 'Address':s.fatherAddress||s.motherAddress||s.guardianAddress||'' })); } },
+      getRows(f){ return applyStudentScope(students.filter(isActive), f).map(s => ({ 'Student Name':s.lastName+' '+s.firstName, 'Admission No':s.admissionNo, 'Class':s.className, 'Section':s.section, 'Roll No':s.rollNo||'', 'Father Name':s.fatherName||'', 'Mother Name':s.motherName||'', 'Phone Number':s.fatherPhone||s.motherPhone||s.guardianPhone||'', 'Address':s.fatherAddress||s.motherAddress||s.guardianAddress||'' })); } },
     { id:'strength_report', category:'Academic', name:'Strength Report', icon:'📊', scopable:false, desc:'Active student count for every class & section.',
       getRows(){ const rows=[]; CLASS_LEVELS.forEach(c=>SECTIONS.forEach(s=>{ const n=students.filter(x=>x.className===c&&x.section===s&&isActive(x)).length; if(n>0) rows.push({ 'Class':c, 'Section':s, 'Students':n }); })); return rows; } },
     { id:'caste_report', category:'Academic', name:'Caste Report', icon:'🗂️', scopable:'student', desc:'Student count by caste category.',
@@ -72,29 +72,29 @@ let reportsTab = 'library';
 
     // Attendance
     { id:'attendance_summary', category:'Attendance', name:'Attendance Summary', icon:'📋', scopable:'student', desc:'Attendance percentage for every active student.',
-      getRows(f){ return applyStudentScope(students.filter(isActive), f).map(s => { const st = computeAttendanceStats(s.id); return { 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Present':st.present, 'Absent':st.absent, 'Late':st.late, 'Leave':st.leave, '%':st.pct }; }); } },
+      getRows(f){ return applyStudentScope(students.filter(isActive), f).map(s => { const st = computeAttendanceStats(s.id); return { 'Student':s.lastName+' '+s.firstName, 'Class':s.className, 'Section':s.section, 'Present':st.present, 'Absent':st.absent, 'Late':st.late, 'Leave':st.leave, '%':st.pct }; }); } },
     { id:'daily_absentees', category:'Attendance', name:'Daily Absentees Report (Today)', icon:'📅', scopable:'student', desc:"Every student marked absent today.",
-      getRows(f){ const today=new Date().toISOString().slice(0,10); const absentIds = attendanceRecords.filter(r=>r.date===today && r.status==='Absent').map(r=>r.studentId); return applyStudentScope(students.filter(s=>absentIds.includes(s.id)), f).map(s => ({ 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Parent Phone':s.fatherPhone||s.motherPhone||'' })); } },
+      getRows(f){ const today=new Date().toISOString().slice(0,10); const absentIds = attendanceRecords.filter(r=>r.date===today && r.status==='Absent').map(r=>r.studentId); return applyStudentScope(students.filter(s=>absentIds.includes(s.id)), f).map(s => ({ 'Student':s.lastName+' '+s.firstName, 'Class':s.className, 'Section':s.section, 'Parent Phone':s.fatherPhone||s.motherPhone||'' })); } },
     { id:'low_attendance_report', category:'Attendance', name:'Attendance Between Given Percentages', icon:'📉', scopable:'student', desc:'Students below the configured attendance threshold.',
-      getRows(f){ return applyStudentScope(computeLowAttendance().map(d=>d.student), f).map(s => { const st=computeAttendanceStats(s.id); return { 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Present':st.present, 'Absent':st.absent, '%':st.pct }; }); } },
+      getRows(f){ return applyStudentScope(computeLowAttendance().map(d=>d.student), f).map(s => { const st=computeAttendanceStats(s.id); return { 'Student':s.lastName+' '+s.firstName, 'Class':s.className, 'Section':s.section, 'Present':st.present, 'Absent':st.absent, '%':st.pct }; }); } },
 
     // Marks
     { id:'consolidated_all', category:'Marks', name:'Consolidated Report (All Students)', icon:'🏆', scopable:'student', desc:'Overall percentage & grade across all exams for every active student.',
-      getRows(f){ return applyStudentScope(students.filter(isActive), f).map(s => { const d = buildConsolidatedData(s.id); if(!d) return null; return { 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Grand Total':d.grandObtained+'/'+d.grandMax, '%':d.overallPct, 'Grade':d.overallGrade }; }).filter(Boolean); } },
+      getRows(f){ return applyStudentScope(students.filter(isActive), f).map(s => { const d = buildConsolidatedData(s.id); if(!d) return null; return { 'Student':s.lastName+' '+s.firstName, 'Class':s.className, 'Section':s.section, 'Grand Total':d.grandObtained+'/'+d.grandMax, '%':d.overallPct, 'Grade':d.overallGrade }; }).filter(Boolean); } },
 
     // Accounts
     { id:'nil_paid', category:'Accounts', name:'Nil Paid Students', icon:'🚫', scopable:'student', desc:'Active students who have paid nothing towards fees yet.',
-      getRows(f){ return applyStudentScope(students.filter(isActive).filter(s => computeStudentFinance(s).totals.collected === 0), f).map(s => ({ 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Total Expected':computeStudentFinance(s).totals.expected })); } },
+      getRows(f){ return applyStudentScope(students.filter(isActive).filter(s => computeStudentFinance(s).totals.collected === 0), f).map(s => ({ 'Student':s.lastName+' '+s.firstName, 'Class':s.className, 'Section':s.section, 'Total Expected':computeStudentFinance(s).totals.expected })); } },
     { id:'revenue_by_date', category:'Accounts', name:'Date-wise Total Amount', icon:'📆', scopable:false, desc:'Total fee collected per day, most recent first.',
       getRows(){ const byDate={}; payments.forEach(p=>{ const d=p.date||'—'; byDate[d]=(byDate[d]||0)+(Number(p.amount)||0); }); return Object.keys(byDate).sort().reverse().map(d=>({ 'Date':d, 'Total Amount':byDate[d] })); } },
     { id:'feetype_totals', category:'Accounts', name:'Fee Type-wise Total Amount', icon:'🏷️', scopable:false, desc:'Total collected, split by Fee / Bus / Stock / Hostel.',
       getRows(){ const { perCat } = computeFinance(); return Object.keys(CATS).map(c => ({ 'Fee Type':CATS[c], 'Expected':perCat[c].expected, 'Collected':perCat[c].collected, 'Outstanding':perCat[c].receivable })); } },
     { id:'concession_report', category:'Accounts', name:'Concession Details Report', icon:'🎟️', scopable:'student', desc:'Every approved discount, by student and category.',
-      getRows(f){ const rows = studentDiscounts.filter(d=>d.status==='Approved').map(d=>{ const s=students.find(x=>x.id===d.studentId); return s ? { s, row:{ 'Student':s.firstName+' '+s.lastName, 'Class':s.className+' - '+s.section, 'Type':d.type, 'Applies To':CATS[d.appliesTo]||d.appliesTo, 'Amount':d.value } } : null; }).filter(Boolean); return applyStudentScope(rows.map(r=>r.s), f).map(s => rows.find(r=>r.s===s).row); } },
+      getRows(f){ const rows = studentDiscounts.filter(d=>d.status==='Approved').map(d=>{ const s=students.find(x=>x.id===d.studentId); return s ? { s, row:{ 'Student':s.lastName+' '+s.firstName, 'Class':s.className+' - '+s.section, 'Type':d.type, 'Applies To':CATS[d.appliesTo]||d.appliesTo, 'Amount':d.value } } : null; }).filter(Boolean); return applyStudentScope(rows.map(r=>r.s), f).map(s => rows.find(r=>r.s===s).row); } },
     { id:'fee_collection', category:'Accounts', name:'Fee Collection (Full Ledger)', icon:'💰', scopable:'student', desc:'Every fee payment recorded, across all categories.',
       getRows(f){ return applyPaymentScope(payments, f).map(p => ({ 'Date':p.date||'', 'Student':p.studentName||'', 'Category':feeLabelFor(p), 'Mode':p.mode||'', 'Amount':p.amount, 'Discount':p.discount||0, 'Receipt No':p.receiptNo||'' })); } },
     { id:'fee_outstanding', category:'Accounts', name:'Fee Outstanding / Defaulters', icon:'⚠️', scopable:'student', desc:'Students with pending fee balances — class-wise, section-wise, or student-wise via the Scope panel above.',
-      getRows(f){ return applyStudentScope(computeDefaulters().map(d=>d.student), f).map(s => { const d=computeDefaulters().find(x=>x.student.id===s.id); return { 'Student':s.firstName+' '+s.lastName, 'Class':s.className+' - '+s.section, 'Parent Phone':d.parentPhone||'', 'Amount Due':d.total }; }); } },
+      getRows(f){ return applyStudentScope(computeDefaulters().map(d=>d.student), f).map(s => { const d=computeDefaulters().find(x=>x.student.id===s.id); return { 'Student':s.lastName+' '+s.firstName, 'Class':s.className+' - '+s.section, 'Parent Phone':d.parentPhone||'', 'Amount Due':d.total }; }); } },
     { id:'fee_defaulters_by_type', category:'Accounts', name:'Fee Defaulters — By Fee Type', icon:'🏷️', scopable:'student', desc:'Outstanding balance broken down by Fee / Bus / Stock / Hostel for every defaulter — use the Fee Type filter above to isolate just one type.',
       getRows(f){
         const scoped = applyStudentScope(students.filter(isActive), f);
@@ -104,7 +104,7 @@ let reportsTab = 'library';
           const catsToShow = f.feeType ? [f.feeType] : Object.keys(CATS);
           const owesAny = catsToShow.some(c => fin.perCat[c] && fin.perCat[c].receivable > 0);
           if(!owesAny) return;
-          const row = { 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section };
+          const row = { 'Student':s.lastName+' '+s.firstName, 'Class':s.className, 'Section':s.section };
           Object.keys(CATS).forEach(c => {
             if(!f.feeType || f.feeType===c) row[CATS[c]+' Due'] = fin.perCat[c] ? fin.perCat[c].receivable : 0;
           });
@@ -277,13 +277,13 @@ let reportsTab = 'library';
         return riders.map(s => {
           const route = transportRoutes.find(r => r.id===s.transportRouteId);
           const stop = route ? route.stops.find(st => st.id===s.transportStopId) : null;
-          return { 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Route':route?route.name:'—', 'Bus Number':route?(route.busNumber||''):'', 'Stop':stop?stop.name:'—', 'Fare (₹/year)':stop?stop.fare:0 };
+          return { 'Student':s.lastName+' '+s.firstName, 'Class':s.className, 'Section':s.section, 'Route':route?route.name:'—', 'Bus Number':route?(route.busNumber||''):'', 'Stop':stop?stop.name:'—', 'Fare (₹/year)':stop?stop.fare:0 };
         });
       } },
     { id:'tr_fee_collection', category:'Transport', name:'Transport Fee Collection Report', icon:'💰', scopable:'student', desc:'Expected, collected, and outstanding bus fee for every student on transport.',
       getRows(f){
         const riders = applyStudentScope(students.filter(s => isActive(s) && s.needsTransport==='Yes'), f);
-        return riders.map(s => { const fin = computeStudentFinance(s); const route = transportRoutes.find(r => r.id===s.transportRouteId); return { 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Route':route?route.name:'Unassigned', 'Expected':fin.perCat.bus.expected, 'Collected':fin.perCat.bus.collected, 'Due':fin.perCat.bus.receivable }; });
+        return riders.map(s => { const fin = computeStudentFinance(s); const route = transportRoutes.find(r => r.id===s.transportRouteId); return { 'Student':s.lastName+' '+s.firstName, 'Class':s.className, 'Section':s.section, 'Route':route?route.name:'Unassigned', 'Expected':fin.perCat.bus.expected, 'Collected':fin.perCat.bus.collected, 'Due':fin.perCat.bus.receivable }; });
       } },
     { id:'tr_route_fee_summary', category:'Transport', name:'Route-wise Fee Summary', icon:'📊', scopable:false, desc:'Student count, expected, collected, and due bus fee, totalled per route.',
       getRows(){
@@ -300,7 +300,7 @@ let reportsTab = 'library';
         return Object.keys(byRoute).map(key => { const route = transportRoutes.find(r => r.id===key); const b = byRoute[key]; return { 'Route':route?route.name:'Unassigned', 'Students':b.count, 'Expected':Math.round(b.expected*100)/100, 'Collected':Math.round(b.collected*100)/100, 'Due':Math.round(b.due*100)/100 }; });
       } },
     { id:'tr_unassigned', category:'Transport', name:'Transport Requested but Unassigned', icon:'❓', scopable:'student', desc:'Students who need transport but have no route or stop assigned yet — a gap to fix before billing.',
-      getRows(f){ return applyStudentScope(students.filter(s => isActive(s) && s.needsTransport==='Yes' && (!s.transportRouteId || !s.transportStopId)), f).map(s => ({ 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Parent Phone':s.fatherPhone||s.motherPhone||'', 'Missing':!s.transportRouteId?'Route':'Stop' })); } },
+      getRows(f){ return applyStudentScope(students.filter(s => isActive(s) && s.needsTransport==='Yes' && (!s.transportRouteId || !s.transportStopId)), f).map(s => ({ 'Student':s.lastName+' '+s.firstName, 'Class':s.className, 'Section':s.section, 'Parent Phone':s.fatherPhone||s.motherPhone||'', 'Missing':!s.transportRouteId?'Route':'Stop' })); } },
 
     // Library
     { id:'lib_catalog', category:'Library', name:'Book Catalog Report', icon:'📚', scopable:false, desc:'Every book in the library with author, category, shelf location, and copies available.',
@@ -322,9 +322,9 @@ let reportsTab = 'library';
     { id:'hostel_vacancy', category:'Hostel', name:'Vacant Beds Report', icon:'🛏️', scopable:false, desc:'Rooms with at least one bed still free.',
       getRows(){ return hostelRooms.map(r => ({ r, occ: hostelOccupants(r.id).length })).filter(x => x.occ < x.r.capacity).map(x => ({ 'Block':x.r.blockName||'', 'Room No':x.r.roomNumber||'', 'Room Type':x.r.roomType||'', 'Capacity':x.r.capacity, 'Occupied':x.occ, 'Vacant Beds':x.r.capacity-x.occ })); } },
     { id:'hostel_roster', category:'Hostel', name:'Boarder Roster (All Rooms)', icon:'📋', scopable:'student', desc:'Every boarder with their assigned block, room, and room type — filter by class/section above.',
-      getRows(f){ const boarders = applyStudentScope(students.filter(s => isActive(s) && s.isBoarder==='Yes'), f); return boarders.map(s => { const room = hostelRooms.find(r => r.id===s.hostelRoomId); return { 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Block':room?room.blockName:'—', 'Room No':room?room.roomNumber:'—', 'Room Type':room?room.roomType:'—' }; }); } },
+      getRows(f){ const boarders = applyStudentScope(students.filter(s => isActive(s) && s.isBoarder==='Yes'), f); return boarders.map(s => { const room = hostelRooms.find(r => r.id===s.hostelRoomId); return { 'Student':s.lastName+' '+s.firstName, 'Class':s.className, 'Section':s.section, 'Block':room?room.blockName:'—', 'Room No':room?room.roomNumber:'—', 'Room Type':room?room.roomType:'—' }; }); } },
     { id:'hostel_fee_collection', category:'Hostel', name:'Hostel Fee Collection Report', icon:'💰', scopable:'student', desc:'Expected, collected, and outstanding hostel fee for every boarder.',
-      getRows(f){ const boarders = applyStudentScope(students.filter(s => isActive(s) && s.isBoarder==='Yes'), f); return boarders.map(s => { const fin = computeStudentFinance(s); const room = hostelRooms.find(r => r.id===s.hostelRoomId); return { 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Room':room?(room.blockName+' - '+room.roomNumber):'Unassigned', 'Expected':fin.perCat.hostel.expected, 'Collected':fin.perCat.hostel.collected, 'Due':fin.perCat.hostel.receivable }; }); } },
+      getRows(f){ const boarders = applyStudentScope(students.filter(s => isActive(s) && s.isBoarder==='Yes'), f); return boarders.map(s => { const fin = computeStudentFinance(s); const room = hostelRooms.find(r => r.id===s.hostelRoomId); return { 'Student':s.lastName+' '+s.firstName, 'Class':s.className, 'Section':s.section, 'Room':room?(room.blockName+' - '+room.roomNumber):'Unassigned', 'Expected':fin.perCat.hostel.expected, 'Collected':fin.perCat.hostel.collected, 'Due':fin.perCat.hostel.receivable }; }); } },
     { id:'hostel_warden_directory', category:'Hostel', name:'Block / Warden Directory', icon:'📇', scopable:false, desc:'Warden name and phone number for every hostel block/room.',
       getRows(){ return hostelRooms.map(r => ({ 'Block':r.blockName||'', 'Room No':r.roomNumber||'', 'Warden Name':r.wardenName||'—', 'Warden Phone':r.wardenPhone||'—' })); } },
 
@@ -437,7 +437,7 @@ let reportsTab = 'library';
     let parts = [];
     if(f.studentId){
       const s = students.find(x => x.id === f.studentId);
-      parts.push(`Scoped to <b>${s ? s.firstName+' '+s.lastName : 'selected student'}</b> only`);
+      parts.push(`Scoped to <b>${s ? s.lastName+' '+s.firstName : 'selected student'}</b> only`);
     }else{
       let label = 'All students';
       if(f.className) label = f.className + (f.section ? ' — Section '+f.section : ' — all sections');
@@ -469,7 +469,7 @@ let reportsTab = 'library';
     if(matches.length===0){ box.innerHTML = `<div class="sg-empty">No students match "${q}"</div>`; box.classList.add('open'); return; }
     box.innerHTML = matches.map(s => `<div class="sg-item" onmousedown="selectReportScopeStudent('${s.id}')">
       <div class="sg-avatar">${initials(s)}</div>
-      <div><div class="sg-name">${s.firstName} ${s.lastName}</div><div class="sg-meta">${s.admissionNo} · ${s.className} — Section ${s.section}</div></div>
+      <div><div class="sg-name">${s.lastName} ${s.firstName}</div><div class="sg-meta">${s.admissionNo} · ${s.className} — Section ${s.section}</div></div>
     </div>`).join('');
     box.classList.add('open');
   }
@@ -616,7 +616,7 @@ let reportsTab = 'library';
     invReportFilteredSales().forEach(s => {
       const st = s.buyerType==='Student' ? students.find(x=>x.id===s.studentId) : null;
       const key = s.buyerType==='Student' ? ('student:'+s.studentId) : ('other:'+s.buyerType+':'+(s.buyerName||''));
-      if(!byBuyer[key]) byBuyer[key] = { name: st ? (st.firstName+' '+st.lastName) : (s.buyerName||s.buyerType), buyerType:s.buyerType, cls: st ? (st.className+' — '+st.section) : '—', admissionNo: st ? st.admissionNo : '—', qty:0, total:0, paid:0, txns:0, lastDate:'' };
+      if(!byBuyer[key]) byBuyer[key] = { name: st ? (st.lastName+' '+st.firstName) : (s.buyerName||s.buyerType), buyerType:s.buyerType, cls: st ? (st.className+' — '+st.section) : '—', admissionNo: st ? st.admissionNo : '—', qty:0, total:0, paid:0, txns:0, lastDate:'' };
       const b = byBuyer[key];
       b.qty += s.qty; b.total += s.totalAmount||0; b.paid += s.paidAmount||0; b.txns += 1;
       if(!b.lastDate || (s.date||'') > b.lastDate) b.lastDate = s.date;
@@ -632,7 +632,7 @@ let reportsTab = 'library';
     if(!itemId) return [];
     const buyerIds = new Set(inventorySales.filter(s => s.itemId===itemId && s.buyerType==='Student').map(s => s.studentId));
     return applyStudentScope(students.filter(isActive), getReportScopeFilters()).filter(s => !buyerIds.has(s.id)).map(s => ({
-      'Admission No': s.admissionNo, 'Name': s.firstName+' '+s.lastName, 'Class': s.className, 'Section': s.section, 'Phone': s.fatherPhone||s.motherPhone||'',
+      'Admission No': s.admissionNo, 'Name': s.lastName+' '+s.firstName, 'Class': s.className, 'Section': s.section, 'Phone': s.fatherPhone||s.motherPhone||'',
     }));
   }
   function updateInvReportSummary(){
@@ -689,7 +689,7 @@ let reportsTab = 'library';
     const rows = r.getRows(filters);
     let subtitle = '';
     if(r.scopable){
-      if(filters.studentId){ const s = students.find(x=>x.id===filters.studentId); subtitle = s ? s.firstName+' '+s.lastName : ''; }
+      if(filters.studentId){ const s = students.find(x=>x.id===filters.studentId); subtitle = s ? s.lastName+' '+s.firstName : ''; }
       else if(r.scopable==='staff' && filters.department) subtitle = filters.department;
       else if(filters.className) subtitle = filters.className + (filters.section ? ' — Section '+filters.section : '');
     }

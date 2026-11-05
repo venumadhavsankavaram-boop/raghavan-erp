@@ -218,7 +218,7 @@ function paintSfSectionRows(){
     if(sfFilter === 'paid' && sum.state !== 'paid') return false;
     if(sfFilter === 'pending' && sum.state === 'paid') return false;
     if(sfFilter === 'overdue' && sum.state !== 'overdue') return false;
-    return !q || (s.firstName + ' ' + s.lastName + ' ' + (s.admissionNo || '')).toLowerCase().includes(q);
+    return !q || (s.lastName + ' ' + s.firstName + ' ' + (s.admissionNo || '')).toLowerCase().includes(q);
   });
 
   tbody.innerHTML = rows.map(({ s, sum, family }) => {

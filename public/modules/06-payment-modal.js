@@ -33,7 +33,7 @@ function openPaymentModal(presetStudentId){
 
     box.innerHTML = `
       <div class="pay-summary-box">
-        <div class="pay-summary-title">${CATS[category]} — Current Standing for ${s.firstName} ${s.lastName}</div>
+        <div class="pay-summary-title">${CATS[category]} — Current Standing for ${s.lastName} ${s.firstName}</div>
         <div class="pay-summary-grid">
           <div class="pay-summary-item"><span>Total Fee (Expected)</span><b>${fmtMoney(cat.expected)}</b></div>
           <div class="pay-summary-item"><span>Discount Applied So Far</span><b>${fmtMoney(cat.discount)}</b></div>

@@ -626,7 +626,7 @@ let tpDashExamId = '';
       const feeDue = fin.totals.receivable;
       if(!byClass[s.className]) byClass[s.className] = [];
       byClass[s.className].push({
-        admissionNo: s.admissionNo, rollNo: s.rollNo||'', name: s.firstName+' '+s.lastName,
+        admissionNo: s.admissionNo, rollNo: s.rollNo||'', name: s.lastName+' '+s.firstName,
         contact: s.fatherPhone || s.motherPhone || s.guardianPhone || '',
         totalFee, concession, feePayable, feePaid, feeDue,
       });
@@ -737,7 +737,7 @@ let tpDashExamId = '';
     attendance: {
       label:'Attendance (per-student summary)',
       columns:[
-        {key:'name',label:'Student', compute:s=>s.firstName+' '+s.lastName},{key:'className',label:'Class'},{key:'section',label:'Section'},
+        {key:'name',label:'Student', compute:s=>s.lastName+' '+s.firstName},{key:'className',label:'Class'},{key:'section',label:'Section'},
         {key:'present',label:'Present', compute:s=>computeAttendanceStats(s.id).present},
         {key:'absent',label:'Absent', compute:s=>computeAttendanceStats(s.id).absent},
         {key:'late',label:'Late', compute:s=>computeAttendanceStats(s.id).late},

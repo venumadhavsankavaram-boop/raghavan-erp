@@ -318,7 +318,7 @@
     }
     if(mode === 'slip'){
       return remarks + teacherRow + `<div class="rc-cut">✂ &nbsp;&nbsp; CUT HERE AND RETURN TO THE CLASS TEACHER &nbsp;&nbsp; ✂</div>
-        <div class="rc-slip"><b>Acknowledgement slip</b> · ${escapeHtml(s.firstName+' '+s.lastName)} · ${escapeHtml(s.className)} — ${escapeHtml(s.section)} · ${escapeHtml(title)}
+        <div class="rc-slip"><b>Acknowledgement slip</b> · ${escapeHtml(s.lastName+' '+s.firstName)} · ${escapeHtml(s.className)} — ${escapeHtml(s.section)} · ${escapeHtml(title)}
         <p style="margin:4px 0 8px;">${ack}</p>
         <div class="rc-ack-sig"><div>${parentLbl} signature: <span class="ln"></span></div><div>Date: <span class="ln short"></span></div></div></div>`;
     }
@@ -486,7 +486,7 @@
   function prcRosterStudents(){
     const q = prcSearchText.trim().toLowerCase();
     return students.filter(s => isActive(s) && (!prcClass || s.className === prcClass) && (!prcSection || s.section === prcSection)
-      && (!q || ((s.firstName||'')+' '+(s.lastName||'')).toLowerCase().includes(q) || String(s.admissionNo||'').toLowerCase().includes(q)))
+      && (!q || ((s.lastName || '')+' '+(s.firstName || '')).toLowerCase().includes(q) || String(s.admissionNo||'').toLowerCase().includes(q)))
       .sort((a,b) => (a.section||'').localeCompare(b.section||'') || (a.firstName||'').localeCompare(b.firstName||''));
   }
   function prcPickDefaults(){
@@ -706,7 +706,7 @@
       const disp = sc.scheme ? sc.scheme.display : 'both';
       const status = !sc.anyHas ? '<span class="sf-badge sf-badge--upcoming">No marks</span>' : sc.missing ? `<span class="sf-badge sf-badge--due">${sc.missing} missing</span>` : '<span class="sf-badge sf-badge--paid">Complete</span>';
       return `<tr class="${prcStudentId===s.id?'prc-sel':''}" onclick="prcSelectStudent('${s.id}')">
-        <td><div class="prc-stu"><span class="prc-av">${s.photo ? `<img src="${s.photo}">` : escapeHtml(initials(s))}</span><span><b>${escapeHtml(s.firstName+' '+s.lastName)}</b><small>${escapeHtml(s.className)} — ${escapeHtml(s.section)}</small></span></div></td>
+        <td><div class="prc-stu"><span class="prc-av">${s.photo ? `<img src="${s.photo}">` : escapeHtml(initials(s))}</span><span><b>${escapeHtml(s.lastName+' '+s.firstName)}</b><small>${escapeHtml(s.className)} — ${escapeHtml(s.section)}</small></span></div></td>
         <td>${escapeHtml(s.admissionNo||'')}</td>
         <td class="c">${sc.anyHas ? `${sc.totalObtained}/${sc.totalMax}` : '—'}</td>
         <td class="c">${sc.anyHas && disp !== 'grades' ? sc.pct + '%' + (sc.missing ? '<sup title="Provisional: some marks are not entered yet">*</sup>' : '') : '—'}</td>
@@ -728,7 +728,7 @@
     const list = prcRosterStudents();
     if(!s || !list.some(x => x.id === s.id)) s = list[0] || null;
     if(!s){ host.innerHTML = `<div class="empty-state"><b>No student to preview</b>Pick a class that has students.</div>`; if(sub) sub.textContent=''; return; }
-    if(sub) sub.textContent = `${s.firstName} ${s.lastName} · ${s.className} — ${s.section}`;
+    if(sub) sub.textContent = `${s.lastName} ${s.firstName} · ${s.className} — ${s.section}`;
     const html = prcReportHtml(s, src, t, { logoSrc:prcLogo(), perPage:1, title:prcTitle });
     const doc = `<!doctype html><html><head><meta charset="utf-8"><style>${prcPrintCss()}${prcLogoCss(prcLogo())} body{ background:#fff; padding:0; margin:0; } .rc-card{ margin:0; }</style></head><body>${html}</body></html>`;
     const editor = (t.layout === 'modern') ? coScholasticEditorHtml(s, src.coExam, t) : '';

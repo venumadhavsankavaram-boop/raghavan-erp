@@ -18,7 +18,7 @@ function toggleMoreActions(){
         <div style="display:flex; gap:12px;">
           ${s.photo ? `<img src="${s.photo}" style="width:60px;height:60px;border-radius:8px;object-fit:cover;">` : `<div style="width:60px;height:60px;border-radius:8px;background:#eee;"></div>`}
           <div>
-            <div style="font-weight:700;">${s.firstName} ${s.lastName}</div>
+            <div style="font-weight:700;">${s.lastName} ${s.firstName}</div>
             <div style="font-size:12px; color:#555;">${s.className} - Sec ${s.section}</div>
             <div style="font-size:12px; color:#555;">Adm No: ${s.admissionNo}</div>
           </div>
@@ -34,7 +34,7 @@ function toggleMoreActions(){
     students.forEach(s => {
       (s.clubs||'').split(',').map(c=>c.trim()).filter(Boolean).forEach(c => {
         groups[c] = groups[c] || [];
-        groups[c].push(s.firstName + ' ' + s.lastName);
+        groups[c].push(s.lastName + ' ' + s.firstName);
       });
     });
     const keys = Object.keys(groups);
@@ -126,7 +126,7 @@ function toggleMoreActions(){
     if(students.length === 0){ showToast('No records to export.'); return; }
     const rows = students.map(s => `
       <tr>
-        <td>${s.admissionNo}</td><td>${s.firstName} ${s.lastName}</td><td>${s.className}</td><td>${s.section}</td>
+        <td>${s.admissionNo}</td><td>${s.lastName} ${s.firstName}</td><td>${s.className}</td><td>${s.section}</td>
         <td>${s.gender||'—'}</td><td>${s.fatherName||'—'}</td><td>${s.fatherPhone||s.motherPhone||'—'}</td><td>${s.status||'Active'}</td>
       </tr>`).join('');
     const w = window.open('', '_blank');
@@ -229,7 +229,7 @@ function toggleMoreActions(){
       newRecordDefaults: () => ({ id: 'stu_' + Date.now() + '_' + Math.random().toString(36).slice(2,7) }),
       newIdValue: () => nextAdmissionNo(),
       deriveFields: rec => {
-        rec.name = (rec.firstName||'') + ' ' + (rec.lastName||'');
+        rec.name = (rec.lastName || '') + ' ' + (rec.firstName || '');
         rec.parent = rec.fatherName || rec.motherName || '';
         rec.contact = rec.fatherPhone || rec.motherPhone || '';
       },
@@ -980,7 +980,7 @@ function toggleMoreActions(){
     if(currentUser.role === 'Admin'){
       groupedDiscountRows().filter(r => r.status==='Pending').forEach(r => {
         const s = students.find(x => x.id === r.studentId);
-        const name = s ? `${s.firstName} ${s.lastName}` : r.studentId;
+        const name = s ? `${s.lastName} ${s.firstName}` : r.studentId;
         const requestedDate = (r.records[0] && r.records[0].requestedDate) || '';
         items.push({
           id: 'discount_'+r.batchId+'_'+r.studentId, icon:'💸', title:'Fee discount request', sourceLabel:'Discounts',
@@ -1361,7 +1361,7 @@ function toggleMoreActions(){
     }
     body.innerHTML = dupGroups.map(group => `
       <div style="margin-bottom:18px;">
-        <div style="font-weight:700; color:var(--navy); margin-bottom:8px;">${group[0].firstName} ${group[0].lastName} <span style="font-weight:400; color:var(--ink-soft); font-size:0.78rem;">(${group.length} records)</span></div>
+        <div style="font-weight:700; color:var(--navy); margin-bottom:8px;">${group[0].lastName} ${group[0].firstName} <span style="font-weight:400; color:var(--ink-soft); font-size:0.78rem;">(${group.length} records)</span></div>
         ${group.map(s => `
           <div class="list-manage-row">
             <div style="font-size:0.82rem;">
@@ -1380,7 +1380,7 @@ function toggleMoreActions(){
   async function deleteDuplicateEntry(id){
     const s = students.find(x => x.id === id);
     if(!s) return;
-    if(!await showConfirmDialog(`Start a 3-step deletion request for this duplicate record (${s.firstName} ${s.lastName}, ${s.admissionNo})? This is step 1 of 3 — nothing is deleted yet.`)) return;
+    if(!await showConfirmDialog(`Start a 3-step deletion request for this duplicate record (${s.lastName} ${s.firstName}, ${s.admissionNo})? This is step 1 of 3 — nothing is deleted yet.`)) return;
     try{
       await throwIfNotOk(await fetch('/api/deletion-requests', { method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify({ resource:'students', recordId:id, reason:'Duplicate record (flagged from Find Duplicate Students)' }) }));
       renderDuplicatesModal();
@@ -1408,7 +1408,7 @@ function toggleMoreActions(){
     const dupGroups = Object.values(groups).filter(g => g.length > 1);
     const extraCount = dupGroups.reduce((n,g) => n + g.length - 1, 0);
     if(!extraCount){ showToast('No duplicates to delete.'); return; }
-    const preview = dupGroups.slice(0,8).map(g => `${g[0].firstName} ${g[0].lastName} (${g.length} records)`).join('\n');
+    const preview = dupGroups.slice(0,8).map(g => `${g[0].lastName} ${g[0].firstName} (${g.length} records)`).join('\n');
     const more = dupGroups.length > 8 ? `\n…and ${dupGroups.length - 8} more name(s).` : '';
     const msg = `Delete ${extraCount} duplicate record(s) across ${dupGroups.length} name(s) in one step, keeping only the original (earliest-added) entry for each name?\n\nThis skips the usual 3-step deletion approval — it applies only to these flagged duplicates. Removed records go to Recently Deleted and can be restored.\n\n${preview}${more}`;
     if(!await showConfirmDialog(msg, { title:'Delete all duplicate students?', okText:'Delete Duplicates' })) return;

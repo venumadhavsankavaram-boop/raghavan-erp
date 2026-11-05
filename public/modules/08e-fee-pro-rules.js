@@ -136,7 +136,7 @@ async function renderLateFeesTab(body){
         <div id="lfPlan"></div>
         ${sfBtn('secondary','search','Preview late fees','fpLatePreviewRun()')}
         <p class="ft-preview">Assessed so far: <b>${lateExtras.length}</b> · Outstanding <b>${fmtMoney(out)}</b> · Waived <b>${fpWaivers.length}</b></p>
-        ${fpWaivers.length ? `<details><summary>Waiver log</summary><div class="table-wrap" style="max-height:200px;overflow:auto;"><table><thead><tr><th>Date</th><th>Student</th><th>Amount</th><th>By</th><th>Reason</th></tr></thead><tbody>${fpWaivers.slice().reverse().slice(0,100).map(w => { const st = students.find(x=>x.id===w.studentId); return `<tr><td>${w.date}</td><td>${st?escapeHtml(st.firstName+' '+st.lastName):'—'}</td><td>${fmtMoney(w.amount)}</td><td>${escapeHtml(w.by)}</td><td>${escapeHtml(w.reason)}</td></tr>`; }).join('')}</tbody></table></div></details>` : ''}
+        ${fpWaivers.length ? `<details><summary>Waiver log</summary><div class="table-wrap" style="max-height:200px;overflow:auto;"><table><thead><tr><th>Date</th><th>Student</th><th>Amount</th><th>By</th><th>Reason</th></tr></thead><tbody>${fpWaivers.slice().reverse().slice(0,100).map(w => { const st = students.find(x=>x.id===w.studentId); return `<tr><td>${w.date}</td><td>${st?escapeHtml(st.lastName+' '+st.firstName):'—'}</td><td>${fmtMoney(w.amount)}</td><td>${escapeHtml(w.by)}</td><td>${escapeHtml(w.reason)}</td></tr>`; }).join('')}</tbody></table></div></details>` : ''}
       </section>
     </div>`;
   ftLatePreview();
@@ -174,7 +174,7 @@ async function fpAutoLate(){
 async function openPreviousDuesModal(studentId){
   if(!canSub('managefee_extra','managefee','create')){ showToast("You don't have permission to add dues."); return; }
   const s = students.find(x => x.id === studentId); if(!s) return;
-  const v = await showPromptDialog(`Previous dues carried forward for ${s.firstName} ${s.lastName}.\n\nEnter the amount (₹) owed from before this system:`, { title:'Add previous dues', defaultValue:'' });
+  const v = await showPromptDialog(`Previous dues carried forward for ${s.lastName} ${s.firstName}.\n\nEnter the amount (₹) owed from before this system:`, { title:'Add previous dues', defaultValue:'' });
   if(v === null) return;
   const amt = Math.round(Number(v));
   if(!(amt > 0)){ showToast('Enter a valid amount greater than zero.'); return; }

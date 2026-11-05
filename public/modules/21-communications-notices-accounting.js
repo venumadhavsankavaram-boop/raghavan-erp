@@ -167,7 +167,7 @@
       showToast(`Can't remove — ${fmtMoney(paidHostel)} has already been collected as Hostel Fee for this student. Void or Refund that payment first (Fee ledger → Payment History), then remove them from the room.`);
       return;
     }
-    if(!await showConfirmDialog(`Remove ${s.firstName} ${s.lastName} from their hostel room?`)) return;
+    if(!await showConfirmDialog(`Remove ${s.lastName} ${s.firstName} from their hostel room?`)) return;
     s.isBoarder = 'No';
     s.hostelRoomId = '';
     await persist();
@@ -255,7 +255,7 @@
   function libBorrowerDisplayName(){
     if(libIssueBorrowerType === 'Student'){
       const s = students.find(x => x.id===libIssueBorrowerId);
-      return s ? `${s.firstName} ${s.lastName} — ${s.className} ${s.section}` : '';
+      return s ? `${s.lastName} ${s.firstName} — ${s.className} ${s.section}` : '';
     }
     const st = staffList.find(x => x.id===libIssueBorrowerId);
     return st ? `${st.firstName} ${st.lastName}` : '';
@@ -495,7 +495,7 @@
     const expected = studentBusFare(s);
     const paid = payments.filter(p => p.studentId === s.id && p.category === 'bus' && !p.voided).reduce((sum,p) => sum + payNet(p), 0);
     return {
-      name: `${s.firstName} ${s.lastName}`,
+      name: `${s.lastName} ${s.firstName}`,
       fatherName: s.fatherName || '—',
       className: s.className,
       section: s.section,

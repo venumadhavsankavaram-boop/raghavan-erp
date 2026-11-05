@@ -38,7 +38,7 @@ function certLetterheadTop(){
   function certProfileCardHtml(s){
     return `
       <div class="profile-card" style="margin-bottom:14px;">
-        <div class="profile-row"><span>Name</span><span>${s.firstName} ${s.lastName}</span></div>
+        <div class="profile-row"><span>Name</span><span>${s.lastName} ${s.firstName}</span></div>
         <div class="profile-row"><span>Admission No</span><span>${s.admissionNo}</span></div>
         <div class="profile-row"><span>Class — Section</span><span>${s.className} — ${s.section}</span></div>
         <div class="profile-row"><span>Father / Mother Name</span><span>${s.fatherName||'—'} / ${s.motherName||'—'}</span></div>
@@ -206,7 +206,7 @@ function certLetterheadTop(){
         <h3 style="text-align:center; margin:20px 0; letter-spacing:1px;">TRANSFER CERTIFICATE</h3>
         <table style="width:100%; border-collapse:collapse; font-size:0.95em;">
           <tr><td style="padding:4px 0; width:60%;">1. Admission Number</td><td><b>${s.admissionNo}</b></td></tr>
-          <tr><td style="padding:4px 0;">2. Name of Student${certGuardianLabel(s)?(' ('+certGuardianLabel(s)+')'):''}</td><td><b>${s.firstName} ${s.lastName}</b></td></tr>
+          <tr><td style="padding:4px 0;">2. Name of Student${certGuardianLabel(s)?(' ('+certGuardianLabel(s)+')'):''}</td><td><b>${s.lastName} ${s.firstName}</b></td></tr>
           <tr><td style="padding:4px 0;">3. Father's Name</td><td><b>${s.fatherName||'—'}</b></td></tr>
           <tr><td style="padding:4px 0;">4. Mother's Name</td><td><b>${s.motherName||'—'}</b></td></tr>
           <tr><td style="padding:4px 0;">5. Nationality</td><td><b>${s.nationality||'Indian'}</b></td></tr>
@@ -244,7 +244,7 @@ function certLetterheadTop(){
           <span>Date of Issue: <b>${new Date().toISOString().slice(0,10)}</b></span>
         </div>
         <h3 style="text-align:center; margin:20px 0; letter-spacing:1px;">CHARACTER CERTIFICATE</h3>
-        <p>This is to certify that ${pronounFor(s.gender,'title')} <b>${s.firstName} ${s.lastName}</b>${guardianLabel?(', '+guardianLabel):''}, bearing Admission Number <b>${s.admissionNo}</b>, was a student of this institution in Class <b>${s.className} — Section ${s.section}</b> from <b>${d.periodFrom||s.admDate||'—'}</b> to <b>${d.periodTo||'—'}</b>.</p>
+        <p>This is to certify that ${pronounFor(s.gender,'title')} <b>${s.lastName} ${s.firstName}</b>${guardianLabel?(', '+guardianLabel):''}, bearing Admission Number <b>${s.admissionNo}</b>, was a student of this institution in Class <b>${s.className} — Section ${s.section}</b> from <b>${d.periodFrom||s.admDate||'—'}</b> to <b>${d.periodTo||'—'}</b>.</p>
         <p>${pronounFor(s.gender,'possessive')} conduct and character during the period of study at this institution were found to be <b>${cert.conduct}</b>. To the best of our knowledge, ${pronounFor(s.gender,'subject')} has not been involved in any activity detrimental to the discipline of the institution.</p>
         <p>This certificate is issued at the request of the student/guardian for ${cert.purpose}.</p>
         <br><br>
@@ -267,7 +267,7 @@ function certLetterheadTop(){
           <span>Date of Issue: <b>${new Date().toISOString().slice(0,10)}</b></span>
         </div>
         <h3 style="text-align:center; margin:20px 0; letter-spacing:1px;">MIGRATION CERTIFICATE</h3>
-        <p>This is to certify that <b>${s.firstName} ${s.lastName}</b>${guardianLabel?(', '+guardianLabel):''}, bearing Admission Number <b>${s.admissionNo}</b>, Date of Birth <b>${s.dob||'—'}</b>, studied/passed Class <b>${d.classPassed||s.className}</b> at this institution in the year <b>${d.yearOfPassing||'—'}</b>.</p>
+        <p>This is to certify that <b>${s.lastName} ${s.firstName}</b>${guardianLabel?(', '+guardianLabel):''}, bearing Admission Number <b>${s.admissionNo}</b>, Date of Birth <b>${s.dob||'—'}</b>, studied/passed Class <b>${d.classPassed||s.className}</b> at this institution in the year <b>${d.yearOfPassing||'—'}</b>.</p>
         <p>${s.firstName} is eligible for admission to <b>${d.eligibleFor||'the next higher class'}</b> at another recognized institution/board.</p>
         ${d.remarks ? `<p>Remarks: ${d.remarks}</p>` : ''}
         <br><br>
@@ -305,7 +305,7 @@ function certLetterheadTop(){
     const body = document.getElementById('studyCertModalBody');
     body.innerHTML = `
       <div class="profile-card" style="margin-bottom:14px;">
-        <div class="profile-row"><span>Name</span><span>${s.firstName} ${s.lastName}</span></div>
+        <div class="profile-row"><span>Name</span><span>${s.lastName} ${s.firstName}</span></div>
         <div class="profile-row"><span>Admission No</span><span>${s.admissionNo}</span></div>
         <div class="profile-row"><span>Class — Section</span><span>${s.className} — ${s.section}</span></div>
         <div class="profile-row"><span>Father / Mother Name</span><span>${s.fatherName||'—'} / ${s.motherName||'—'}</span></div>
@@ -367,7 +367,7 @@ function certLetterheadTop(){
           <span>Date of Issue: <b>${new Date().toISOString().slice(0,10)}</b></span>
         </div>
         <h3 style="text-align:center; margin:20px 0; letter-spacing:1px;">STUDY CERTIFICATE</h3>
-        <p>This is to certify that ${pronounFor(s.gender,'title')} <b>${s.firstName} ${s.lastName}</b>${guardianLabel?(', '+guardianLabel):''}, bearing Admission Number <b>${s.admissionNo}</b>, ${studyLine}</p>
+        <p>This is to certify that ${pronounFor(s.gender,'title')} <b>${s.lastName} ${s.firstName}</b>${guardianLabel?(', '+guardianLabel):''}, bearing Admission Number <b>${s.admissionNo}</b>, ${studyLine}</p>
         <p>Date of Birth (as per school records): <b>${s.dob||'—'}</b></p>
         <p>Date of Admission: <b>${s.admDate||'—'}</b></p>
         <p>${pronounFor(s.gender,'possessive')} conduct and character during the period of study at this institution were found to be <b>${cert.conduct}</b>.</p>

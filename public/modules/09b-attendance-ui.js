@@ -184,7 +184,7 @@ function requestAttCorrection(studentId){
   const s = students.find(x => x.id === studentId); if(!s) return;
   const rec = attendanceRecords.find(r => r.studentId === studentId && r.date === attMarkDate && (r.session === attMarkSession || !r.session));
   openCorrectionRequest('attendance', { studentId, date: attMarkDate, session: rec ? (rec.session || null) : attMarkSession },
-    `${s.firstName} ${s.lastName} · ${attMarkDate} ${attMarkSession}`, rec ? rec.status : '');
+    `${s.lastName} ${s.firstName} · ${attMarkDate} ${attMarkSession}`, rec ? rec.status : '');
 }
 function requestStaffAttCorrection(staffId){
   const st = staffList.find(x => x.id === staffId); if(!st) return;
@@ -204,7 +204,7 @@ function openMarksCorrectionPicker(){
   o.innerHTML = `<div style="background:var(--surface,#fff);color:var(--ink,#1b2433);border-radius:16px;padding:22px;max-width:420px;width:100%;">
     <h3 style="margin:0 0 10px;">Which mark is wrong?</h3>
     <label style="font-size:.8rem;font-weight:600;">Student</label>
-    <select class="input" id="corrStu" style="width:100%;">${list.map(s => `<option value="${s.id}">${escapeHtml((s.rollNo ? s.rollNo + ' · ' : '') + s.firstName + ' ' + s.lastName)}</option>`).join('')}</select>
+    <select class="input" id="corrStu" style="width:100%;">${list.map(s => `<option value="${s.id}">${escapeHtml((s.rollNo ? s.rollNo + ' · ' : '') + s.lastName + ' ' + s.firstName)}</option>`).join('')}</select>
     <label style="font-size:.8rem;font-weight:600;display:block;margin-top:10px;">Subject</label>
     <select class="input" id="corrSub" style="width:100%;">${subs.map(s => `<option>${escapeHtml(s)}</option>`).join('')}</select>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
@@ -217,7 +217,7 @@ function corrMarksNext(){
   const sid = document.getElementById('corrStu').value, sub = document.getElementById('corrSub').value;
   const s = students.find(x => x.id === sid);
   const r = examResults.find(x => x.examId === exam.id && x.studentId === sid && x.subject === sub);
-  openCorrectionRequest('marks', { examId: exam.id, studentId: sid, subject: sub }, `${s.firstName} ${s.lastName} · ${sub} · ${exam.name}`, r ? (r.marks ?? '') : '');
+  openCorrectionRequest('marks', { examId: exam.id, studentId: sid, subject: sub }, `${s.lastName} ${s.firstName} · ${sub} · ${exam.name}`, r ? (r.marks ?? '') : '');
 }
 async function renderCorrectionsTab(body){
   body.innerHTML = '<div class="empty-state"><b>Loading…</b></div>';

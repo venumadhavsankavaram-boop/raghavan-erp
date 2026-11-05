@@ -201,12 +201,12 @@ function fpxPoTarget(cls){
 
 function fpxPoRowsHtml(list, next){
   const q = fpxPoQ.trim().toLowerCase();
-  const rows = list.filter(s => !q || ((s.firstName || '') + ' ' + (s.lastName || '') + ' ' + (s.rollNo || '') + ' ' + (s.admissionNo || '')).toLowerCase().includes(q));
+  const rows = list.filter(s => !q || ((s.lastName || '') + ' ' + (s.firstName || '') + ' ' + (s.rollNo || '') + ' ' + (s.admissionNo || '')).toLowerCase().includes(q));
   if(!rows.length) return { n: 0, html: `<tr><td colspan="4">${fpxEmpty('No student matches', 'Try a different name or roll number.')}</td></tr>` };
   return { n: rows.length, html: rows.map(s => `
     <tr>
       <td class="fpx-roll">${escapeHtml(s.rollNo || '—')}</td>
-      <td><span class="fpx-who">${sfAvatar(s)}<span class="fpx-nm"><b>${escapeHtml((s.firstName || '') + ' ' + (s.lastName || ''))}</b><small class="fpx-sec-m">Section ${escapeHtml(s.section || '—')}</small></span></span></td>
+      <td><span class="fpx-who">${sfAvatar(s)}<span class="fpx-nm"><b>${escapeHtml((s.lastName || '') + ' ' + (s.firstName || ''))}</b><small class="fpx-sec-m">Section ${escapeHtml(s.section || '—')}</small></span></span></td>
       <td class="fpx-sec-col">${escapeHtml(s.section || '—')}</td>
       <td>${next ? `<span class="fpx-move"><span class="fpx-move-from">${escapeHtml(s.className)}<span aria-hidden="true"> → </span></span><b>${escapeHtml(next)}</b></span>` : `<span class="sf-badge sf-badge--upcoming">Graduates</span>`}</td>
     </tr>`).join('') };

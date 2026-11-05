@@ -114,7 +114,7 @@ function ccFiltered(){
     if(ccHeadFilter && !r.records.some(d => d.appliesTo === ccHeadFilter)) return false;
     if(q){
       const s = students.find(x => x.id === r.studentId);
-      const hay = s ? ((s.firstName || '') + ' ' + (s.lastName || '') + ' ' + (s.admissionNo || '') + ' ' + (s.fatherName || '')).toLowerCase() : '';
+      const hay = s ? ((s.lastName || '') + ' ' + (s.firstName || '') + ' ' + (s.admissionNo || '') + ' ' + (s.fatherName || '')).toLowerCase() : '';
       if(!hay.includes(q)) return false;
     }
     return true;
@@ -142,7 +142,7 @@ function ccRowHtml(r){
   const tk = CC_TYPE_KEY[r.type] || 'General';
   return `<div class="cc-row st-${ftEsc(r.status)}">
     <div class="cc-who">${s ? sfAvatar(s) : '<span class="sf-avatar" aria-hidden="true">?</span>'}
-      <span><b>${s ? ftEsc(s.firstName + ' ' + s.lastName) : 'Unknown student'}</b>
+      <span><b>${s ? ftEsc(s.lastName + ' ' + s.firstName) : 'Unknown student'}</b>
       <small>${s ? ftEsc(s.className) + ' · Sec ' + ftEsc(s.section) + ' · ' + ftEsc(s.admissionNo || '') : ''}</small></span></div>
     <div><span class="cc-type cc-t-${tk}">${ftEsc(r.type || 'Discount')}</span>${r.note ? `<span class="cc-note">${ftEsc(r.note)}</span>` : ''}</div>
     <div class="cc-heads">${heads || '—'}</div>
@@ -174,7 +174,7 @@ function ccExport(){
   ccFiltered().list.forEach(r => {
     const s = students.find(x => x.id === r.studentId) || {};
     r.records.forEach(d => rows.push({
-      'Student': ((s.firstName || '') + ' ' + (s.lastName || '')).trim(), 'Admission No': s.admissionNo || '', 'Class': s.className || '', 'Section': s.section || '',
+      'Student': ((s.lastName || '') + ' ' + (s.firstName || '')).trim(), 'Admission No': s.admissionNo || '', 'Class': s.className || '', 'Section': s.section || '',
       'Type': d.type || '', 'Fee Head': CATS[d.appliesTo] || d.appliesTo, 'Amount': ccAmt(d), 'Status': d.status || '',
       'Requested By': d.requestedBy || '', 'Requested On': d.requestedDate || '', 'Approved By': d.approvedBy || '', 'Approved On': d.approvedDate || '',
       'Cancelled By': d.cancelledBy || '', 'Cancelled On': d.cancelledDate || '', 'Remark': d.note || '',
@@ -256,7 +256,7 @@ deleteDiscountGroup = async function(batchId, studentId){
   const s = students.find(x => x.id === studentId);
   const wasApproved = rows[0].status === 'Approved';
   const ok = await showConfirmDialog(
-    'Cancel this discount' + (s ? ' for ' + s.firstName + ' ' + s.lastName : '') + '?' +
+    'Cancel this discount' + (s ? ' for ' + s.lastName + ' ' + s.firstName : '') + '?' +
     (wasApproved ? ' The fee goes back to the full amount. ' : ' ') + 'The record stays in the list as Cancelled, and the fee head becomes free for a new discount.',
     { title: 'Cancel discount', okText: 'Cancel discount', cancelText: 'Keep it' });
   if(!ok) return;

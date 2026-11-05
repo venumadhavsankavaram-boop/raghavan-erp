@@ -35,7 +35,7 @@
     var issues = [];
     var studentById = {}; studs.forEach(function(s){ studentById[s.id] = s; });
     var feeById = {}; fees.forEach(function(f){ feeById[f.id] = f; });
-    function nameOf(p){ var s = studentById[p.studentId]; return (s && (s.name || ((s.firstName || '') + ' ' + (s.lastName || '')).trim())) || p.studentName || '(unknown student)'; }
+    function nameOf(p){ var s = studentById[p.studentId]; return (s && (s.name || ((s.lastName || '') + ' ' + (s.firstName || '')).trim())) || p.studentName || '(unknown student)'; }
     function add(sev, code, title, detail, extra){ var o = { sev: sev, code: code, title: title, detail: detail }; if(extra) for(var k in extra) o[k] = extra[k]; issues.push(o); }
 
     var active = pays.filter(acIsActive);
@@ -58,7 +58,7 @@
     active.forEach(function(p){ if(p.category === 'extra' && p.extraFeeId) sumByFee[p.extraFeeId] = (sumByFee[p.extraFeeId] || 0) + acNum(p.amount); });
     fees.forEach(function(f){
       var got = Math.round((sumByFee[f.id] || 0) * 100) / 100, amt = acNum(f.amount), stored = Math.round(acNum(f.paidAmount) * 100) / 100;
-      var st = studentById[f.studentId]; var who = st ? (st.name || ((st.firstName || '') + ' ' + (st.lastName || '')).trim()) : '(unknown student)';
+      var st = studentById[f.studentId]; var who = st ? (st.name || ((st.lastName || '') + ' ' + (st.firstName || '')).trim()) : '(unknown student)';
       if(amt > 0 && got > amt + 0.009){
         add('bad', 'OVER_COLLECTED', who + ': "' + f.name + '" collected ' + acMoney(got) + ' on a ' + acMoney(amt) + ' fee',
           'Receipts add up to more than the fee. One of them is probably a duplicate - void it.', { studentId: f.studentId, feeId: f.id });

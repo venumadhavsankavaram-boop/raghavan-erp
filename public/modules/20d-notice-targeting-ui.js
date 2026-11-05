@@ -48,7 +48,7 @@ function nbxAudienceLabel(){
     case 'everyone': return 'Everyone (students + staff)';
     case 'class': return `${nbxClass} (Whole Class)`;
     case 'section': return `${nbxClass} — Section ${nbxSection}`;
-    case 'individual': { const s = students.find(x => x.id === nbxIndId); return s ? `${s.firstName} ${s.lastName} (${s.className} ${s.section})` : 'One student'; }
+    case 'individual': { const s = students.find(x => x.id === nbxIndId); return s ? `${s.lastName} ${s.firstName} (${s.className} ${s.section})` : 'One student'; }
   }
   return '';
 }
@@ -122,7 +122,7 @@ function nbxFindStudent(q){
   const out = document.getElementById('nbxFound'); if(!out) return;
   q = q.trim().toLowerCase();
   if(q.length < 2){ out.innerHTML = ''; return; }
-  const m = students.filter(s => isActive(s) && `${s.firstName} ${s.lastName} ${s.admissionNo}`.toLowerCase().includes(q)).slice(0, 8);
+  const m = students.filter(s => isActive(s) && `${s.lastName} ${s.firstName} ${s.admissionNo}`.toLowerCase().includes(q)).slice(0, 8);
   out.innerHTML = m.length ? m.map(s => `<button type="button" onclick="nbxPickStudent('${s.id}')"><b>${escapeHtml(s.firstName)} ${escapeHtml(s.lastName)}</b><small>${escapeHtml(s.admissionNo || '')} · ${escapeHtml(s.className)} ${escapeHtml(s.section || '')}</small></button>`).join('') : '<div class="nbx-none">No student matches.</div>';
 }
 function nbxPickStudent(id){ nbxIndId = id; const i = document.getElementById('nbxFind'); if(i) i.value = nbxAudienceLabel(); const o = document.getElementById('nbxFound'); if(o) o.innerHTML = ''; nbxPaintSummary(); }

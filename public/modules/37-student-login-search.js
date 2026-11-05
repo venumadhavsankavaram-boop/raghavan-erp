@@ -6,7 +6,7 @@
 (function(){
   const S = { cls: '', sec: '', sid: '' };
   const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
-  const nm = s => ((s.firstName || '') + ' ' + (s.lastName || '')).trim();
+  const nm = s => ((s.lastName || '') + ' ' + (s.firstName || '')).trim();
   const active = () => students.filter(s => typeof isActive === 'function' ? isActive(s) : true);
   const num = v => { const m = String(v).match(/\d+/); return m ? parseInt(m[0], 10) : 999; };
   const classes = () => Array.from(new Set(active().map(s => s.className).filter(Boolean))).sort((a, b) => num(a) - num(b) || String(a).localeCompare(String(b)));

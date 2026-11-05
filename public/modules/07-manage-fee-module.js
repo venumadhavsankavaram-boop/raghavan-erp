@@ -240,7 +240,7 @@ const FEE_TYPES_KEY = "fee-types";
         <div style="margin-bottom:14px;">
           <div onclick="toggleFamilyMemberCard('${id}')" style="cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:14px 18px; background:var(--surface-2,#f5f2e9); border-radius:14px;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style="transition:transform .2s ease; transform:rotate(${open?90:0}deg); flex:none;" id="famChevron-${id}"><path d="M9 6L15 12L9 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <b>${m.firstName} ${m.lastName}</b>
+            <b>${m.lastName} ${m.firstName}</b>
             ${id===focusId ? `<span class="pill">Self</span>` : ``}
             <span class="pill">${m.className} - Section ${m.section}</span>
             <span style="margin-left:auto; font-weight:700; color:${totals.receivable>0?'var(--magenta)':'var(--teal,#1E8E5A)'};">${totals.receivable>0?fmtMoney(totals.receivable)+' due':'All Paid'}</span>

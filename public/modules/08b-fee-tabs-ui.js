@@ -73,7 +73,7 @@ function ftDiscFiltered(){
     const q = discSearchQuery.toLowerCase();
     list = list.filter(r => {
       const s = students.find(x => x.id === r.studentId);
-      return s && (s.firstName + ' ' + s.lastName).toLowerCase().includes(q);
+      return s && (s.lastName + ' ' + s.firstName).toLowerCase().includes(q);
     });
   }
   return { rows, list };
@@ -92,7 +92,7 @@ function ftDiscRowHtml(r){
   return `<tr>
     <td>
       <div class="ft-who">${s ? sfAvatar(s) : '<span class="sf-avatar" aria-hidden="true">?</span>'}
-        <span><b>${s ? ftEsc(s.firstName + ' ' + s.lastName) : 'Unknown student'}</b><small>${s ? ftEsc(s.className) + ' - ' + ftEsc(s.section) + ' · ' : ''}S/o ${s && s.fatherName ? ftEsc(s.fatherName) : '—'}</small></span>
+        <span><b>${s ? ftEsc(s.lastName + ' ' + s.firstName) : 'Unknown student'}</b><small>${s ? ftEsc(s.className) + ' - ' + ftEsc(s.section) + ' · ' : ''}S/o ${s && s.fatherName ? ftEsc(s.fatherName) : '—'}</small></span>
       </div>
     </td>
     <td>${ftEsc(r.type)}${r.note ? `<small>${ftEsc(r.note)}</small>` : ''}</td>

@@ -44,7 +44,7 @@ function stdSectionRows(){
     .filter(s => s.className === currentClass && s.section === currentSection && statusMatches(s))
     .sort(compareByRoll)
     .filter(s => stdGender === 'all' || (s.gender || '').toString().toLowerCase() === stdGender)
-    .filter(s => !q || `${s.firstName} ${s.lastName} ${s.admissionNo} ${s.rollNo || ''}`.toLowerCase().includes(q));
+    .filter(s => !q || `${s.lastName} ${s.firstName} ${s.admissionNo} ${s.rollNo || ''}`.toLowerCase().includes(q));
 }
 
 function stdStatusBadge(s){

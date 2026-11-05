@@ -231,10 +231,10 @@ function salaryDisbursementData(monthStr){
     if(q){
       const studentLabel = u => {
         const s = u.linkedStudentId ? students.find(x => x.id === u.linkedStudentId) : null;
-        return s ? (s.firstName+' '+s.lastName) : '';
+        return s ? (s.lastName+' '+s.firstName) : '';
       };
       visibleLogins = logins.filter(u => (u.name||'').toLowerCase().includes(q) || (u.username||'').toLowerCase().includes(q) || studentLabel(u).toLowerCase().includes(q));
-      missing = missing.filter(s => (s.firstName+' '+s.lastName).toLowerCase().includes(q) || (s.admissionNo||'').toLowerCase().includes(q));
+      missing = missing.filter(s => (s.lastName+' '+s.firstName).toLowerCase().includes(q) || (s.admissionNo||'').toLowerCase().includes(q));
     }
     const loginRows = visibleLogins.map(u => {
       const linked = u.linkedStudentId ? students.find(s => s.id === u.linkedStudentId) : null;
@@ -243,7 +243,7 @@ function salaryDisbursementData(monthStr){
           <td class="name-cell">${u.name}</td>
           <td class="id-cell">${u.username}</td>
           <td><span class="role-pill">${u.role}</span></td>
-          <td>${linked ? `${linked.firstName} ${linked.lastName} — ${linked.className}${linked.section?'-'+linked.section:''}` : '—'}</td>
+          <td>${linked ? `${linked.lastName} ${linked.firstName} — ${linked.className}${linked.section?'-'+linked.section:''}` : '—'}</td>
           <td>
             <button class="btn-edit-text" onclick="editUser('${u.id}')">Fix Login</button>
             &nbsp;·&nbsp;<button class="btn-edit-text" onclick="adminResetPassword('${u.id}')">Reset password</button>
@@ -255,10 +255,10 @@ function salaryDisbursementData(monthStr){
     }).join('');
     const missingRows = missing.map(s => `
       <tr>
-        <td class="name-cell">${s.firstName} ${s.lastName}</td>
+        <td class="name-cell">${s.lastName} ${s.firstName}</td>
         <td>${s.className}${s.section?'-'+s.section:''}</td>
         <td>${s.admissionNo||'—'}</td>
-        <td><button class="btn-edit-text" onclick="openUserModal('${(s.firstName+' '+s.lastName).replace(/'/g,"\\'")}', 'Student', '${s.id}', 'studentparent')">+ Create Login</button></td>
+        <td><button class="btn-edit-text" onclick="openUserModal('${(s.lastName+' '+s.firstName).replace(/'/g,"\\'")}', 'Student', '${s.id}', 'studentparent')">+ Create Login</button></td>
       </tr>
     `).join('');
     body.innerHTML = `

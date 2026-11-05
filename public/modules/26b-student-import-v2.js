@@ -244,7 +244,7 @@
     const groups = dupGroups();
     const extra = groups.reduce((n, g) => n + g.length - 1, 0);
     if(!extra){ showToast('No duplicates to delete.'); return; }
-    const preview = groups.slice(0, 8).map(g => `${g[0].firstName} ${g[0].lastName} (${g.length} records)`).join('\n');
+    const preview = groups.slice(0, 8).map(g => `${g[0].lastName} ${g[0].firstName} (${g.length} records)`).join('\n');
     const more = groups.length > 8 ? `\n…and ${groups.length - 8} more.` : '';
     const msg = `Remove ${extra} duplicate record(s) across ${groups.length} student(s)?\n\n${preview}${more}\n\nThe copy that has fee receipts is kept (otherwise the earliest added). Copies are only moved to Recently Deleted and can be restored. If two copies both have receipts they are left alone for you to merge.`;
     if(!await showConfirmDialog(msg, { title: 'Delete duplicate students?', okText: 'Delete Duplicates' })) return;

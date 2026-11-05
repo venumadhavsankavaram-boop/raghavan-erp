@@ -192,7 +192,7 @@ let myProfileTab = 'notifications';
       <div class="profile-head">
         ${s.photo ? `<img class="profile-photo" src="${s.photo}">` : `<div class="profile-photo">${initials(s)}</div>`}
         <div>
-          <h2>${s.firstName} ${s.lastName}</h2>
+          <h2>${s.lastName} ${s.firstName}</h2>
           <div class="p-meta">${s.admissionNo} · ${s.className} — Section ${s.section} · <span class="pill">${s.status||'Active'}</span></div>
         </div>
       </div>
@@ -873,7 +873,7 @@ let myProfileTab = 'notifications';
       amount: order.amount,
       currency: order.currency,
       name: schoolInfo.name || 'School Fees',
-      description: `${label} — ${s.firstName} ${s.lastName}`,
+      description: `${label} — ${s.lastName} ${s.firstName}`,
       prefill: { name: currentUser.name || '' },
       theme: { color: '#1f3a63' },
       handler: async function(response){
@@ -891,7 +891,7 @@ let myProfileTab = 'notifications';
           // The server has already recorded the payment and updated any extra-fee balance; just show it here.
           if(!payments.some(x => x.id === result.paymentId)){
             payments.push({
-              id: result.paymentId, receiptNo: result.receiptNo, studentId: s.id, studentName: `${s.firstName} ${s.lastName}`,
+              id: result.paymentId, receiptNo: result.receiptNo, studentId: s.id, studentName: `${s.lastName} ${s.firstName}`,
               category: type==='extra' ? 'extra' : key, mode:'Online', amount, discount:0, instalment:'',
               date: new Date().toISOString().slice(0,10), note:'Paid online via Razorpay', classAtPayment: s.className,
               extraFeeName: type==='extra' ? label : undefined, extraFeeId: type==='extra' ? key : undefined,
@@ -940,7 +940,7 @@ let myProfileTab = 'notifications';
     const logoEl = document.querySelector('.sb-brand img');
     const logoSrc = logoEl ? logoEl.src : '';
     // Shown inside the page (not a pop-up window): phones and many browsers block pop-ups, which left parents with a button that did nothing.
-    const docHtml = `<html><head><title>Marks Card - ${s.firstName} ${s.lastName}</title>
+    const docHtml = `<html><head><title>Marks Card - ${s.lastName} ${s.firstName}</title>
       <style>${reportCardPrintCss()}</style></head>
       <body>${reportCardPageHtml(s, exam, logoSrc, template)}</body></html>`;
     const old = document.getElementById('myCardOverlay'); if(old) old.remove();
@@ -1004,7 +1004,7 @@ let myProfileTab = 'notifications';
       <div class="sg-item" onmousedown="selectSuggestion('${s.id}')">
         <div class="sg-avatar">${s.photo ? `<img src="${s.photo}">` : initials(s)}</div>
         <div>
-          <div class="sg-name">${s.firstName} ${s.lastName}</div>
+          <div class="sg-name">${s.lastName} ${s.firstName}</div>
           <div class="sg-meta">${s.admissionNo} · ${s.className} — Section ${s.section}</div>
         </div>
       </div>
@@ -1041,7 +1041,7 @@ let myProfileTab = 'notifications';
     const tableRows = rows.map(s => `
       <tr onclick="openProfile('${s.id}')" style="cursor:pointer;">
         <td class="id-cell">${s.admissionNo}</td>
-        <td class="name-cell">${s.firstName} ${s.lastName}</td>
+        <td class="name-cell">${s.lastName} ${s.firstName}</td>
         <td><span class="pill">${s.className}</span></td>
         <td>${s.section}</td>
         <td>${s.email||'—'}</td>

@@ -22,7 +22,7 @@
   const todayIso = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
   const toDay = iso => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || '')); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) / 86400000 : NaN; };
   const daysBetween = (fromIso, toIso) => Math.round(toDay(toIso) - toDay(fromIso));
-  const nameOf = s => ((s.firstName || '') + ' ' + (s.lastName || '')).trim() || 'your child';
+  const nameOf = s => ((s.lastName || '') + ' ' + (s.firstName || '')).trim() || 'your child';
   const classOf = s => (s.className || '') + (s.section ? '-' + s.section : '');
   const phoneOf = s => String(s.fatherPhone || s.motherPhone || s.guardianPhone || '').replace(/\D/g, '').slice(-10);
   const money = n => (typeof fmtMoney === 'function' ? fmtMoney(n) : '₹' + Number(n || 0).toLocaleString('en-IN'));

@@ -104,7 +104,7 @@ const WIZARD_TABS = ['new','parent','previous','transport'];
     el.innerHTML = wizardSiblings.map(id => {
       const s = students.find(x => x.id === id);
       if(!s) return '';
-      return `<span class="sibling-chip">${s.firstName} ${s.lastName}<button type="button" onclick="removeSibling('${id}')">&times;</button></span>`;
+      return `<span class="sibling-chip">${s.lastName} ${s.firstName}<button type="button" onclick="removeSibling('${id}')">&times;</button></span>`;
     }).join('');
 
     const inheritedWrap = document.getElementById('siblingInheritedWrap');
@@ -112,7 +112,7 @@ const WIZARD_TABS = ['new','parent','previous','transport'];
     if(inheritedWrap && inheritedEl){
       const names = wizardInheritedSiblingIds.map(id => {
         const s = students.find(x => x.id === id);
-        return s ? `${s.firstName} ${s.lastName} (${s.className||'—'}${s.section?' — '+s.section:''})` : null;
+        return s ? `${s.lastName} ${s.firstName} (${s.className||'—'}${s.section?' — '+s.section:''})` : null;
       }).filter(Boolean);
       inheritedWrap.style.display = names.length ? 'block' : 'none';
       inheritedEl.innerHTML = names.map(n => `<span class="sibling-chip" style="opacity:0.75; cursor:default;">${n}</span>`).join('');
@@ -288,8 +288,8 @@ const WIZARD_TABS = ['new','parent','previous','transport'];
     if(!s) return;
     const goingInactive = isActive(s);
     const msg = goingInactive
-      ? `Mark ${s.firstName} ${s.lastName} as Inactive? They'll drop out of the current class/section strength and stop accruing new fee dues until reactivated — their record, fee history, and certificate details are all kept exactly as they are.`
-      : `Mark ${s.firstName} ${s.lastName} as Active again? They'll count toward the current strength and fee dues will resume from today.`;
+      ? `Mark ${s.lastName} ${s.firstName} as Inactive? They'll drop out of the current class/section strength and stop accruing new fee dues until reactivated — their record, fee history, and certificate details are all kept exactly as they are.`
+      : `Mark ${s.lastName} ${s.firstName} as Active again? They'll count toward the current strength and fee dues will resume from today.`;
     if(!await showConfirmDialog(msg)) return;
     s.status = goingInactive ? 'Inactive' : 'Active';
     await persist();
@@ -308,7 +308,7 @@ const WIZARD_TABS = ['new','parent','previous','transport'];
   async function requestDeleteStudent(id){
     const s = students.find(x => x.id === id);
     if(!s) return;
-    const reason = await showPromptDialog(`Why should ${s.firstName} ${s.lastName}'s record be deleted?\n\nIf this child has simply left the school, use "Mark Inactive" instead — that keeps their data for Transfer Certificates. Deletion is only for genuine mistakes, like a duplicate entry.`, { title:'Request deletion', okText:'Continue', placeholder:'Reason for deletion' });
+    const reason = await showPromptDialog(`Why should ${s.lastName} ${s.firstName}'s record be deleted?\n\nIf this child has simply left the school, use "Mark Inactive" instead — that keeps their data for Transfer Certificates. Deletion is only for genuine mistakes, like a duplicate entry.`, { title:'Request deletion', okText:'Continue', placeholder:'Reason for deletion' });
     if(reason === null) return;
     if(!reason.trim()){ showToast('A reason is required.'); return; }
     if(!await showConfirmDialog(`Start a 3-step deletion request for this record? This is step 1 of 3 — nothing is deleted yet.`)) return;
@@ -458,8 +458,8 @@ const WIZARD_TABS = ['new','parent','previous','transport'];
       const dup = aadharDup || nameDup;
       if(dup){
         const reason = aadharDup
-          ? `Aadhaar ${data.aadhar} is already on file for ${dup.firstName} ${dup.lastName} (Admission No: ${dup.admissionNo}, ${dup.className} — Section ${dup.section}).`
-          : `A student named "${data.firstName} ${data.lastName}" already exists in ${data.className} — Section ${data.section} (Admission No: ${dup.admissionNo}${dup.fatherName ? ', Father: '+dup.fatherName : ''}).`;
+          ? `Aadhaar ${data.aadhar} is already on file for ${dup.lastName} ${dup.firstName} (Admission No: ${dup.admissionNo}, ${dup.className} — Section ${dup.section}).`
+          : `A student named "${data.lastName} ${data.firstName}" already exists in ${data.className} — Section ${data.section} (Admission No: ${dup.admissionNo}${dup.fatherName ? ', Father: '+dup.fatherName : ''}).`;
         if(currentUser.role === 'Admin'){
           const proceed = await showConfirmDialog(
             reason + '\n\nThis looks like a duplicate. Only continue if you have verified this is genuinely a different student (e.g. twins).',

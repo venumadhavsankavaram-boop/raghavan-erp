@@ -82,7 +82,7 @@ const PENDING_APPROVALS_KEY = "pending-approvals";
             const due = (typeof fyhClassTotals === 'function') ? Math.round(fyhClassTotals(s).receivable) : computeStudentFinance(s).totals.receivable;
             return `<tr>
               <td><input type="checkbox" class="pt-student-check" value="${s.id}"></td>
-              <td class="name-cell">${s.firstName} ${s.lastName}</td>
+              <td class="name-cell">${s.lastName} ${s.firstName}</td>
               <td><span class="pill">${s.section}</span></td>
               <td>${due>0 ? `<b style="color:var(--magenta);">${fmtMoney(due)}</b>` : '—'}</td>
               <td>${due>0 ? `<select class="pt-carryforward-type" data-student="${s.id}" data-due="${due}">
@@ -122,7 +122,7 @@ const PENDING_APPROVALS_KEY = "pending-approvals";
           <tbody>
           ${list.map(s => `<tr>
             <td><input type="checkbox" class="pt-student-check" value="${s.id}"></td>
-            <td class="name-cell">${s.firstName} ${s.lastName}</td>
+            <td class="name-cell">${s.lastName} ${s.firstName}</td>
             <td><span class="pill">${s.section}</span></td>
             <td><select class="pt-target-section" data-student="${s.id}">
               ${SECTIONS.map(sec => `<option value="${sec}" ${sec===s.section?'selected':''}>${sec}</option>`).join('')}
@@ -145,7 +145,7 @@ const PENDING_APPROVALS_KEY = "pending-approvals";
         <div class="table-wrap">
           <table><thead><tr><th></th><th>Student</th><th>Section</th></tr></thead>
           <tbody>
-          ${list.map(s => `<tr><td><input type="checkbox" class="pt-student-check" value="${s.id}"></td><td class="name-cell">${s.firstName} ${s.lastName}</td><td><span class="pill">${s.section}</span></td></tr>`).join('')}
+          ${list.map(s => `<tr><td><input type="checkbox" class="pt-student-check" value="${s.id}"></td><td class="name-cell">${s.lastName} ${s.firstName}</td><td><span class="pill">${s.section}</span></td></tr>`).join('')}
           </tbody></table>
           ${list.length===0 ? `<div class="empty-state"><b>No active students in this class</b></div>` : ``}
         </div>
@@ -323,12 +323,12 @@ const PENDING_APPROVALS_KEY = "pending-approvals";
   }
   function approvalDetailSummary(a){
     if(a.type === 'promote'){
-      return a.payload.map(p => { const s = students.find(x=>x.id===p.studentId); return s ? `${s.firstName} ${s.lastName} → ${p.target==='__graduate__'?'Graduate':p.target}` : ''; }).filter(Boolean).join(', ');
+      return a.payload.map(p => { const s = students.find(x=>x.id===p.studentId); return s ? `${s.lastName} ${s.firstName} → ${p.target==='__graduate__'?'Graduate':p.target}` : ''; }).filter(Boolean).join(', ');
     }
     if(a.type === 'section'){
-      return a.payload.changes.map(c => { const s = students.find(x=>x.id===c.studentId); return s ? `${s.firstName} ${s.lastName} → Section ${c.target}` : ''; }).filter(Boolean).join(', ');
+      return a.payload.changes.map(c => { const s = students.find(x=>x.id===c.studentId); return s ? `${s.lastName} ${s.firstName} → Section ${c.target}` : ''; }).filter(Boolean).join(', ');
     }
-    const names = a.payload.studentIds.map(id => { const s = students.find(x=>x.id===id); return s ? s.firstName+' '+s.lastName : ''; }).filter(Boolean).join(', ');
+    const names = a.payload.studentIds.map(id => { const s = students.find(x=>x.id===id); return s ? s.lastName+' '+s.firstName : ''; }).filter(Boolean).join(', ');
     return names + (a.payload.reason ? ' — '+a.payload.reason : '');
   }
   // Every approval flow that lives purely as a client-side KV record

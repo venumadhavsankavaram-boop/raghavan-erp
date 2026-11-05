@@ -55,7 +55,7 @@ function fyhClassTotals(s){
   t.extraUnpaid = Math.max(0, (Number(f.totals.receivable) || 0) - t.receivable);
   return t;
 }
-function fyhName(s){ return ((s.firstName || '') + ' ' + (s.lastName || '')).trim(); }
+function fyhName(s){ return ((s.lastName || '') + ' ' + (s.firstName || '')).trim(); }
 
 /* Builds the list of year groups for one student, newest first. */
 function fyhBuild(s){

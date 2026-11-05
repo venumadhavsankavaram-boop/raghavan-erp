@@ -127,7 +127,7 @@ function rfIsNonRefundable(p){
 }
 function rfStudentName(sid, fallback){
   const s = students.find(x => x.id === sid);
-  return s ? (s.name || ((s.firstName || '') + ' ' + (s.lastName || '')).trim()) : (fallback || '');
+  return s ? (s.name || ((s.lastName || '') + ' ' + (s.firstName || '')).trim()) : (fallback || '');
 }
 function rfNextNo(){
   const max = feeRefunds.reduce((m, r) => Math.max(m, parseInt(String(r.refundNo || '').replace(/\D/g, ''), 10) || 0), 0);
@@ -260,7 +260,7 @@ function rfRenderStudentList(){
   const sec = document.getElementById('rfSectionSel').value;
   if(!q && !cls && !sec){ box.innerHTML = `<p style="font-size:.85rem;color:var(--ink-soft);margin:0;">Pick a class (and section), or type a name, to list students.</p>`; return; }
   let list = students.filter(s => (typeof isActive !== 'function' || isActive(s)) && (!cls || s.className === cls) && (!sec || String(s.section) === String(sec)) &&
-    (!q || (((s.firstName || '') + ' ' + (s.lastName || '') + ' ' + (s.name || '')).toLowerCase().includes(q) || (s.admissionNo || '').toLowerCase().includes(q))));
+    (!q || (((s.lastName || '') + ' ' + (s.firstName || '') + ' ' + (s.name || '')).toLowerCase().includes(q) || (s.admissionNo || '').toLowerCase().includes(q))));
   list.sort((a, b) => rfStudentName(a.id).localeCompare(rfStudentName(b.id)));
   const total = list.length; list = list.slice(0, 60);
   if(!total){ box.innerHTML = `<div class="empty-state"><b>No students match</b>Try a different name, class or section.</div>`; return; }

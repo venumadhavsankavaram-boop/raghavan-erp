@@ -371,7 +371,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
       block.classEntries.forEach(ce => {
         (ce.htNumbers||[]).forEach(htNum => {
           const s = studentByHt[htNum];
-          if(s) list.push({ studentId: s.id, ht: htNum, name: (s.firstName||'')+' '+(s.lastName||''), className: s.className, section: s.section, room: block.name });
+          if(s) list.push({ studentId: s.id, ht: htNum, name: (s.lastName || '')+' '+(s.firstName || ''), className: s.className, section: s.section, room: block.name });
         });
       });
     });
@@ -854,7 +854,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
         <table><thead><tr><th>Student</th><th>Admission No</th><th></th></tr></thead>
         <tbody>
         ${list.map(s => `<tr>
-          <td class="name-cell">${s.firstName} ${s.lastName}</td>
+          <td class="name-cell">${s.lastName} ${s.firstName}</td>
           <td class="id-cell">${s.admissionNo}</td>
           <td>${canPrint ? `<button class="btn-edit-text" ${(subjects.length===0 || missingDates.length>0)?'disabled':''} onclick="printAdmitCards('${admitCardsClass}','${admitCardsSection}', '${s.id}')">Print Admit Card</button>` : ''}</td>
         </tr>`).join('')}
@@ -958,7 +958,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
           <div class="ac-photo-slot">${s.photo ? `<img src="${s.photo}">` : initials(s)}</div>
           <div class="ac-title">STUDENT DETAILS</div>
           <table class="ac-info">
-            <tr><td>Name</td><td>${s.firstName} ${s.lastName}</td></tr>
+            <tr><td>Name</td><td>${s.lastName} ${s.firstName}</td></tr>
             <tr><td>Admission No.</td><td>${s.admissionNo}</td></tr>
             <tr><td>Class &amp; Section</td><td>${s.className} — ${s.section}</td></tr>
             <tr><td>Roll No.</td><td>${s.rollNo||'—'}</td></tr>
@@ -1053,7 +1053,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
         </div>
         <div class="acg-examline">${exam.name} &nbsp;·&nbsp; ${examPeriod}</div>
         <table class="acg-info">
-          <tr><td>Name</td><td>${s.firstName} ${s.lastName}</td></tr>
+          <tr><td>Name</td><td>${s.lastName} ${s.firstName}</td></tr>
           <tr><td>Admission No.</td><td>${s.admissionNo}</td></tr>
           <tr><td>Class</td><td>${s.className} — ${s.section}</td></tr>
           <tr><td>Roll No.</td><td>${s.rollNo||'—'}</td></tr>
@@ -1125,7 +1125,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
           <div class="acf-examname">${exam.name} &nbsp;·&nbsp; ${examPeriod}</div>
           <div class="acf-body">
             <table class="acf-info">
-              <tr><td>Candidate Name</td><td>${s.firstName} ${s.lastName}</td></tr>
+              <tr><td>Candidate Name</td><td>${s.lastName} ${s.firstName}</td></tr>
               <tr><td>Admission No.</td><td>${s.admissionNo}</td></tr>
               <tr><td>Class &amp; Section</td><td>${s.className} — ${s.section}</td></tr>
               <tr><td>Roll No.</td><td>${s.rollNo||'—'}</td></tr>
@@ -1227,7 +1227,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     if(matches.length===0){ box.innerHTML = `<div class="sg-empty">No students match "${q}"</div>`; box.classList.add('open'); return; }
     box.innerHTML = matches.map(s => `<div class="sg-item" onmousedown="selectCsSuggestion('${s.id}')">
       <div class="sg-avatar">${s.photo?`<img src="${s.photo}">`:initials(s)}</div>
-      <div><div class="sg-name">${s.firstName} ${s.lastName}</div><div class="sg-meta">${s.admissionNo} · ${s.className} — Section ${s.section}</div></div>
+      <div><div class="sg-name">${s.lastName} ${s.firstName}</div><div class="sg-meta">${s.admissionNo} · ${s.className} — Section ${s.section}</div></div>
     </div>`).join('');
     box.classList.add('open');
   }
@@ -1290,7 +1290,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
       document.getElementById('csResult').innerHTML = `
         <div class="profile-head">
           ${s.photo ? `<img class="profile-photo" src="${s.photo}">` : `<div class="profile-photo">${initials(s)}</div>`}
-          <div><h2>${s.firstName} ${s.lastName}</h2><div class="p-meta">${s.admissionNo} · ${s.className} — Section ${s.section}</div></div>
+          <div><h2>${s.lastName} ${s.firstName}</h2><div class="p-meta">${s.admissionNo} · ${s.className} — Section ${s.section}</div></div>
         </div>
         <div class="empty-state"><b>No exams with configured subjects yet</b>Configure subjects for ${s.className} — Section ${s.section} under the "Exams" tab first.</div>
       `;
@@ -1300,7 +1300,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     document.getElementById('csResult').innerHTML = `
       <div class="profile-head">
         ${s.photo ? `<img class="profile-photo" src="${s.photo}">` : `<div class="profile-photo">${initials(s)}</div>`}
-        <div><h2>${s.firstName} ${s.lastName}</h2><div class="p-meta">${s.admissionNo} · ${s.className} — Section ${s.section} · ${relevantExams.length} exam(s)</div></div>
+        <div><h2>${s.lastName} ${s.firstName}</h2><div class="p-meta">${s.admissionNo} · ${s.className} — Section ${s.section} · ${relevantExams.length} exam(s)</div></div>
         <div class="profile-actions"><button class="btn btn-primary" onclick="printConsolidatedReport('${s.id}')">Print Consolidated Report</button></div>
       </div>
       <div class="table-wrap" style="overflow-x:auto;">
@@ -1338,7 +1338,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
 
     const w = window.open('', '_blank');
     w.document.write(`
-      <html><head><title>Consolidated Report - ${s.firstName} ${s.lastName}</title>
+      <html><head><title>Consolidated Report - ${s.lastName} ${s.firstName}</title>
       <style>
         @page{ size:A4; margin:14mm; }
         body{ font-family:Arial,Helvetica,sans-serif; color:#111; }
@@ -1362,7 +1362,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
         ${brandLineHtml({ size:'11px' })}${brandFixedWmHtml()}
         <div class="rc-title">${consolTitle}</div>
         <div class="rc-info">
-          <div>Student Name: <b>${s.firstName} ${s.lastName}</b></div>
+          <div>Student Name: <b>${s.lastName} ${s.firstName}</b></div>
           <div>Admission No: <b>${s.admissionNo}</b></div>
           <div>Class &amp; Section: <b>${s.className} — ${s.section}</b></div>
           <div>Father Name: <b>${s.fatherName||'—'}</b></div>
@@ -1657,7 +1657,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
           const r = finalized ? { subjects: finalized.subjects, overallPct: finalized.overallPct, overallGrade: finalized.overallGrade } : computeYearEndForStudent(s.id, yeClass, yeSection);
           const bySubject = {}; r.subjects.forEach(su => bySubject[su.name]=su);
           return `<tr>
-            <td class="name-cell">${s.firstName} ${s.lastName}</td>
+            <td class="name-cell">${s.lastName} ${s.firstName}</td>
             <td>${s.admissionNo}</td>
             ${roster.map(n => { const su=bySubject[n]; return `<td>${su && su.pct!==null ? su.pct+'%' : '—'}${su && !finalized && !su.complete ? ' <span style="color:var(--ink-soft); font-size:0.72rem;">(partial)</span>' : ''}</td>`; }).join('')}
             <td><b>${r.overallPct!==null ? r.overallPct+'%' : '—'}</b></td>
@@ -1861,7 +1861,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     if(!list.length){ box.innerHTML = `<div class="empty-state"><b>No students in ${previewClass} — Section ${previewSection}</b></div>`; return; }
     const rows = list.map(s => {
       const r = computeYearEndForStudentWithSchemeResolver(s.id, previewClass, previewSection, () => yeDraft);
-      return `<tr><td>${s.firstName} ${s.lastName}</td><td>${r.overallPct!==null ? r.overallPct+'%' : '—'}</td><td>${r.overallGrade}</td></tr>`;
+      return `<tr><td>${s.lastName} ${s.firstName}</td><td>${r.overallPct!==null ? r.overallPct+'%' : '—'}</td><td>${r.overallGrade}</td></tr>`;
     }).join('');
     box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Student</th><th>Overall %</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table></div><p style="font-size:0.74rem; color:var(--ink-soft); margin-top:6px;">Preview only — nothing is saved yet.</p>`;
   }
@@ -1983,7 +1983,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
         <div class="${finalized ? 'yec-final' : 'yec-provisional'}">${finalized ? `FINAL — ISSUED ${finalized.generatedAt ? new Date(finalized.generatedAt).toLocaleDateString() : ''}` : 'PROVISIONAL — SUBJECT TO CHANGE UNTIL FINALIZED'}</div>
         <div class="yec-title">YEAR-END MARKS CARD — ${currentAcademicYearValue || ''}</div>
         <div class="yec-info">
-          <div>Student Name: <b>${s.firstName} ${s.lastName}</b></div>
+          <div>Student Name: <b>${s.lastName} ${s.firstName}</b></div>
           <div>Admission No: <b>${s.admissionNo}</b></div>
           <div>Class &amp; Section: <b>${s.className} — ${s.section}</b></div>
           <div>Father Name: <b>${s.fatherName||'—'}</b></div>
@@ -2044,7 +2044,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     const s = students.find(x => x.id===studentId);
     if(!s) return;
     const w = window.open('', '_blank');
-    w.document.write(`<html><head><title>Year-End Marks Card - ${s.firstName} ${s.lastName}</title><style>${yearEndPrintCss()}</style></head><body onload="window.print()">${yearEndCardPageHtml(s)}</body></html>`);
+    w.document.write(`<html><head><title>Year-End Marks Card - ${s.lastName} ${s.firstName}</title><style>${yearEndPrintCss()}</style></head><body onload="window.print()">${yearEndCardPageHtml(s)}</body></html>`);
     w.document.close();
   }
   async function printBulkYearEndCards(){

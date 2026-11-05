@@ -13,7 +13,7 @@ let refundPaymentId = null;
     if(!p || p.voided){ showToast('This payment can\'t be refunded.'); return; }
     refundPaymentId = paymentId;
     const student = students.find(x => x.id === p.studentId);
-    document.getElementById('refundModalSub').textContent = `${student ? student.firstName + ' ' + student.lastName : (p.studentName||'')} — originally paid ${fmtMoney(p.amount)} (${feeLabelFor(p)}) on ${p.date||'—'}.`;
+    document.getElementById('refundModalSub').textContent = `${student ? student.lastName + ' ' + student.firstName : (p.studentName||'')} — originally paid ${fmtMoney(p.amount)} (${feeLabelFor(p)}) on ${p.date||'—'}.`;
     document.getElementById('refundModalBody').innerHTML = `
       <div class="f-field" style="margin-bottom:12px;"><label>Refund Amount (₹)</label><input type="number" min="0" max="${p.amount}" class="input" id="refundAmount" value="${p.amount}" style="width:100%;"></div>
       <div class="f-field" style="margin-bottom:12px;"><label>Refund Mode</label><select class="input" id="refundMode" style="width:100%;"><option>Cash</option><option>Online</option><option>Cheque</option></select></div>
@@ -77,7 +77,7 @@ let refundPaymentId = null;
     acctExpenses.push({
       id: 'exp_' + Date.now(), voucherNo, date: new Date().toISOString().slice(0,10),
       category: FEE_REFUND_CATEGORY, costCenter: feePaymentCostCenter(p),
-      amount, party: student ? (student.firstName + ' ' + student.lastName) : (p.studentName||''),
+      amount, party: student ? (student.lastName + ' ' + student.firstName) : (p.studentName||''),
       mode, referenceNo: '', bankAccountId,
       description: `Fee refund — ${feeLabelFor(p)} originally paid ${p.date||''} (receipt ${p.receiptNo||'—'}). ${reason}`,
       addedBy: currentUser.name, voided: false,
@@ -173,7 +173,7 @@ let refundPaymentId = null;
       const headerRow = `
         <tr class="ff-student-header-row" data-student-id="${m.id}">
           <td><input type="checkbox" id="ffStudentChk_${m.id}" ${payable?'checked':''} ${payable?'':'disabled'} onchange="onFamilyStudentToggle('${m.id}')"></td>
-          <td class="name-cell"><b>${m.firstName} ${m.lastName}</b><div style="font-size:0.72rem; color:var(--ink-soft); font-weight:400;">${m.className} - Section ${m.section}${m.id===s.id?' · Self':''}</div></td>
+          <td class="name-cell"><b>${m.lastName} ${m.firstName}</b><div style="font-size:0.72rem; color:var(--ink-soft); font-weight:400;">${m.className} - Section ${m.section}${m.id===s.id?' · Self':''}</div></td>
           <td></td>
           <td class="balance-tag ${payable?'due':'zero'}"><b>${fmtMoney(totalPendingOutstanding)}</b></td>
           <td></td>
@@ -605,13 +605,13 @@ let refundPaymentId = null;
       html += `<div class="disc-chip-row">` + discSelectedStudents.map(id => {
         const s = students.find(x => x.id === id);
         if(!s) return '';
-        return `<span class="disc-chip">${s.firstName} ${s.lastName}<button type="button" onclick="removeDiscSelectedStudent('${id}')">&times;</button></span>`;
+        return `<span class="disc-chip">${s.lastName} ${s.firstName}<button type="button" onclick="removeDiscSelectedStudent('${id}')">&times;</button></span>`;
       }).join('') + `</div>`;
     }
     if(discCreateClass && discCreateSection){
       const list = students.filter(s => s.className===discCreateClass && s.section===discCreateSection && isActive(s));
       html += `<div class="disc-checklist">` + (list.length ? list.map(s => `
-        <label class="disc-check-item"><input type="checkbox" ${discSelectedStudents.includes(s.id)?'checked':''} onchange="toggleDiscSelectedStudent('${s.id}', this.checked)"> ${s.firstName} ${s.lastName} <span style="color:var(--ink-soft); font-size:0.76rem;">(${s.admissionNo})</span></label>
+        <label class="disc-check-item"><input type="checkbox" ${discSelectedStudents.includes(s.id)?'checked':''} onchange="toggleDiscSelectedStudent('${s.id}', this.checked)"> ${s.lastName} ${s.firstName} <span style="color:var(--ink-soft); font-size:0.76rem;">(${s.admissionNo})</span></label>
       `).join('') : `<div style="font-size:0.82rem; color:var(--ink-soft); padding:8px 0;">No active students in this section</div>`) + `</div>`;
     } else if(!discSelectedStudents.length){
       html += `<div class="empty-state"><b>Select a class &amp; section, or search above</b>to choose students.</div>`;
@@ -645,7 +645,7 @@ let refundPaymentId = null;
     if(matches.length===0){ box.innerHTML = `<div class="sg-empty">No students match "${q}"</div>`; box.classList.add('open'); return; }
     box.innerHTML = matches.map(s => `<div class="sg-item" onmousedown="addDiscSearchedStudent('${s.id}')">
       <div class="sg-avatar">${s.photo?`<img src="${s.photo}">`:initials(s)}</div>
-      <div><div class="sg-name">${s.firstName} ${s.lastName}</div><div class="sg-meta">${s.admissionNo} · ${s.className} — Section ${s.section}</div></div>
+      <div><div class="sg-name">${s.lastName} ${s.firstName}</div><div class="sg-meta">${s.admissionNo} · ${s.className} — Section ${s.section}</div></div>
     </div>`).join('');
     box.classList.add('open');
   }
@@ -679,7 +679,7 @@ let refundPaymentId = null;
           <div class="disc-student-panel-head" onclick="toggleDiscStudentPanel('${id}')">
             <svg class="disc-panel-chevron ${isOpen?'open':''}" width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 9L12 15L18 9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <div class="disc-panel-avatar">${initials(s)}</div>
-            <div><b>${s.firstName} ${s.lastName}</b><span class="disc-panel-meta">S/o: ${s.fatherName || '—'}</span></div>
+            <div><b>${s.lastName} ${s.firstName}</b><span class="disc-panel-meta">S/o: ${s.fatherName || '—'}</span></div>
           </div>
           <div class="disc-student-panel-body" style="display:${isOpen ? 'block' : 'none'};">
             ${cats.length ? `
@@ -768,7 +768,7 @@ let refundPaymentId = null;
     try{ const fresh = await storageGet(STUDENT_DISCOUNTS_KEY, null); if(Array.isArray(fresh)) studentDiscounts = fresh; }catch(e){}
     const dupes = perStudentAmounts.filter(x => discExistingFor(x.studentId, x.cat).length);
     if(dupes.length){
-      const names = dupes.map(x => { const st = students.find(y => y.id === x.studentId); return (st ? st.firstName + ' ' + st.lastName : 'Student') + ' – ' + (CATS[x.cat] || x.cat); });
+      const names = dupes.map(x => { const st = students.find(y => y.id === x.studentId); return (st ? st.lastName + ' ' + st.firstName : 'Student') + ' – ' + (CATS[x.cat] || x.cat); });
       showToast('Discount already exists for: ' + names.slice(0,3).join(', ') + (names.length > 3 ? ' +' + (names.length - 3) + ' more' : '') + '. Not created again.');
       renderDiscStudentFeePanels();
       return;
@@ -819,7 +819,7 @@ let refundPaymentId = null;
     renderDashboard();
     showToast('Discount approved.', 'burst');
     const s = students.find(x => x.id === studentId);
-    const name = s ? `${s.firstName} ${s.lastName}` : studentId;
+    const name = s ? `${s.lastName} ${s.firstName}` : studentId;
     notifyRequesterOfDecision(rows[0] && rows[0].requestedByUserId, 'Fee discount approved', `${currentUser.name} approved the fee discount you requested for ${name}.`, 'approval-decision');
   }
   async function rejectDiscountGroup(batchId, studentId){
@@ -832,7 +832,7 @@ let refundPaymentId = null;
     renderDashboard();
     showToast('Discount rejected.', 'burst');
     const s = students.find(x => x.id === studentId);
-    const name = s ? `${s.firstName} ${s.lastName}` : studentId;
+    const name = s ? `${s.lastName} ${s.firstName}` : studentId;
     notifyRequesterOfDecision(rows[0] && rows[0].requestedByUserId, 'Fee discount rejected', `${currentUser.name} rejected the fee discount you requested for ${name}.`, 'approval-decision');
   }
   async function deleteDiscountGroup(batchId, studentId){
@@ -916,7 +916,7 @@ let refundPaymentId = null;
     }
     const existing = studentExtraFees.find(e => e.studentId === studentId && e.name === 'Admission Fee');
     if(existing){
-      const proceed = await showConfirmDialog(`${s.firstName} ${s.lastName} already has an Admission Fee of ${fmtMoney(existing.amount)} (${existing.paid?'Paid':'Unpaid'}) on file. Add another one anyway?`);
+      const proceed = await showConfirmDialog(`${s.lastName} ${s.firstName} already has an Admission Fee of ${fmtMoney(existing.amount)} (${existing.paid?'Paid':'Unpaid'}) on file. Add another one anyway?`);
       if(!proceed) return;
     }
     studentExtraFees.push({
@@ -926,7 +926,7 @@ let refundPaymentId = null;
     await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
     renderDashboard();
     renderFeeBody();
-    showToast(`Admission Fee of ${fmtMoney(amount)} added for ${s.firstName} ${s.lastName}.`);
+    showToast(`Admission Fee of ${fmtMoney(amount)} added for ${s.lastName} ${s.firstName}.`);
   }
 
   async function markExtraFeePaid(id){
@@ -1074,7 +1074,7 @@ let refundPaymentId = null;
     if(matches.length===0){ box.innerHTML = `<div class="sg-empty">No students match "${q}"</div>`; box.classList.add('open'); return; }
     box.innerHTML = matches.map(s => `<div class="sg-item" onmousedown="selectFeeSuggestion('${s.id}')">
       <div class="sg-avatar">${s.photo?`<img src="${s.photo}">`:initials(s)}</div>
-      <div><div class="sg-name">${s.firstName} ${s.lastName}</div><div class="sg-meta">${s.admissionNo} · ${s.className} — Section ${s.section}</div></div>
+      <div><div class="sg-name">${s.lastName} ${s.firstName}</div><div class="sg-meta">${s.admissionNo} · ${s.className} — Section ${s.section}</div></div>
     </div>`).join('');
     box.classList.add('open');
   }

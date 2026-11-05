@@ -3012,7 +3012,7 @@ const TRASH_RETENTION_DAYS = 60;
 const PURGEABLE_RESOURCES = {
   students: {
     table: 'students',
-    label: row => `${row.first_name || ''} ${row.last_name || ''}`.trim() + (row.admission_no ? ` (Adm# ${row.admission_no})` : ''),
+    label: row => `${row.last_name || ''} ${row.first_name || ''}`.trim() + (row.admission_no ? ` (Adm# ${row.admission_no})` : ''),
     // What an admin must type into the "Delete Permanently" confirmation
     // to prove they mean this specific record, not just any record.
     confirmField: 'admission_no', confirmLabel: 'Admission No',
@@ -3099,7 +3099,7 @@ async function purgeOneRecord(req, res, resource) {
 const DELETION_REQUEST_TARGETS = {
   students: {
     table: 'students',
-    label: row => `${row.first_name || ''} ${row.last_name || ''}`.trim() + (row.admission_no ? ` (Adm# ${row.admission_no})` : ''),
+    label: row => `${row.last_name || ''} ${row.first_name || ''}`.trim() + (row.admission_no ? ` (Adm# ${row.admission_no})` : ''),
     // The final, irreversible step requires typing this value back — same
     // "type the identifier to confirm" pattern as Delete Permanently in
     // Recently Deleted (see PURGEABLE_RESOURCES above), since removing the
@@ -3441,7 +3441,7 @@ async function handleDeleteDuplicateStudents(req, res) {
   // birth (then they are two children). Same admission number also counts.
   // Whichever copy already has fee receipts is the one kept; two copies that
   // both have receipts are never deleted - they are reported for a manual merge.
-  const nk = r => `${r.first_name || ''} ${r.last_name || ''}`.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean).sort().join(' ');
+  const nk = r => `${r.last_name || ''} ${r.first_name || ''}`.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean).sort().join(' ');
   const ck = r => String(r.class_name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const dk = r => String((r.extra && r.extra.dob) || '').slice(0, 10);
   const payRows = await sql`SELECT student_id, COUNT(*) AS n FROM payments GROUP BY student_id`;
@@ -3469,7 +3469,7 @@ async function handleDeleteDuplicateStudents(req, res) {
       toDelete.push(r);
     }
   }
-  const label = row => `${row.first_name || ''} ${row.last_name || ''}`.trim() + (row.admission_no ? ` (Adm# ${row.admission_no})` : '');
+  const label = row => `${row.last_name || ''} ${row.first_name || ''}`.trim() + (row.admission_no ? ` (Adm# ${row.admission_no})` : '');
   for (const row of toDelete) {
     await sql`UPDATE students SET deleted_at = now(), deleted_by = ${req.authUser.id}, deleted_by_name = ${req.authUser.name} WHERE id = ${row.id}`;
     // One audit_log row per record removed — the dispatcher's own
@@ -3499,7 +3499,7 @@ async function handleDeleteDuplicateStudents(req, res) {
 const CERTIFICATE_TARGETS = {
   students: {
     table: 'students',
-    label: row => `${row.first_name || ''} ${row.last_name || ''}`.trim() + (row.admission_no ? ` (Adm# ${row.admission_no})` : ''),
+    label: row => `${row.last_name || ''} ${row.first_name || ''}`.trim() + (row.admission_no ? ` (Adm# ${row.admission_no})` : ''),
     buildSnapshot: row => {
       const extra = row.extra || {};
       return {
@@ -3936,7 +3936,7 @@ async function finalizeOnlinePayment(orderId, paymentId) {
 }
 async function studentFullName(studentId) {
   const r = await sql`SELECT first_name, last_name FROM students WHERE id = ${studentId}`;
-  return r.length ? `${r[0].first_name || ''} ${r[0].last_name || ''}`.trim() : '';
+  return r.length ? `${r[0].last_name || ''} ${r[0].first_name || ''}`.trim() : '';
 }
 app.post('/api/payments/verify', async (req, res) => {
   try {
@@ -4182,7 +4182,7 @@ async function childrenOfUser(userRow) {
   const ph = ids.map((_, i) => `$${i + 1}`).join(', ');
   const rows = await sql.query(`SELECT id, first_name, last_name, class_name, section FROM students WHERE id IN (${ph}) AND deleted_at IS NULL`, ids);
   const by = new Map(rows.map(r => [r.id, r]));
-  return ids.filter(id => by.has(id)).map(id => { const r = by.get(id); return { id, name: ((r.first_name || '') + ' ' + (r.last_name || '')).trim(), className: r.class_name, section: r.section }; });
+  return ids.filter(id => by.has(id)).map(id => { const r = by.get(id); return { id, name: ((r.last_name || '') + ' ' + (r.first_name || '')).trim(), className: r.class_name, section: r.section }; });
 }
 // Every Student/Parent login for every active student in a class (optionally
 // narrowed to one section) — used to notify a whole class about something
@@ -4272,11 +4272,11 @@ async function notifyFeePayment({ studentId, amount, mode, receiptNo }) {
   const rows = await sql`SELECT * FROM students WHERE id = ${studentId}`;
   const student = rows[0];
   if (!student) return;
-  const body = `${fmtMoneyServer(amount)} received for ${student.first_name} ${student.last_name}${mode ? ' via ' + mode : ''}${receiptNo ? ' · Receipt ' + receiptNo : ''}.`;
+  const body = `${fmtMoneyServer(amount)} received for ${student.last_name} ${student.first_name}${mode ? ' via ' + mode : ''}${receiptNo ? ' · Receipt ' + receiptNo : ''}.`;
   await sendPushToStudent(student.id, { title: 'Payment received', body, tag: 'fee-payment', url: '/' });
   if (whatsappConfigured()) {
     const phone = getStudentParentPhone(student);
-    if (phone) await sendWhatsAppTemplate(phone, 'FEE_PAYMENT', [`${student.first_name} ${student.last_name}`, fmtMoneyServer(amount), receiptNo || '—']);
+    if (phone) await sendWhatsAppTemplate(phone, 'FEE_PAYMENT', [`${student.last_name} ${student.first_name}`, fmtMoneyServer(amount), receiptNo || '—']);
   }
 }
 // Only Absent/Late/Leave push — a "marked Present" push every school day
@@ -4320,7 +4320,7 @@ async function notifyAttendanceEvent({ studentId, date, status }) {
   const rows = await sql`SELECT * FROM students WHERE id = ${studentId}`;
   const student = rows[0];
   if (!student) return;
-  const name = `${student.first_name} ${student.last_name}`;
+  const name = `${student.last_name} ${student.first_name}`;
   const where = single ? '' : fullDay ? ' for the full day (Morning and Afternoon)' : ` in the ${sess[0]} session`;
   const body = `${name} was marked ${status}${where} on ${date}.`;
   const title = fullDay && !single ? `${status} for the full day` : `Marked ${status}`;
@@ -4354,11 +4354,11 @@ async function notifyMarksIfComplete({ examId, studentId }) {
   const studentRows = await sql`SELECT * FROM students WHERE id = ${studentId}`;
   const student = studentRows[0];
   if (!student) return;
-  const body = `${exam.name} results are now available for ${student.first_name} ${student.last_name}.`;
+  const body = `${exam.name} results are now available for ${student.last_name} ${student.first_name}.`;
   await sendPushToStudent(student.id, { title: 'Results published', body, tag: 'marks', url: '/' });
   if (whatsappConfigured()) {
     const phone = getStudentParentPhone(student);
-    if (phone) await sendWhatsAppTemplate(phone, 'MARKS_PUBLISHED', [`${student.first_name} ${student.last_name}`, exam.name]);
+    if (phone) await sendWhatsAppTemplate(phone, 'MARKS_PUBLISHED', [`${student.last_name} ${student.first_name}`, exam.name]);
   }
 }
 // Fires once, right when an exam schedule is first created (not on every
@@ -4407,7 +4407,7 @@ async function notifyPendingDiscountRequest({ studentId, requestedBy }) {
   if (!studentId) return;
   const rows = await sql`SELECT * FROM students WHERE id = ${studentId}`;
   const student = rows[0];
-  const name = student ? `${student.first_name} ${student.last_name}` : 'a student';
+  const name = student ? `${student.last_name} ${student.first_name}` : 'a student';
   const body = `${requestedBy || 'A staff member'} requested a fee discount for ${name} — needs your approval.`;
   await notifyUsersByRole(['Admin'], { title: 'Discount approval needed', body, tag: 'discount-approval', url: '/' });
 }
@@ -4512,7 +4512,7 @@ async function planFeeReminders(settings, today) {
   for (const student of students) {
     let insts; try { insts = studentInstallments(student, ctx, today); } catch (e) { console.error('reminder plan failed for', student.id, e.message); continue; }
     if (!insts.length) continue;
-    const name = `${student.first_name} ${student.last_name}`;
+    const name = `${student.last_name} ${student.first_name}`;
     const soonDate = isoAddDays(today, settings.leadDays);
     const soon = insts.filter(i => i.due === soonDate);
     const overdue = insts.filter(i => i.due < today);
@@ -5160,7 +5160,7 @@ app.get('/api/online-exams/:id/results', async (req, res) => {
     const atts = await sql`SELECT * FROM online_attempts WHERE exam_id = ${ex.id}`;
     const am = {}; atts.forEach(a => { am[a.student_id] = a; });
     const qs = oeParse(ex.questions, []);
-    const rows = kids.map(k => { const a = am[k.id]; return { studentId: k.id, name: ((k.first_name || '') + ' ' + (k.last_name || '')).trim(), admissionNo: k.admission_no || '',
+    const rows = kids.map(k => { const a = am[k.id]; return { studentId: k.id, name: ((k.last_name || '') + ' ' + (k.first_name || '')).trim(), admissionNo: k.admission_no || '',
       state: !a ? 'NotAttempted' : a.status, autoScore: a ? oeNum(a.auto_score) : 0, total: a ? oeNum(a.total) : 0, leaves: a ? oeNum(a.leaves) : 0, attemptId: a ? a.id : '',
       startedMs: a ? oeNum(a.started_ms) : 0, submittedMs: a && a.submitted_ms ? oeNum(a.submitted_ms) : 0 }; });
     const fin = atts.filter(a => a.status !== 'InProgress');
@@ -5182,7 +5182,7 @@ app.get('/api/online-exams/:id/attempt/:attemptId', async (req, res) => {
     const questions = oeParse(ex.questions, []).map(q => { const a = ans[q.id]; const o = { id: q.id, type: q.type, text: q.text, marks: q.marks, yourAnswer: a === undefined ? null : a };
       if (q.type === 'short') { o.keyAnswer = q.keyAnswer || ''; o.given = man[q.id] === undefined ? null : oeNum(man[q.id]); } else { o.options = q.options; o.correct = q.answer; o.got = a !== undefined && parseInt(a, 10) === q.answer ? q.marks : 0; }
       return o; });
-    return res.status(200).json({ studentName: st ? ((st.first_name || '') + ' ' + (st.last_name || '')).trim() : '', status: att.status, autoScore: oeNum(att.auto_score), total: oeNum(att.total), leaves: oeNum(att.leaves), questions });
+    return res.status(200).json({ studentName: st ? ((st.last_name || '') + ' ' + (st.first_name || '')).trim() : '', status: att.status, autoScore: oeNum(att.auto_score), total: oeNum(att.total), leaves: oeNum(att.leaves), questions });
   } catch (err) { console.error('online-exam attempt error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 app.post('/api/online-exams/:id/grade', async (req, res) => {
@@ -7115,7 +7115,7 @@ app.get('/api/homework-items/:id/roster', async (req, res) => {
     const roster = studentRows.map(s => {
       const sub = byStudent[s.id] || null;
       return {
-        studentId: s.id, studentName: (s.first_name + ' ' + (s.last_name || '')).trim(), section: s.section,
+        studentId: s.id, studentName: ((s.last_name || '') + ' ' + s.first_name).trim(), section: s.section,
         status: sub ? sub.status : 'not_submitted', submittedAt: sub ? sub.createdAt : null,
         marks: sub ? sub.marks : null, submissionId: sub ? sub.id : null,
       };
@@ -7300,7 +7300,7 @@ app.post('/api/student-logins/bulk', async (req, res) => {
     const force = b.forceChange === false ? 0 : 1;
     const created = [];
     for (const k of todo) {
-      const full = ((k.first_name || '') + ' ' + (k.last_name || '')).trim();
+      const full = ((k.first_name || '') + ' ' + (k.last_name || '')).trim(); // usernames keep first+last (display order is surname first)
       const base = slugName(full); let cand = base, n = 1;
       while (taken.has(cand)) { n++; cand = base + n; }
       taken.add(cand);
@@ -7322,7 +7322,7 @@ app.get('/api/student-logins/slips', async (req, res) => {
       WHERE u.deleted_at IS NULL AND u.initial_pw IS NOT NULL AND u.initial_pw <> '' AND s.deleted_at IS NULL AND (s.status IS NULL OR LOWER(s.status) = 'active')
       ORDER BY s.class_name, s.section, s.first_name, s.last_name`;
     const list = rows.filter(r => (!className || r.class_name === className) && (!section || r.section === section))
-      .map(r => ({ studentId: r.id, name: ((r.first_name || '') + ' ' + (r.last_name || '')).trim(), className: r.class_name, section: r.section, admissionNo: r.admission_no || '', username: r.username, password: r.initial_pw }));
+      .map(r => ({ studentId: r.id, name: ((r.last_name || '') + ' ' + (r.first_name || '')).trim(), className: r.class_name, section: r.section, admissionNo: r.admission_no || '', username: r.username, password: r.initial_pw }));
     return res.status(200).json({ slips: list });
   } catch (err) { console.error('login slips error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
@@ -7338,7 +7338,7 @@ app.get('/api/student-logins/push-status', async (req, res) => {
       WHERE u.deleted_at IS NULL AND u.role IN ('Student', 'Parent') AND s.deleted_at IS NULL AND (s.status IS NULL OR LOWER(s.status) = 'active')
       ORDER BY s.class_name, s.section, s.first_name, s.last_name`;
     const list = rows.filter(r => (!className || r.class_name === className) && (!section || r.section === section))
-      .map(r => ({ studentId: r.id, name: ((r.first_name || '') + ' ' + (r.last_name || '')).trim(), className: r.class_name, section: r.section, admissionNo: r.admission_no || '', username: r.username, on: Number(r.devices) > 0 }));
+      .map(r => ({ studentId: r.id, name: ((r.last_name || '') + ' ' + (r.first_name || '')).trim(), className: r.class_name, section: r.section, admissionNo: r.admission_no || '', username: r.username, on: Number(r.devices) > 0 }));
     return res.status(200).json({ pushConfigured: webPushConfigured(), total: list.length, on: list.filter(x => x.on).length, students: list });
   } catch (err) { console.error('push status error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
@@ -7367,7 +7367,7 @@ app.get('/api/student-logins/adoption', async (req, res) => {
     const iso = d => d ? new Date(d).toISOString() : '';
     const list = kids.filter(k => (!className || k.class_name === className) && (!section || k.section === section)).map(k => {
       const u = bySid.get(k.id);
-      const name = ((k.first_name || '') + ' ' + (k.last_name || '')).trim();
+      const name = ((k.last_name || '') + ' ' + (k.first_name || '')).trim();
       if (!u) return { studentId: k.id, name, className: k.class_name, section: k.section, admissionNo: k.admission_no || '', hasLogin: false, signedIn: false, ownPassword: false, installed: false, notifications: false, firstLogin: '', lastSeen: '', username: '' };
       const own = !!Number(u.own_pw);
       return { studentId: k.id, name, className: k.class_name, section: k.section, admissionNo: k.admission_no || '', username: u.username, hasLogin: true,
@@ -7430,7 +7430,7 @@ app.get('/api/student-logins/sibling-suggestions', async (req, res) => {
       if (g.length < 2) continue;
       const fams = new Set(g.map(k => famOf.get(k.id) || ('s' + k.id)));
       if (fams.size === 1) continue;   // already one family
-      out.push({ phone: ph.slice(0, 2) + 'xxxxx' + ph.slice(-3), father: g[0].fname || '', students: g.map(k => { const l = loginOf.get(k.id); return { studentId: k.id, name: ((k.first_name || '') + ' ' + (k.last_name || '')).trim(), className: k.class_name, section: k.section, admissionNo: k.admission_no || '', hasLogin: !!l, loginRole: l ? l.role : '', username: l ? l.username : '', linked: famOf.has(k.id) }; }) });
+      out.push({ phone: ph.slice(0, 2) + 'xxxxx' + ph.slice(-3), father: g[0].fname || '', students: g.map(k => { const l = loginOf.get(k.id); return { studentId: k.id, name: ((k.last_name || '') + ' ' + (k.first_name || '')).trim(), className: k.class_name, section: k.section, admissionNo: k.admission_no || '', hasLogin: !!l, loginRole: l ? l.role : '', username: l ? l.username : '', linked: famOf.has(k.id) }; }) });
     }
     out.sort((a, b) => String(a.students[0].className).localeCompare(String(b.students[0].className)));
     return res.status(200).json({ groups: out.slice(0, 300) });
@@ -7489,7 +7489,7 @@ app.get('/api/student-logins/family-check', async (req, res) => {
     const children = [];
     for (const id of ids) {
       const k = kids.find(x => x.id === id);
-      const name = k ? ((k.first_name || '') + ' ' + (k.last_name || '')).trim() : id;
+      const name = k ? ((k.last_name || '') + ' ' + (k.first_name || '')).trim() : id;
       add(k && !k.deleted_at, name + ': the student record exists', 'Restore the student or unlink this child.');
       if (!k || k.deleted_at) continue;
       add(!k.status || String(k.status).toLowerCase() === 'active', name + ': the student is Active (status: ' + (k.status || 'Active') + ')', 'Make the student Active, or unlink.');

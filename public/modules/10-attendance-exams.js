@@ -190,7 +190,7 @@ const ROOMS_KEY = "exam-rooms";
               ${r.students.map(s => {
                 const subjects = getExamSubjects(exam, r.cls, r.sec);
                 const done = subjects.every(subj => examResults.find(x => x.examId===exam.id && x.studentId===s.id && x.subject===subj.name));
-                return `<tr><td>${s.firstName} ${s.lastName}</td><td>${done ? '<span class="pill" style="background:rgba(24,143,134,0.15); color:#0f6a63;">Entered</span>' : '<span class="balance-tag due">Pending</span>'}</td></tr>`;
+                return `<tr><td>${s.lastName} ${s.firstName}</td><td>${done ? '<span class="pill" style="background:rgba(24,143,134,0.15); color:#0f6a63;">Entered</span>' : '<span class="balance-tag due">Pending</span>'}</td></tr>`;
               }).join('')}
               </tbody></table>
             </div>
@@ -1024,7 +1024,7 @@ const ROOMS_KEY = "exam-rooms";
         ${list.map(s => `
           <tr>
             <td class="id-cell">${s.rollNo||'—'}</td>
-            <td class="name-cell">${s.firstName} ${s.lastName}</td>
+            <td class="name-cell">${s.lastName} ${s.firstName}</td>
             ${subjects.map(subj => {
               const r = getResult(s.id, subj.name);
               const isAbsent = r ? !!r.absent : false;
@@ -1331,7 +1331,7 @@ const ROOMS_KEY = "exam-rooms";
   function buildInfoFieldLines(s, exam, t){
     const fields = t.infoFields || DEFAULT_INFO_FIELDS;
     const labels = { admissionNo:'Admission No', rollNo:'Roll Number', className:'Class', section:'Section', fatherName:'Father Name', motherName:'Mother Name', dob:'Date of Birth', gender:'Gender', bloodGroup:'Blood Group', address:'Address', phone:'Phone', email:'Email' };
-    let lines = `<div>Student Name: <b>${s.firstName} ${s.lastName}</b></div>`;
+    let lines = `<div>Student Name: <b>${s.lastName} ${s.firstName}</b></div>`;
     if(fields.className && fields.section){
       lines += `<div>Class &amp; Section: <b>${s.className} — ${s.section}</b></div>`;
     }else{
@@ -1661,7 +1661,7 @@ const ROOMS_KEY = "exam-rooms";
   const DEFAULT_INFO_FIELDS = { studentName:true, admissionNo:true, rollNo:false, className:true, section:true, fatherName:true, motherName:false, dob:false, gender:false, bloodGroup:false, address:false, phone:false, email:false, examPeriod:true, attendance:true };
   function studentInfoFieldValue(s, key){
     switch(key){
-      case 'studentName': return s.firstName+' '+s.lastName;
+      case 'studentName': return s.lastName+' '+s.firstName;
       case 'admissionNo': return s.admissionNo || '—';
       case 'rollNo': return s.rollNo || '—';
       case 'className': return s.className || '—';

@@ -73,7 +73,7 @@
   window.acAllow = async function(sid){
     const s = students.find(x => x.id === sid); if(!s) return;
     const examId = admitCardsExamId, due = dueOf(s);
-    const reason = await showPromptDialog(s.firstName + ' ' + s.lastName + ' has ' + money(due) + ' fee due. Why is the admit card being issued? (This is kept on record.)', { title: 'Allow admit card', okText: 'Allow', placeholder: 'e.g. Parent requested — will pay by 15th' });
+    const reason = await showPromptDialog(s.lastName + ' ' + s.firstName + ' has ' + money(due) + ' fee due. Why is the admit card being issued? (This is kept on record.)', { title: 'Allow admit card', okText: 'Allow', placeholder: 'e.g. Parent requested — will pay by 15th' });
     if(reason === null) return;
     if(!reason){ showToast('Please write a short reason.'); return; }
     try{
@@ -86,7 +86,7 @@
   };
   window.acWithdraw = async function(sid){
     const s = students.find(x => x.id === sid); if(!s) return;
-    if(!await showConfirmDialog('Withdraw the permission for ' + s.firstName + ' ' + s.lastName + '? Their admit card will be on hold again while fees are due.', { title: 'Withdraw permission', okText: 'Withdraw' })) return;
+    if(!await showConfirmDialog('Withdraw the permission for ' + s.lastName + ' ' + s.firstName + '? Their admit card will be on hold again while fees are due.', { title: 'Withdraw permission', okText: 'Withdraw' })) return;
     try{ await load(); delete exc[keyOf(admitCardsExamId, sid)]; await storageSet(EXC, exc); showToast('Permission withdrawn.'); }
     catch(e){ showToast('Could not save: ' + (e && e.message || 'try again')); }
     renderResultBody();
@@ -98,7 +98,7 @@
     const exam = admitCardsExamId;
     const held = policy.hold ? listFor(cls, sec).filter(s => isHeld(exam, s)) : [];
     if(held.length){
-      await showInfoDialog(held.length + ' student' + (held.length === 1 ? ' is' : 's are') + ' on hold because fees are due and will be skipped:\n' + held.slice(0, 8).map(s => '• ' + s.firstName + ' ' + s.lastName).join('\n') + (held.length > 8 ? '\n…and ' + (held.length - 8) + ' more' : '') + (isMgr() ? '\n\nUse "Allow" next to a name to include them.' : '\n\nAsk the Admin or Principal to allow them.'), { title: 'Some admit cards are on hold' });
+      await showInfoDialog(held.length + ' student' + (held.length === 1 ? ' is' : 's are') + ' on hold because fees are due and will be skipped:\n' + held.slice(0, 8).map(s => '• ' + s.lastName + ' ' + s.firstName).join('\n') + (held.length > 8 ? '\n…and ' + (held.length - 8) + ' more' : '') + (isMgr() ? '\n\nUse "Allow" next to a name to include them.' : '\n\nAsk the Admin or Principal to allow them.'), { title: 'Some admit cards are on hold' });
       const ids = new Set(held.map(s => s.id)), saved = students;
       students = students.filter(s => !ids.has(s.id));
       try{ window.printAdmitCards(cls, sec, null); } finally{ students = saved; }
@@ -114,7 +114,7 @@
     const exam = admitCardsExamId;
     const held = policy.hold ? pairs.reduce((a, p) => a.concat(listFor(p.cls, p.sec)), []).filter(s => isHeld(exam, s)) : [];
     if(held.length){
-      await showInfoDialog(held.length + ' student' + (held.length === 1 ? ' is' : 's are') + ' on hold because fees are due and will be skipped:\n' + held.slice(0, 8).map(s => '• ' + s.firstName + ' ' + s.lastName).join('\n') + (held.length > 8 ? '\n…and ' + (held.length - 8) + ' more' : '') + (isMgr() ? '\n\nOpen the class and use "Allow" next to a name to include them.' : '\n\nAsk the Admin or Principal to allow them.'), { title: 'Some admit cards are on hold' });
+      await showInfoDialog(held.length + ' student' + (held.length === 1 ? ' is' : 's are') + ' on hold because fees are due and will be skipped:\n' + held.slice(0, 8).map(s => '• ' + s.lastName + ' ' + s.firstName).join('\n') + (held.length > 8 ? '\n…and ' + (held.length - 8) + ' more' : '') + (isMgr() ? '\n\nOpen the class and use "Allow" next to a name to include them.' : '\n\nAsk the Admin or Principal to allow them.'), { title: 'Some admit cards are on hold' });
       const ids = new Set(held.map(s => s.id)), saved = students;
       students = students.filter(s => !ids.has(s.id));
       try{ window.printAdmitCardPairs(pairs); } finally{ students = saved; }

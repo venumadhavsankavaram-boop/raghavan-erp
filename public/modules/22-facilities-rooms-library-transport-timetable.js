@@ -845,7 +845,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     const matches = students.filter(s => isActive(s) && ((s.firstName||'').toLowerCase().includes(ql) || (s.lastName||'').toLowerCase().includes(ql) || (s.admissionNo||'').toLowerCase().includes(ql))).slice(0,8);
     box.innerHTML = matches.length ? matches.map(s => `<div class="sg-item" onmousedown="selectInvCheckoutStudent('${s.id}')">
       <div class="sg-avatar">${initials(s)}</div>
-      <div><div class="sg-name">${s.firstName} ${s.lastName}</div><div class="sg-meta">${s.admissionNo} · ${s.className} — Section ${s.section}</div></div>
+      <div><div class="sg-name">${s.lastName} ${s.firstName}</div><div class="sg-meta">${s.admissionNo} · ${s.className} — Section ${s.section}</div></div>
     </div>`).join('') : `<div class="sg-empty">No students match "${q}"</div>`;
     box.classList.add('open');
   }
@@ -899,7 +899,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
         sefId = 'sef_'+Date.now()+'_'+c.itemId;
         studentExtraFees.push({ id:sefId, studentId:invCheckoutStudentId, name:`${c.name} x${c.qty}`, amount:lineTotal, paidAmount:linePaid, paid: linePaid>=lineTotal, date:today });
         if(linePaid > 0){
-          payments.push({ id:'pay_'+Date.now()+'_'+c.itemId, receiptNo:nextReceiptNo(), studentId:invCheckoutStudentId, studentName:buyerStudent.firstName+' '+buyerStudent.lastName, category:'extra', extraFeeName:c.name, extraFeeId:sefId, mode:invCheckoutPaymentMode, amount:linePaid, discount:c.discount, instalment:'', date:today, note:notes, classAtPayment:buyerStudent.className });
+          payments.push({ id:'pay_'+Date.now()+'_'+c.itemId, receiptNo:nextReceiptNo(), studentId:invCheckoutStudentId, studentName:buyerStudent.lastName+' '+buyerStudent.firstName, category:'extra', extraFeeName:c.name, extraFeeId:sefId, mode:invCheckoutPaymentMode, amount:linePaid, discount:c.discount, instalment:'', date:today, note:notes, classAtPayment:buyerStudent.className });
         }
       }
       inventorySales.push({ id:'isale_'+Date.now()+'_'+c.itemId, itemId:c.itemId, itemName:c.name, buyerType:invCheckoutBuyerType, studentId:invCheckoutBuyerType==='Student'?invCheckoutStudentId:'', buyerName, qty:c.qty, unitPrice:c.price, unitCost:c.cost, discount:c.discount, totalAmount:lineTotal, totalCost:lineCost, paidAmount:linePaid, mode:invCheckoutPaymentMode, notes, date:today, soldBy:currentUser.name, sefId });
@@ -1016,7 +1016,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
         <tbody>
         ${recent.length ? recent.map(s => {
           const st = s.studentId ? students.find(x=>x.id===s.studentId) : null;
-          const buyer = st ? st.firstName+' '+st.lastName : (s.buyerName||s.buyerType);
+          const buyer = st ? st.lastName+' '+st.firstName : (s.buyerName||s.buyerType);
           const alreadyReturned = returnedQtyForSale(s.id);
           const returnable = s.qty - alreadyReturned;
           return `<tr><td>${s.date}</td><td>${s.itemName}${alreadyReturned>0?` <span class="pill" style="font-size:0.62rem; background:rgba(203,154,46,0.18); color:#8a6a1f;">${alreadyReturned} returned</span>`:''}</td><td>${buyer}</td><td>${s.qty}</td><td>${fmtMoney(s.totalAmount)}</td><td>${fmtMoney(s.paidAmount||0)}</td><td>${s.mode||'—'}</td><td>${s.soldBy||'—'}</td><td>${canReturn && returnable>0 ? `<button class="btn-edit-text" onclick="openInventoryReturnModal('${s.id}')">Return</button>` : (returnable<=0 ? '<span style="color:var(--ink-soft); font-size:0.76rem;">Fully returned</span>' : '')}</td></tr>`;
@@ -1027,7 +1027,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       <div class="table-wrap">
         <table><thead><tr><th>Date</th><th>Item</th><th>Buyer</th><th>Qty</th><th>Revenue Reversed</th><th>Cash Refunded</th><th>Mode</th><th>Reason</th><th>Processed By</th></tr></thead>
         <tbody>
-        ${recentReturns.length ? recentReturns.map(r => { const st = r.studentId ? students.find(x=>x.id===r.studentId) : null; const buyer = st ? st.firstName+' '+st.lastName : (r.buyerName||r.buyerType||'—'); return `<tr><td>${r.date}</td><td>${r.itemName}</td><td>${buyer}</td><td>${r.qty}</td><td>${fmtMoney(r.refundAmount)}</td><td>${fmtMoney(r.cashRefunded||0)}</td><td>${r.refundMode||'—'}</td><td>${r.reason||'—'}</td><td>${r.processedBy||'—'}</td></tr>`; }).join('') : `<tr><td colspan="9"><div class="empty-state"><b>No returns recorded</b></div></td></tr>`}
+        ${recentReturns.length ? recentReturns.map(r => { const st = r.studentId ? students.find(x=>x.id===r.studentId) : null; const buyer = st ? st.lastName+' '+st.firstName : (r.buyerName||r.buyerType||'—'); return `<tr><td>${r.date}</td><td>${r.itemName}</td><td>${buyer}</td><td>${r.qty}</td><td>${fmtMoney(r.refundAmount)}</td><td>${fmtMoney(r.cashRefunded||0)}</td><td>${r.refundMode||'—'}</td><td>${r.reason||'—'}</td><td>${r.processedBy||'—'}</td></tr>`; }).join('') : `<tr><td colspan="9"><div class="empty-state"><b>No returns recorded</b></div></td></tr>`}
         </tbody></table>
       </div>
       <div id="invReturnModalWrap"></div>
@@ -1041,7 +1041,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     const returnable = s.qty - alreadyReturned;
     if(returnable <= 0){ showToast('Nothing left to return on this sale.'); return; }
     const st = s.studentId ? students.find(x=>x.id===s.studentId) : null;
-    const buyer = st ? st.firstName+' '+st.lastName : (s.buyerName||s.buyerType);
+    const buyer = st ? st.lastName+' '+st.firstName : (s.buyerName||s.buyerType);
     const perUnitPrice = s.totalAmount / s.qty;
     const perUnitPaid = (s.paidAmount||0) / s.qty;
     const wrap = document.getElementById('invReturnModalWrap');
@@ -1147,7 +1147,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
         window.__retPayBefore = payments.length;
         payments.push({
           id:'pay_refund_'+Date.now()+'_'+s.itemId, receiptNo:nextReceiptNo(), studentId:s.studentId,
-          studentName: st ? st.firstName+' '+st.lastName : '', category:'extra', extraFeeName:s.itemName,
+          studentName: st ? st.lastName+' '+st.firstName : '', category:'extra', extraFeeName:s.itemName,
           extraFeeId:s.sefId, mode:refundMode||'Cash', amount:-cashRefunded, discount:0, instalment:'',
           date:today, note:`Refund — return of ${qty} × ${s.itemName}${reason?' ('+reason+')':''}`,
           classAtPayment: st ? st.className : '',
@@ -2234,7 +2234,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
   function populateUserStudentPicker(){
     const sel = document.getElementById('uLinkedStudent');
     sel.innerHTML = '<option value="">Not linked</option>' +
-      students.map(s => `<option value="${s.id}">${s.firstName} ${s.lastName} — ${s.admissionNo}</option>`).join('');
+      students.map(s => `<option value="${s.id}">${s.lastName} ${s.firstName} — ${s.admissionNo}</option>`).join('');
   }
   function editUser(id){
     const u = users.find(x => x.id === id);
