@@ -104,3 +104,15 @@
   document.addEventListener('touchend', end, { passive: true });
   document.addEventListener('touchcancel', () => { pulling = false; armed = false; hide(); }, { passive: true });
 })();
+
+/* Parent/Student logins (also when an admin uses "Log in as") are view-only: block browser printing of the portal. */
+(function(){
+  function apply(){
+    var r = window.currentUser && window.currentUser.role;
+    var on = (r === 'Student' || r === 'Parent');
+    var st = document.getElementById('noPrintPortal');
+    if(on && !st){ st = document.createElement('style'); st.id='noPrintPortal'; st.textContent='@media print{body{display:none!important}}'; document.head.appendChild(st); }
+    if(!on && st) st.remove();
+  }
+  setInterval(apply, 1500);
+})();

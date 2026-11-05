@@ -841,7 +841,7 @@ let myProfileTab = 'notifications';
 
       <div class="dash-section-title"><div><h3>Payment History &amp; Receipts</h3></div></div>
       <div class="table-wrap"><table class="fee-stack"><thead><tr><th>Date</th><th>Category</th><th>Mode</th><th>Amount</th><th></th></tr></thead><tbody>
-        ${studentPayments.length ? studentPayments.map(p => `<tr><td data-l="Date">${p.date||'—'}</td><td data-l=""><span class="pill">${feeLabelFor(p)}</span></td><td data-l="Mode">${p.mode||'—'}</td><td data-l="Amount">${fmtMoney(p.amount)}${(typeof payRefunded === 'function' && payRefunded(p) > 0) ? `<br><small style="color:#b3261e;">Refunded ${fmtMoney(payRefunded(p))} · net ${fmtMoney(payNet(p))}</small>` : ''}</td><td data-l="">${canSub('managefee_collection','managefee','print') ? `<button class="btn-edit-text" onclick="printReceipt('${p.id}')">Print Receipt</button>` : ''}</td></tr>`).join('') : `<tr><td colspan="5"><div class="empty-state"><b>No payments yet</b></div></td></tr>`}
+        ${studentPayments.length ? studentPayments.map(p => `<tr><td data-l="Date">${p.date||'—'}</td><td data-l=""><span class="pill">${feeLabelFor(p)}</span></td><td data-l="Mode">${p.mode||'—'}</td><td data-l="Amount">${fmtMoney(p.amount)}${(typeof payRefunded === 'function' && payRefunded(p) > 0) ? `<br><small style="color:#b3261e;">Refunded ${fmtMoney(payRefunded(p))} · net ${fmtMoney(payNet(p))}</small>` : ''}</td><td data-l="">${(currentUser.role!=='Student' && currentUser.role!=='Parent' && canSub('managefee_collection','managefee','print')) ? `<button class="btn-edit-text" onclick="printReceipt('${p.id}')">Print Receipt</button>` : ''}</td></tr>`).join('') : `<tr><td colspan="5"><div class="empty-state"><b>No payments yet</b></div></td></tr>`}
       </tbody></table></div>
     `;
   }
@@ -927,7 +927,7 @@ let myProfileTab = 'notifications';
           <h4 style="margin:0 0 4px;">${ex.name}</h4>
           <p style="font-size:0.78rem; color:var(--ink-soft); margin:0;">${ex.examType||''}${ex.startDate?` · ${ex.startDate}${ex.endDate?' – '+ex.endDate:''}`:''}</p>
         </div>
-        <button class="btn btn-primary btn-sm" onclick="printMyReportCard('${ex.id}')">🖨️ View / Print Marks Card</button>
+        <button class="btn btn-primary btn-sm" onclick="printMyReportCard('${ex.id}')">👁️ View Marks Card</button>
       </div>
     `).join('');
   }
@@ -941,19 +941,18 @@ let myProfileTab = 'notifications';
     const logoSrc = logoEl ? logoEl.src : '';
     // Shown inside the page (not a pop-up window): phones and many browsers block pop-ups, which left parents with a button that did nothing.
     const docHtml = `<html><head><title>Marks Card - ${s.lastName} ${s.firstName}</title>
-      <style>${reportCardPrintCss()}</style></head>
+      <style>${reportCardPrintCss()}</style><style>@media print{body{display:none!important}}</style></head>
       <body>${reportCardPageHtml(s, exam, logoSrc, template)}</body></html>`;
     const old = document.getElementById('myCardOverlay'); if(old) old.remove();
     const ov = document.createElement('div'); ov.id = 'myCardOverlay';
     ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(15,20,35,.72);display:flex;flex-direction:column;';
     ov.innerHTML = `<div style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 14px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.2);">
         <b style="font-size:.95rem;">${exam.name} — Marks Card</b>
-        <span><button class="btn btn-primary btn-sm" id="myCardPrint">🖨️ Print / Save as PDF</button> <button class="btn btn-ghost btn-sm" id="myCardClose">✕ Close</button></span>
+        <span><button class="btn btn-ghost btn-sm" id="myCardClose">✕ Close</button></span>
       </div><iframe id="myCardFrame" style="flex:1;border:0;background:#fff;width:100%;"></iframe>`;
     document.body.appendChild(ov);
     const fr = document.getElementById('myCardFrame'); fr.srcdoc = docHtml;
     document.getElementById('myCardClose').onclick = () => ov.remove();
-    document.getElementById('myCardPrint').onclick = () => { try{ fr.contentWindow.focus(); fr.contentWindow.print(); }catch(e){ showToast('Printing is not available in this browser.'); } };
   }
 
   /* --- Notices tab: same feed the public website shows, read-only (no
