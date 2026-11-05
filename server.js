@@ -7791,6 +7791,108 @@ async function autoBackupTick() {
 }
 setTimeout(() => { autoBackupTick(); }, 3 * 60 * 1000);
 setInterval(() => { autoBackupTick(); }, 60 * 60 * 1000);
+
+// ---- Auto clean-up of old messages (Admin sets a time frame per type; off until switched on) ----
+// kv_store 'auto-cleanup-settings' = { notifications:{on,days}, notices:{on,days}, requests:{on,days}, sentlog:{on,days} }
+const CLEANUP_TYPES = {
+  notifications: { label: 'Phone / in-app notifications', min: 7, def: 60 },
+  notices: { label: 'Notices & messages (Communications)', min: 30, def: 365 },
+  requests: { label: 'Finished password-reset and correction requests', min: 30, def: 180 },
+  sentlog: { label: 'Reminder “already sent” log', min: 180, def: 365 }
+};
+function cuNormalize(v) {
+  const o = (v && typeof v === 'object') ? v : {}, out = {};
+  for (const k of Object.keys(CLEANUP_TYPES)) {
+    const t = CLEANUP_TYPES[k], x = (o[k] && typeof o[k] === 'object') ? o[k] : {};
+    out[k] = { on: x.on === true, days: Math.max(t.min, Math.min(3650, Math.round(Number(x.days)) || t.def)) };
+  }
+  return out;
+}
+async function cuSettings() {
+  try { const r = await sql`SELECT value FROM kv_store WHERE \`key\` = 'auto-cleanup-settings'`; if (r[0]) return cuNormalize(r[0].value); } catch (e) { /* defaults */ }
+  return cuNormalize({});
+}
+function cuCutoff(days) { return new Date(Date.now() - days * 86400000).toISOString().slice(0, 19).replace('T', ' '); }
+async function cuCount(k, days) {
+  try {
+    if (k === 'notifications') return Number((await sql.query('SELECT COUNT(*) AS c FROM user_notifications WHERE created_at < $1', [cuCutoff(days)]))[0].c);
+    if (k === 'notices') return Number((await sql.query('SELECT COUNT(*) AS c FROM comms_messages WHERE created_at < $1', [cuCutoff(days)]))[0].c);
+    if (k === 'sentlog') return Number((await sql.query('SELECT COUNT(*) AS c FROM notification_events WHERE sent_at < $1', [cuCutoff(days)]))[0].c);
+    if (k === 'requests') {
+      await ensureCorrectionTable();
+      const a = Number((await sql.query("SELECT COUNT(*) AS c FROM password_reset_requests WHERE status <> 'pending' AND COALESCE(resolved_at, created_at) < $1", [cuCutoff(days)]))[0].c);
+      const b = Number((await sql.query("SELECT COUNT(*) AS c FROM correction_requests WHERE status <> 'Pending' AND COALESCE(decided_at, created_at) < $1", [cuCutoff(days)]))[0].c);
+      return a + b;
+    }
+  } catch (e) { console.error('cuCount', k, e.message); }
+  return 0;
+}
+async function cuDelete(k, days) {
+  const n = await cuCount(k, days);   // delete statements give no row count here, so count what is about to go first
+  if (!n) return 0;
+  if (k === 'notifications') await sql.query('DELETE FROM user_notifications WHERE created_at < $1', [cuCutoff(days)]);
+  else if (k === 'notices') await sql.query('DELETE FROM comms_messages WHERE created_at < $1', [cuCutoff(days)]);
+  else if (k === 'sentlog') await sql.query('DELETE FROM notification_events WHERE sent_at < $1', [cuCutoff(days)]);
+  else if (k === 'requests') {
+    await ensureCorrectionTable();
+    await sql.query("DELETE FROM password_reset_requests WHERE status <> 'pending' AND COALESCE(resolved_at, created_at) < $1", [cuCutoff(days)]);
+    await sql.query("DELETE FROM correction_requests WHERE status <> 'Pending' AND COALESCE(decided_at, created_at) < $1", [cuCutoff(days)]);
+  }
+  return n;
+}
+let cuBusy = false;
+async function runCleanup(who) {
+  if (cuBusy) return { busy: true };
+  cuBusy = true;
+  try {
+    const st = await cuSettings(), removed = {}; let total = 0;
+    for (const k of Object.keys(CLEANUP_TYPES)) {
+      if (!st[k].on) continue;
+      try { removed[k] = await cuDelete(k, st[k].days); total += removed[k]; } catch (e) { console.error('cleanup', k, e.message); removed[k] = 0; }
+    }
+    const at = new Date().toISOString();
+    try { await sql`INSERT INTO kv_store (\`key\`, value) VALUES ('auto-cleanup-last', ${JSON.stringify({ at, removed, total, by: who })}) ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP`; } catch (e) { /* best effort */ }
+    if (total) auditNote(who, 'System', 'AUTO_CLEANUP', 'cleanup', null, 'removed old messages: ' + Object.keys(removed).filter(k => removed[k]).map(k => k + ' ' + removed[k]).join(', '), null);
+    return { removed, total, at };
+  } finally { cuBusy = false; }
+}
+setTimeout(() => { runCleanup('Auto clean-up').catch(e => console.error('cleanup (startup):', e.message)); }, 5 * 60 * 1000);
+setInterval(() => { runCleanup('Auto clean-up').catch(e => console.error('cleanup (interval):', e.message)); }, 24 * 60 * 60 * 1000);
+app.get('/api/cleanup', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can see this.' });
+  const st = await cuSettings(), items = {};
+  const tbl = { notifications: ['user_notifications'], notices: ['comms_messages'], requests: ['password_reset_requests', 'correction_requests'], sentlog: ['notification_events'] };
+  for (const k of Object.keys(CLEANUP_TYPES)) {
+    let kb = 0;
+    try {
+      for (const t of tbl[k]) {
+        const r = await sql`SELECT COALESCE(data_length + index_length, 0) AS b FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ${t}`;
+        kb += r.length ? Math.round(Number(r[0].b) / 1024) : 0;
+      }
+    } catch (e) { /* size is optional */ }
+    items[k] = { ...st[k], label: CLEANUP_TYPES[k].label, min: CLEANUP_TYPES[k].min, old: await cuCount(k, st[k].days), kb };
+  }
+  let last = null; try { const r = await sql`SELECT value FROM kv_store WHERE \`key\` = 'auto-cleanup-last'`; if (r[0]) last = r[0].value; } catch (e) { /* none */ }
+  return res.status(200).json({ items, last });
+});
+app.put('/api/cleanup', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can change this.' });
+  try {
+    const v = cuNormalize(req.body);
+    await sql`INSERT INTO kv_store (\`key\`, value) VALUES ('auto-cleanup-settings', ${JSON.stringify(v)}) ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP`;
+    auditNote(req.authUser.name, req.authUser.role, 'CLEANUP_SETTINGS', 'cleanup', null, Object.keys(v).map(k => k + ' ' + (v[k].on ? v[k].days + 'd' : 'off')).join(', '), clientIp(req));
+    return res.status(200).json(v);
+  } catch (e) { console.error('cleanup settings error:', e); return res.status(500).json({ error: 'Could not save the clean-up settings.' }); }
+});
+app.post('/api/cleanup/run', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can run this.' });
+  try {
+    const out = await runCleanup(req.authUser.name);
+    if (out.busy) return res.status(409).json({ error: 'A clean-up is already running.' });
+    return res.status(200).json(out);
+  } catch (e) { console.error('cleanup run error:', e); return res.status(500).json({ error: 'Clean-up failed.' }); }
+});
+
 app.get('/api/backup/auto/settings', async (req, res) => {
   if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can see this.' });
   return res.status(200).json(await abSettings());
