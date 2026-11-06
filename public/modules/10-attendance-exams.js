@@ -907,13 +907,44 @@ const ROOMS_KEY = "exam-rooms";
       cls => expandedMarksClass === cls
     );
     body.innerHTML = `
+      ${marksLateCardHtml()}
       <div class="f-field" style="max-width:320px; margin-bottom:20px;">
         <label>Exam</label>
         <select id="marksExamSelect" onchange="onMarksExamSelectChange(this.value)">${examOptions}</select>
       </div>
       ${gridHtml}
     `;
+    marksLateLoad();
   }
+
+  /* --- Admin switch: allow marks for PREVIOUS (already released) exams, for students who joined mid-year.
+     Teachers can then fill BLANK marks only; marks already entered stay locked. Enforced on the server. --- */
+  let marksLateOn = null;
+  try { OBJECT_BACKED_KEYS['marks-late-entry'] = '/api/kv/marks-late-entry'; } catch(e){}
+  function marksLateIsBoss(){ try { return !!(currentUser && (currentUser.role === 'Admin' || currentUser.role === 'Principal')); } catch(e){ return false; } }
+  function marksLateCardHtml(){
+    if(!marksLateIsBoss()) return '';
+    const on = marksLateOn === true;
+    return `<div id="marksLateCard" style="max-width:720px; margin-bottom:16px; padding:12px 14px; border-radius:12px; border:1px solid ${on ? '#e0b94a' : '#dde3ee'}; background:${on ? '#fff6dc' : '#f6f8fc'}; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+      <div style="flex:1; min-width:240px; font-size:0.85rem;"><b>Marks for previous exams (students who joined mid-year)</b><br>
+        <span style="color:var(--ink-soft);">${on ? 'ON: teachers can fill blank marks of exams already released. Marks already entered stay locked.' : 'OFF: once an exam is released, teachers cannot add marks for it. Admin can always enter them.'}</span></div>
+      <button class="btn ${on ? 'btn-ghost' : 'btn-primary'} btn-sm" onclick="toggleMarksLateEntry()">${on ? 'Turn OFF' : 'Allow previous exams'}</button></div>`;
+  }
+  async function marksLateLoad(){
+    if(!marksLateIsBoss() || marksLateOn !== null) return;
+    try { const v = await storageGet('marks-late-entry', {}); marksLateOn = !!(v && v.on === true); } catch(e){ marksLateOn = false; }
+    const c = document.getElementById('marksLateCard'); if(c) c.outerHTML = marksLateCardHtml();
+  }
+  async function toggleMarksLateEntry(){
+    if(!marksLateIsBoss()) return;
+    const next = !(marksLateOn === true);
+    const ok = await storageSet('marks-late-entry', { on: next, by: (currentUser && currentUser.name) || '', at: new Date().toISOString() });
+    if(ok === false){ showToast('Could not save. Check the connection and try again.'); return; }
+    marksLateOn = next;
+    const c = document.getElementById('marksLateCard'); if(c) c.outerHTML = marksLateCardHtml();
+    showToast(next ? 'Teachers can now add marks for previous exams.' : 'Previous-exam marks entry switched off.');
+  }
+  window.toggleMarksLateEntry = toggleMarksLateEntry;
 
   // Switching the exam must re-render the class grid immediately, because
   // which classes/sections show up depends on the NEW exam's type

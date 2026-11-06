@@ -1486,6 +1486,7 @@ async function enforceDateLockKv(req, res, key) {
 
 async function handleKv(req, res, key) {
   if (!key) return res.status(400).json({ error: 'Missing key.' });
+  if (key === 'marks-late-entry' && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change this setting.' });
   if (key === 'date-lock-policy' && req.method === 'PUT' && (!req.authUser || req.authUser.role !== 'Admin')) return res.status(403).json({ error: 'Only the Admin can change this setting.' });
   if ((key === 'admit-card-policy' || key === 'admit-card-exceptions') && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change the admit card fee rules.' });
   if (key === 'exam-releases' && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can release marks to students.' });
@@ -5734,6 +5735,14 @@ async function readExamReleases() {
     return (v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length) ? v : null;
   } catch (_) { return null; }
 }
+// Admin switch (kv 'marks-late-entry' = {on:true}): lets teachers enter BLANK marks for exams already released (students who joined mid-year).
+async function marksLateEntryOn() {
+  try {
+    const r = await sql`SELECT value FROM kv_store WHERE \`key\` = 'marks-late-entry'`;
+    let v = r.length ? r[0].value : null; if (typeof v === 'string') { try { v = JSON.parse(v); } catch (_) { v = null; } }
+    return !!(v && v.on === true);
+  } catch (_) { return false; }
+}
 function examIsReleased(rel, examId, className) {
   if (!rel) return true;
   if (Array.isArray(rel.legacy) && rel.legacy.includes(examId)) return true;
@@ -8428,7 +8437,16 @@ app.all('/api/:resource', async (req, res) => {
             let tpExam = (req.body || {}).examId;
             if (req.method === 'DELETE') { const ex3 = req.query.id ? await sql`SELECT exam_id FROM exam_results WHERE id = ${req.query.id}` : []; tpExam = ex3.length ? ex3[0].exam_id : null; }
             const tpRel = await readExamReleases();
-            if (tpExam && tpRel && examIsReleased(tpRel, tpExam, cls.className)) return res.status(403).json({ error: 'These marks are already released to students, so they are locked for teachers. Please ask the Admin or Principal to change them.', code: 'MARKS_LOCKED' });
+            if (tpExam && tpRel && examIsReleased(tpRel, tpExam, cls.className)) {
+              // Admin's "previous exams" switch: a teacher may still fill a BLANK mark (late joiners); existing marks stay locked.
+              let lateOk = false;
+              if (req.method === 'POST' && (await marksLateEntryOn())) {
+                const b3 = req.body || {};
+                const ex4 = await sql`SELECT id FROM exam_results WHERE exam_id = ${tpExam} AND student_id = ${b3.studentId} AND subject = ${b3.subject}`;
+                lateOk = !ex4.length;
+              }
+              if (!lateOk) return res.status(403).json({ error: 'These marks are already released to students, so they are locked for teachers. Please ask the Admin or Principal to change them.', code: 'MARKS_LOCKED' });
+            }
           }
         }
       }
