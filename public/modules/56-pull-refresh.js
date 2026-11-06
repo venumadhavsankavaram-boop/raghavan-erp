@@ -42,27 +42,39 @@
     bar.id = 'prBar';
     bar.setAttribute('aria-hidden', 'true');
     bar.style.cssText = 'position:fixed;left:50%;top:0;transform:translate(-50%,-60px);z-index:99999;width:42px;height:42px;border-radius:50%;background:#fff;box-shadow:0 4px 16px rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;font-size:20px;color:#2f6fed;transition:transform .18s;pointer-events:none;';
-    bar.innerHTML = '<span id="prIco" style="display:inline-block;transition:transform .15s;">↓</span>';
+    bar.innerHTML = '<svg id="prSvg" width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true">' +
+      '<circle cx="13" cy="13" r="9" stroke="#e3e8f3" stroke-width="2.6"/>' +
+      '<circle id="prArc" cx="13" cy="13" r="9" stroke="#b3185f" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="56.55" stroke-dashoffset="56.55" transform="rotate(-90 13 13)"/>' +
+      '<path id="prHead" d="M13 8.4 L13 17.6 M9.4 14 L13 17.6 L16.6 14" stroke="#b3185f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     document.body.appendChild(bar);
     if(!document.getElementById('prCss')){
       const s = document.createElement('style'); s.id = 'prCss';
-      s.textContent = '@keyframes prSpin{to{transform:rotate(360deg)}} #prBar.spin #prIco{animation:prSpin .8s linear infinite}';
+      s.textContent = '@keyframes prSpin{to{transform:rotate(360deg)}} #prSvg{display:block;transform-origin:50% 50%;will-change:transform} #prHead{transform-origin:13px 13px;transition:transform .2s ease,opacity .15s} #prBar.spin #prSvg{animation:prSpin .75s linear infinite} #prBar.spin #prHead{opacity:0} #prBar.spin #prArc{stroke-dashoffset:14.1!important;transition:none}';
       document.head.appendChild(s);
     }
     return bar;
   }
   function show(dy, ready){
-    const b = ensureBar();
+    const b = ensureBar(); b.style.transition = 'none';
     b.style.transform = 'translate(-50%,' + (Math.min(dy, MAX_PULL) - 50) + 'px)';
-    const ico = b.querySelector('#prIco'); if(ico) ico.style.transform = ready ? 'rotate(180deg)' : 'none';
+    const p = Math.max(0, Math.min(1, dy / (THRESHOLD * 0.6)));
+    const arc = b.querySelector('#prArc'), head = b.querySelector('#prHead'), svg = b.querySelector('#prSvg');
+    if(arc) arc.style.strokeDashoffset = String(56.55 * (1 - p));
+    if(head) head.style.transform = ready ? 'rotate(180deg)' : 'none';
+    if(svg) svg.style.transform = 'none';
   }
-  function hide(){ if(bar){ bar.classList.remove('spin'); bar.style.transform = 'translate(-50%,-60px)'; const i = bar.querySelector('#prIco'); if(i){ i.textContent = '↓'; i.style.transform = 'none'; } } }
+  function hide(){
+    if(!bar) return;
+    bar.classList.remove('spin'); bar.style.transition = 'transform .2s'; bar.style.transform = 'translate(-50%,-60px)';
+    const arc = bar.querySelector('#prArc'), head = bar.querySelector('#prHead'), svg = bar.querySelector('#prSvg');
+    if(arc) arc.style.strokeDashoffset = '56.55'; if(head) head.style.transform = 'none'; if(svg) svg.style.transform = 'none';
+  }
 
   async function refreshNow(){
     if(busy || !signedIn()) return;
     busy = true;
-    const b = ensureBar(); b.classList.add('spin'); b.style.transform = 'translate(-50%,16px)';
-    const ico = b.querySelector('#prIco'); if(ico) ico.textContent = '⟳';
+    const b = ensureBar(); b.style.transition = 'transform .2s'; b.classList.add('spin'); b.style.transform = 'translate(-50%,16px)';
+    const sv = b.querySelector('#prSvg'); if(sv) sv.style.transform = '';
     try{
       // forget what the lazily loaded lists cached, so they are fetched again
       try{ if(typeof _lazyDataPromises === 'object') Object.keys(_lazyDataPromises).forEach(k => { delete _lazyDataPromises[k]; }); }catch(e){}
