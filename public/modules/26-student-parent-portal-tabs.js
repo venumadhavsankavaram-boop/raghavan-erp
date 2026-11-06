@@ -1171,6 +1171,14 @@ function toggleMoreActions(){
     flags.push(['bad', 'Deletion cannot be undone from the app. Reject it if you are not sure.']);
     return { facts, flags };
   }
+  // Compact "what is being asked + what to double-check" panel, shared by the Approvals Center-style lists.
+  function apxPanelHtml(d){
+    if(!d || !d.facts) return '';
+    const TONE = { ok:['#e6f6ec','#1d7a43','✔'], info:['#eaf1fb','#2c5b95','ℹ'], warn:['#fff3d6','#8a5a00','⚠'], bad:['#fde8e8','#a32020','⛔'] };
+    return `<div style="display:grid; grid-template-columns:minmax(90px,max-content) 1fr; gap:4px 12px; margin-top:8px; font-size:0.8rem;">`
+      + d.facts.map(f => `<span style="color:var(--ink-soft);">${f[0]}</span><span style="min-width:0; overflow-wrap:anywhere;">${f[1]}</span>`).join('') + `</div>`
+      + (d.flags && d.flags.length ? `<div style="display:grid; gap:4px; margin-top:8px;">${d.flags.map(f => { const t = TONE[f[0]] || TONE.info; return `<div style="font-size:0.76rem; padding:5px 9px; border-radius:8px; background:${t[0]}; color:${t[1]};">${t[2]} ${f[1]}</div>`; }).join('')}</div>` : '');
+  }
   async function computeApprovalQueueItems(){
     const items = [];
     const canPromoTransfer = getRolePermission(currentUser.role, 'promotransfer', 'approve');
@@ -1413,19 +1421,22 @@ function toggleMoreActions(){
     }
     // 'all' — Admin/Principal only (see openStaffLeaveModal's tab gate above)
     if(!rows.length){ body.innerHTML = `<div class="empty-state"><b>No leave requests</b></div>`; return; }
-    body.innerHTML = rows.map(r => `
-      <div class="approvals-item-card">
+    body.innerHTML = rows.map(r => {
+      let panel = '';
+      if(r.status === 'Pending'){ try { panel = apxPanelHtml(apxLeaveDetail(r)); } catch(e){} }
+      return `
+      <div class="approvals-item-card"${panel ? ' style="flex-direction:column; align-items:stretch;"' : ''}>
         <div>
           <div><b>${escapeHtml(r.staffName||r.staffId)}</b> — ${escapeHtml(staffLeaveSpanLabel(r))} — ${staffLeaveStatusPill(r.status)}</div>
-          <div class="approvals-item-meta">${escapeHtml(r.reason||'')} — by ${escapeHtml(r.requestedByName||'')}</div>
+          ${panel || `<div class="approvals-item-meta">${escapeHtml(r.reason||'')} — by ${escapeHtml(r.requestedByName||'')}</div>`}
         </div>
         ${r.status==='Pending' ? `
-        <div class="approvals-item-actions">
+        <div class="approvals-item-actions"${panel ? ' style="margin-top:10px; justify-content:flex-end;"' : ''}>
           <button class="btn btn-primary btn-sm" onclick="decideStaffLeaveRequest('${r.id}','Approve')">Approve</button>
           <button class="btn-danger-text" onclick="decideStaffLeaveRequest('${r.id}','Reject')">Reject</button>
         </div>` : ''}
       </div>
-    `).join('');
+    `;}).join('');
   }
   async function submitStaffLeaveRequest(){
     const isHalf = document.querySelector('input[name="slKind"]:checked').value === 'half';

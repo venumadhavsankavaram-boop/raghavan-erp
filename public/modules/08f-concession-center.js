@@ -152,6 +152,7 @@ function ccRowHtml(r){
       ${adminPending ? sfBtn('link', 'check', 'Approve', `approveDiscountGroup('${r.batchId}','${r.studentId}')`) + sfBtn('danger', '', 'Reject', `rejectDiscountGroup('${r.batchId}','${r.studentId}')`) : ''}
       ${canDelete && live ? sfBtn('danger', '', 'Cancel discount', `deleteDiscountGroup('${r.batchId}','${r.studentId}')`) : ''}
     </div>` : ''}
+    ${(r.status === 'Pending' && typeof apxDiscountDetail === 'function' && typeof apxPanelHtml === 'function') ? (() => { try { return `<div style="grid-column:1/-1; flex-basis:100%; width:100%; background:#fafbff; border-radius:10px; padding:2px 12px 10px;">${apxPanelHtml(apxDiscountDetail(r))}</div>`; } catch(e){ return ''; } })() : ''}
   </div>`;
 }
 
