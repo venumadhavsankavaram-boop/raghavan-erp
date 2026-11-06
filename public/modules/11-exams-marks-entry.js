@@ -673,67 +673,102 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     w.document.close();
   }
 
-  /* --- Notice Board --- */
+  /* --- Notice Board: the sheet pasted outside, so every child can find the room they go to --- */
+  function raNoticeRows(examId){
+    const { roomBlocks, corridorBlock } = buildFinalPrintoutDataFor(examId);
+    const byId = {}; students.forEach(s => { byId[s.id] = s; });
+    const rows = [];
+    (corridorBlock ? [...roomBlocks, corridorBlock] : roomBlocks).forEach(block => block.classEntries.forEach(ce => ce.studentIds.forEach(id => {
+      const s = byId[id]; if(!s) return;
+      const ht = getHallTicket(examId, id);
+      rows.push({ studentId: id, ht: ht && ht.htNumber ? String(ht.htNumber) : '', name: ((s.lastName || '') + ' ' + (s.firstName || '')).trim(), className: s.className, section: s.section || '', room: block.name, girl: raIsGirl(s) });
+    })));
+    return rows;
+  }
+  function raNoticeGroups(rows, cfg){
+    const group = cfg.nbGroup || 'class';
+    const cmpHt = (a, b) => (a.ht && b.ht) ? raCompareHt(a.ht, b.ht) : (a.ht ? -1 : b.ht ? 1 : a.name.localeCompare(b.name));
+    const sorter = group === 'name' ? ((a, b) => a.name.localeCompare(b.name)) : cmpHt;
+    const map = {};
+    rows.forEach(r => { const k = group === 'room' ? r.room : group === 'class' ? r.className : 'All children'; (map[k] = map[k] || []).push(r); });
+    let keys = Object.keys(map);
+    if(group === 'class') keys.sort((a, b) => CLASS_LEVELS.indexOf(a) - CLASS_LEVELS.indexOf(b));
+    else if(group === 'room') keys.sort((a, b) => a === 'CORRIDOR' ? 1 : b === 'CORRIDOR' ? -1 : a.localeCompare(b, undefined, { numeric: true }));
+    return keys.map(k => ({ key: k, rows: map[k].sort(sorter) }));
+  }
+  function raNoticeSheetHtml(groups, cfg, exam, forPrint){
+    const size = { normal: 12, large: 15, xl: 19 }[cfg.nbSize || 'large'] || 15;
+    const cols = Number(cfg.nbCols) || 2, group = cfg.nbGroup || 'class';
+    const ink = cfg.colour === false ? '#000' : RA_GIRL_INK;
+    const sections = groups.map((g, gi) => {
+      const girls = g.rows.filter(r => r.girl).length;
+      const title = group === 'room' ? 'ROOM ' + raEsc(g.key).replace(/^ROOM\s*/i, '') : group === 'class' ? 'CLASS ' + raEsc(g.key) : 'ALL CHILDREN';
+      const lines = g.rows.map((r, i) => {
+        const room = '<span class="nb-room" title="' + raEsc(r.room) + '">' + raEsc(r.room.replace(/\s*\(.*\)\s*$/, '').replace(/^ROOM\s*/i, 'Room ')) + '</span>';
+        const left = group === 'room' ? raEsc(r.className) + (r.section ? ' - ' + raEsc(r.section) : '') : (group === 'name' ? raEsc(r.className) + (r.section ? '-' + raEsc(r.section) : '') : raEsc(r.section));
+        return '<div class="nb-row"><span class="nb-no">' + (i + 1) + '</span><span class="nb-ht">' + (r.ht ? raEsc(r.ht) : '—') + '</span><span class="nb-name"' + (r.girl && cfg.nbGirlRed ? ' style="color:' + ink + ';"' : '') + '>' + raEsc(r.name) + '</span><span class="nb-sec">' + left + '</span>' + (group === 'room' ? '' : room) + '</div>';
+      }).join('');
+      return '<section class="nb-sec-wrap"' + (forPrint && cfg.nbPageBreak !== false && gi > 0 ? ' style="break-before:page;page-break-before:always;"' : '') + '>'
+        + '<div class="nb-head"><div class="nb-sch">' + raEsc(String(schoolInfo.name || '').toUpperCase()) + '</div><div class="nb-ex">' + (exam ? raEsc(exam.name.toUpperCase()) + ' — ' : '') + 'ROOM ALLOTMENT</div>'
+        + '<div class="nb-title">' + title + '</div><div class="nb-cnt">' + g.rows.length + ' children' + (group === 'room' ? ' · girls ' + girls + ' · boys ' + (g.rows.length - girls) : '') + '</div></div>'
+        + '<div class="nb-cols">' + lines + '</div></section>';
+    }).join('');
+    const css = '.nb-sec-wrap{margin-bottom:18px;}.nb-head{text-align:center;margin-bottom:10px;}.nb-sch{font-weight:700;font-size:' + (size + 6) + 'px;}.nb-ex{font-size:' + (size - 1) + 'px;color:#444;margin-top:2px;}.nb-title{display:inline-block;margin-top:8px;padding:4px 22px;border:2px solid #000;font-weight:800;font-size:' + (size + 5) + 'px;letter-spacing:1px;}.nb-cnt{font-size:' + (size - 2) + 'px;color:#555;margin-top:4px;}'
+      + '.nb-cols{column-count:' + cols + ';column-gap:22px;}.nb-row{display:flex;align-items:center;gap:8px;break-inside:avoid;padding:3px 2px;border-bottom:1px solid #999;font-size:' + size + 'px;line-height:1.35;}'
+      + '.nb-no{width:2.2em;color:#666;text-align:right;font-size:' + (size - 3) + 'px;}.nb-ht{width:6.6em;font-weight:700;font-variant-numeric:tabular-nums;}.nb-name{flex:1;}.nb-sec{min-width:2em;text-align:center;color:#444;}.nb-room{display:inline-block;white-space:nowrap;flex-shrink:0;min-width:4.6em;text-align:center;padding:1px 8px;border:2px solid #000;border-radius:5px;font-weight:800;}';
+    return { css, html: sections };
+  }
   function renderNoticeBoardSubTab(el){
-    const data = buildNoticeBoardData();
-    const classesPresent = Array.from(new Set(data.map(d => d.className))).sort();
-    let filtered = roomAllotNoticeClassFilter ? data.filter(d => d.className===roomAllotNoticeClassFilter) : data.slice();
-    filtered.sort((a,b) => roomAllotNoticeSort==='name' ? a.name.localeCompare(b.name) : a.ht.localeCompare(b.ht, undefined, {numeric:true}));
+    const cfg = roomAllotConfig(), canEd = getResultTabAccess(currentUser.role, 'result_roomallotment', 'edit');
+    const all = raNoticeRows(roomAllotExamId);
+    const classesPresent = Array.from(new Set(all.map(d => d.className))).sort((a, b) => CLASS_LEVELS.indexOf(a) - CLASS_LEVELS.indexOf(b));
+    if(roomAllotNoticeClassFilter && !classesPresent.includes(roomAllotNoticeClassFilter)) roomAllotNoticeClassFilter = '';
+    const rows = roomAllotNoticeClassFilter ? all.filter(d => d.className === roomAllotNoticeClassFilter) : all;
+    const groups = raNoticeGroups(rows, cfg), exam = roomAllotCurrentExam();
+    const sheet = raNoticeSheetHtml(groups, cfg, exam, false);
+    const noHt = rows.filter(r => !r.ht).length;
+    const g = cfg.nbGroup || 'class', sz = cfg.nbSize || 'large', cl = String(cfg.nbCols || 2);
     el.innerHTML = `
       <div class="profile-card">
-        <h4>Notice Board Display</h4>
-        <p style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:10px;">A printable list so students can check the notice board to find their Hall Ticket Number and allotted Room.</p>
-        <div class="form-grid" style="margin-bottom:12px;">
-          <div class="f-field"><label>Sort By</label>
-            <select id="raNoticeSort" onchange="roomAllotNoticeSort=this.value; renderRoomAllotSubBody();">
-              <option value="ht" ${roomAllotNoticeSort==='ht'?'selected':''}>Hall Ticket No.</option>
-              <option value="name" ${roomAllotNoticeSort==='name'?'selected':''}>Name</option>
-            </select>
-          </div>
-          <div class="f-field"><label>Class Filter</label>
-            <select id="raNoticeClass" onchange="roomAllotNoticeClassFilter=this.value; renderRoomAllotSubBody();">
-              <option value="">All Classes</option>
-              ${classesPresent.map(c => `<option value="${c}" ${roomAllotNoticeClassFilter===c?'selected':''}>${c}</option>`).join('')}
-            </select>
-          </div>
-          <div class="f-field"><label>Print Columns</label>
-            <select id="raNoticeCols" onchange="roomAllotNoticeCols=Number(this.value); renderRoomAllotSubBody();">
-              <option value="2" ${roomAllotNoticeCols===2?'selected':''}>2</option>
-              <option value="3" ${roomAllotNoticeCols===3?'selected':''}>3</option>
-              <option value="4" ${roomAllotNoticeCols===4?'selected':''}>4</option>
-            </select>
-          </div>
+        <style>.ra-opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:8px 0 14px;}.ra-choice{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border:2px solid var(--border);border-radius:10px;cursor:pointer;}.ra-choice input{display:none;}.ra-choice small{color:var(--ink-soft);font-size:.72rem;}.ra-choice.on{border-color:#1f8a7a;background:rgba(31,138,122,.09);}.ra-tick{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;margin:0 8px 8px 0;font-size:.82rem;}</style>
+        <h4>Notice Board Sheet — where does each child go?</h4>
+        <p style="font-size:0.8rem; color:var(--ink-soft); margin:4px 0 8px;">Print it and paste it outside, so every child finds their name and goes straight to their room. Pick how the list is arranged:</p>
+        <div class="ra-opts">
+          ${raChoice('nbGroup','class',g,'One page per class','Children look up their own class. Recommended.',canEd)}
+          ${raChoice('nbGroup','room',g,'One page per room','Everyone sitting in a room, for the room door.',canEd)}
+          ${raChoice('nbGroup','name',g,'One A–Z list','All children in name order.',canEd)}
         </div>
-        <div class="table-wrap" style="margin-bottom:12px; max-height:420px; overflow:auto;">
-          <table><thead><tr><th>Hall Ticket No.</th><th>Name</th><th>Class</th><th>Room</th></tr></thead>
-          <tbody>${filtered.map(d => `<tr><td>${d.ht}</td><td>${d.name}</td><td>${d.className} - ${d.section}</td><td>${d.room}</td></tr>`).join('') || '<tr><td colspan="4" style="color:var(--ink-soft);">No hall ticket numbers generated yet.</td></tr>'}</tbody></table>
+        <div class="form-grid" style="margin-bottom:6px;">
+          <div class="f-field"><label>Letter size</label><select onchange="setRaOption('nbSize', this.value)">
+            <option value="normal" ${sz==='normal'?'selected':''}>Normal</option><option value="large" ${sz==='large'?'selected':''}>Large (easy to read)</option><option value="xl" ${sz==='xl'?'selected':''}>Extra large</option></select></div>
+          <div class="f-field"><label>Columns on the page</label><select onchange="setRaOption('nbCols', Number(this.value))">
+            <option value="1" ${cl==='1'?'selected':''}>1</option><option value="2" ${cl==='2'?'selected':''}>2</option><option value="3" ${cl==='3'?'selected':''}>3</option></select></div>
+          <div class="f-field"><label>Show only class</label><select onchange="roomAllotNoticeClassFilter=this.value; renderRoomAllotSubBody();">
+            <option value="">All classes</option>${classesPresent.map(c => `<option value="${raEsc(c)}" ${roomAllotNoticeClassFilter===c?'selected':''}>${raEsc(c)}</option>`).join('')}</select></div>
         </div>
+        <label class="ra-tick"><input type="checkbox" ${cfg.nbPageBreak === false ? '' : 'checked'} onchange="setRaOption('nbPageBreak', this.checked)"> Start each ${g==='room'?'room':'class'} on a new page</label>
+        <label class="ra-tick"><input type="checkbox" ${cfg.nbGirlRed ? 'checked' : ''} onchange="setRaOption('nbGirlRed', this.checked)"> Show girls' names in red</label>
+        ${noHt ? `<div style="color:#b45309;font-size:.8rem;margin:2px 0 10px;">⚠ ${noHt} child${noHt===1?' has':'ren have'} no Hall Ticket Number yet (shown as —). Generate them under Hall Ticket Numbers first for a complete sheet.</div>` : ''}
+        <div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin:8px 0 14px;max-height:460px;overflow:auto;background:#fff;color:#111;"><style>${sheet.css}</style>${sheet.html || '<div style="color:#666;">No children allotted yet — add rooms and select classes first.</div>'}</div>
         ${getResultTabAccess(currentUser.role, 'result_roomallotment', 'print') ? `<button class="btn btn-primary" onclick="printNoticeBoard()">Print Notice Board Sheet</button>` : ''}
       </div>
     `;
   }
   function printNoticeBoard(){
-    const data = buildNoticeBoardData();
-    let filtered = roomAllotNoticeClassFilter ? data.filter(d => d.className===roomAllotNoticeClassFilter) : data.slice();
-    filtered.sort((a,b) => roomAllotNoticeSort==='name' ? a.name.localeCompare(b.name) : a.ht.localeCompare(b.ht, undefined, {numeric:true}));
-    const exam = roomAllotCurrentExam();
-    const itemsHtml = filtered.map(d => `<div class="nb-item"><b>${d.ht}</b> — ${d.name} (${d.className}-${d.section}) — Room: ${d.room}</div>`).join('');
+    const cfg = roomAllotConfig(), exam = roomAllotCurrentExam();
+    const all = raNoticeRows(roomAllotExamId);
+    const rows = roomAllotNoticeClassFilter ? all.filter(d => d.className === roomAllotNoticeClassFilter) : all;
+    if(!rows.length){ showToast('Nothing to print yet — add rooms and select classes first.'); return; }
+    const sheet = raNoticeSheetHtml(raNoticeGroups(rows, cfg), cfg, exam, true);
     const w = window.open('', '_blank');
     w.document.write(`
-      <html><head><title>Notice Board - ${exam?exam.name:''}</title>
+      <html><head><title>Notice Board - ${exam?raEsc(exam.name):''}</title>
       <style>
-        @page{ size:A4; margin:12mm; }
-        body{ font-family:Arial,Helvetica,sans-serif; color:#111; font-size:11px; }
-        h2{ text-align:center; margin-bottom:4px; }
-        .nb-sub{ text-align:center; color:#555; margin-bottom:14px; font-size:12px; }
-        .nb-cols{ column-count:${roomAllotNoticeCols}; column-gap:18px; }
-        .nb-item{ break-inside:avoid; padding:4px 0; border-bottom:1px dotted #ccc; font-size:11px; }
+        @page{ size:A4 portrait; margin:12mm; }
+        body{ font-family:Arial,Helvetica,sans-serif; color:#111; margin:0; }
+        ${sheet.css}
       </style></head>
-      <body onload="window.print()">
-        <h2>${schoolInfo.name}</h2>
-        <div class="nb-sub">${exam?exam.name.toUpperCase():''} — HALL TICKET NUMBER &amp; ROOM ALLOTMENT</div>
-        <div class="nb-cols">${itemsHtml}</div>
-      </body></html>
+      <body onload="window.print()">${sheet.html}</body></html>
     `);
     w.document.close();
   }
