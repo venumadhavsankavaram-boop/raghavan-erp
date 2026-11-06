@@ -959,6 +959,218 @@ function toggleMoreActions(){
     if(['Admin','Principal'].includes(currentUser.role)) return true;
     return ['staff','inventory','promotransfer'].some(m => getRolePermission(currentUser.role, m, 'approve'));
   }
+
+  /* ---------- Approval detail cards ----------
+     Every approval shows WHAT is being asked (facts) and anything the approver should think twice about (flags),
+     built only from data already loaded in the app, so the decision never has to be made blind. */
+  function apxDay(iso){
+    if(!iso) return '—';
+    const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if(!m) return escapeHtml(String(iso));
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    if(isNaN(d)) return escapeHtml(String(iso));
+    return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getUTCDay()] + ', ' + (+m[3]) + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m[2] - 1] + ' ' + m[1];
+  }
+  function apxStudentName(s, fallback){ return s ? ((s.firstName||'') + ' ' + (s.lastName||'')).trim() : (fallback || 'Unknown student'); }
+  function apxStudentClass(s){ return s ? [s.className, s.section ? 'Section ' + s.section : ''].filter(Boolean).join(' · ') : '—'; }
+  function apxMoney(n){ try { return fmtMoney(Number(n)||0); } catch(e){ return '₹' + (Number(n)||0); } }
+  function apxLeaveDates(from, to){
+    const out = []; if(!from) return out;
+    let cur = new Date(from + 'T00:00:00Z'); const end = new Date((to || from) + 'T00:00:00Z'); let g = 0;
+    while(cur <= end && g++ < 366){ out.push(cur.toISOString().slice(0,10)); cur = new Date(cur.getTime() + 86400000); }
+    return out;
+  }
+  function apxLeaveDays(r){ return r.session ? 0.5 : apxLeaveDates(r.fromDate, r.toDate || r.fromDate).length; }
+  function apxStaffById(id){ return (typeof staffList !== 'undefined' ? staffList : []).find(x => x.id === id); }
+  function apxLeaveDetail(r){
+    const facts = [], flags = [];
+    const st = apxStaffById(r.staffId);
+    const days = apxLeaveDays(r);
+    const dates = r.session ? [r.fromDate] : apxLeaveDates(r.fromDate, r.toDate || r.fromDate);
+    const sundays = dates.filter(d => new Date(d + 'T00:00:00Z').getUTCDay() === 0).length;
+    facts.push(['Staff', escapeHtml(r.staffName || (st ? st.firstName + ' ' + st.lastName : r.staffId))]);
+    if(st) facts.push(['Role', escapeHtml([st.designation, st.department].filter(Boolean).join(' · ') || '—')]);
+    facts.push(['Leave', r.session ? 'Half day — ' + escapeHtml(r.session) + ' on ' + apxDay(r.fromDate)
+      : (r.fromDate === (r.toDate || r.fromDate) ? '1 day — ' + apxDay(r.fromDate) : days + ' days — ' + apxDay(r.fromDate) + ' to ' + apxDay(r.toDate))]);
+    facts.push(['Reason', escapeHtml(r.reason || 'No reason given')]);
+    facts.push(['Applied on', apxDay(r.requestedAt)]);
+    // Leave already taken in the same month (approved requests), against the monthly paid-leave allowance.
+    const all = (typeof _staffLeaveCache !== 'undefined' ? _staffLeaveCache : []);
+    const mine = all.filter(x => x.staffId === r.staffId && x.id !== r.id);
+    const ym = String(r.fromDate || '').slice(0,7), yr = String(r.fromDate || '').slice(0,4);
+    const spanIn = (x, pref) => {
+      if(x.session) return String(x.fromDate).startsWith(pref) ? 0.5 : 0;
+      return apxLeaveDates(x.fromDate, x.toDate || x.fromDate).filter(d => d.startsWith(pref)).length;
+    };
+    const takenMonth = mine.filter(x => x.status === 'Approved').reduce((n, x) => n + spanIn(x, ym), 0);
+    const takenYear = mine.filter(x => x.status === 'Approved').reduce((n, x) => n + spanIn(x, yr), 0);
+    const thisInMonth = r.session ? 0.5 : dates.filter(d => d.startsWith(ym)).length;
+    const quotaRaw = st && st.paidLeavesPerMonth !== undefined && st.paidLeavesPerMonth !== '' ? Number(st.paidLeavesPerMonth) : 1;
+    const quota = Number.isFinite(quotaRaw) ? quotaRaw : 1;
+    facts.push(['This month', `${takenMonth} day(s) already approved + ${thisInMonth} requested · paid allowance ${quota} day(s)/month`]);
+    facts.push(['This year', `${takenYear} day(s) approved so far this year`]);
+    const lop = Math.max(0, takenMonth + thisInMonth - quota);
+    if(lop > 0) flags.push(['warn', `${lop} day(s) of this month would be beyond the ${quota}-day paid allowance, so salary is reduced for those days (loss of pay).`]);
+    else flags.push(['ok', `Within the paid allowance (${takenMonth + thisInMonth} of ${quota} day(s) this month).`]);
+    const todayIso = (typeof localISODate === 'function') ? localISODate() : new Date().toISOString().slice(0,10);
+    if(dates.length && dates[dates.length - 1] < todayIso) flags.push(['warn', 'These dates are already over. Approving will mark leave on days that have passed and replaces any attendance already marked for them.']);
+    else if(dates.length && dates[0] <= todayIso) flags.push(['warn', 'Leave starts today or has already started.']);
+    if(sundays) flags.push(['info', `${sundays} Sunday(s) fall inside the dates; approval marks every calendar day as Leave.`]);
+    // Clashes: other staff already on (or asking for) leave on the same dates.
+    const overlap = all.filter(x => x.id !== r.id && x.staffId !== r.staffId && (x.status === 'Approved' || x.status === 'Pending')
+      && apxLeaveDates(x.fromDate, x.toDate || x.fromDate).some(d => dates.includes(d)));
+    if(overlap.length){
+      const names = Array.from(new Set(overlap.map(x => escapeHtml(x.staffName || x.staffId) + (x.status === 'Pending' ? ' (pending)' : '')))).join(', ');
+      const sameDept = st ? overlap.filter(x => { const o = apxStaffById(x.staffId); return o && o.department && o.department === st.department; }) : [];
+      flags.push([sameDept.length ? 'warn' : 'info', `Also on leave on these dates: ${names}${sameDept.length ? ' — including the same department.' : '.'}`]);
+    }
+    // Class-teacher / subject duties that need cover.
+    const ct = st && (st.classTeacherClass || (st.extra && st.extra.classTeacherClass));
+    if(ct) flags.push(['info', `Class Teacher of ${escapeHtml(ct)}${(st.classTeacherSection || (st.extra && st.extra.classTeacherSection)) ? ' ' + escapeHtml(st.classTeacherSection || st.extra.classTeacherSection) : ''} — that class needs cover.`]);
+    return { facts, flags };
+  }
+  function apxDiscountDetail(r){
+    const facts = [], flags = [];
+    const s = students.find(x => x.id === r.studentId);
+    facts.push(['Student', escapeHtml(apxStudentName(s, r.studentId)) + (s ? ' · ' + escapeHtml(apxStudentClass(s)) : '')]);
+    facts.push(['Concession', escapeHtml(r.type || 'Discount')]);
+    let total = 0;
+    const lines = r.records.map(d => {
+      const amt = (typeof fpDiscountAmount === 'function') ? fpDiscountAmount(d) : (Number(d.value) || 0);
+      total += amt;
+      const label = (typeof CATS !== 'undefined' && CATS[d.appliesTo]) || d.appliesTo || 'Fee';
+      const how = d.mode === 'percentage' || d.mode === 'percent' ? ` (${Number(d.value)}%)` : '';
+      return escapeHtml(label) + ': <b>' + apxMoney(amt) + '</b>' + how;
+    });
+    facts.push(['Discount asked', lines.join(' · ') + (r.records.length > 1 ? ' · Total <b>' + apxMoney(total) + '</b>' : '')]);
+    if(r.note) facts.push(['Reason / note', escapeHtml(r.note)]);
+    const reqDate = (r.records[0] && r.records[0].requestedDate) || '';
+    facts.push(['Requested by', escapeHtml(r.requestedBy || '—') + (r.records[0] && r.records[0].requestedRole ? ' (' + escapeHtml(r.records[0].requestedRole) + ')' : '') + (reqDate ? ' on ' + apxDay(reqDate) : '')]);
+    if(s && typeof computeStudentFinance === 'function'){
+      try {
+        const fin = computeStudentFinance(s), pc = fin.perCat || {};
+        r.records.forEach(d => {
+          const c = pc[d.appliesTo]; if(!c) return;
+          const label = (typeof CATS !== 'undefined' && CATS[d.appliesTo]) || d.appliesTo;
+          facts.push([label + ' position', `Fee ${apxMoney(c.expected)} · already discounted ${apxMoney(c.discount)} · paid ${apxMoney(c.collected)} · balance ${apxMoney(c.receivable)}`]);
+          const amt = (typeof fpDiscountAmount === 'function') ? fpDiscountAmount(d) : (Number(d.value) || 0);
+          if(c.expected > 0 && amt > c.expected - c.discount) flags.push(['bad', `${escapeHtml(label)} discount of ${apxMoney(amt)} is more than the fee still discountable (${apxMoney(Math.max(0, c.expected - c.discount))}).`]);
+          else if(c.expected > 0 && amt >= c.expected * 0.5) flags.push(['warn', `Large concession: ${Math.round(amt * 100 / c.expected)}% of the ${escapeHtml(label)}.`]);
+          if(c.expected > 0 && c.receivable <= 0) flags.push(['info', `The ${escapeHtml(label)} is already fully paid; an approved discount will become a credit/refund situation.`]);
+        });
+        const t = fin.totals;
+        if(t) facts.push(['All fees', `Expected ${apxMoney(t.expected)} · paid ${apxMoney(t.collected)} · balance ${apxMoney(t.receivable !== undefined ? t.receivable : (t.expected - t.collected))}`]);
+      } catch(e){}
+    }
+    // Other discounts this student already has.
+    const others = studentDiscounts.filter(d => d.studentId === r.studentId && d.status === 'Approved');
+    if(others.length) flags.push(['info', 'Already has approved concession(s): ' + others.map(d => escapeHtml((d.type || 'Discount') + ' ' + (d.mode === 'percentage' || d.mode === 'percent' ? Number(d.value) + '%' : apxMoney(d.value)))).join(', ') + '.']);
+    if(!r.note) flags.push(['warn', 'No reason was written for this discount.']);
+    return { facts, flags };
+  }
+  function apxPayrollDetail(r){
+    const facts = [], flags = [];
+    const st = apxStaffById(r.staffId);
+    facts.push(['Staff', escapeHtml(st ? st.firstName + ' ' + st.lastName : r.staffId) + (st && st.designation ? ' · ' + escapeHtml(st.designation) : '')]);
+    facts.push(['Month', escapeHtml(r.month || '—')]);
+    facts.push(['Earnings', `Basic ${apxMoney(r.basic)}${Number(r.bonus) ? ' + bonus ' + apxMoney(r.bonus) : ''} = Gross <b>${apxMoney(r.grossSalary)}</b>`]);
+    const ded = [];
+    if(Number(r.lopDeduction)) ded.push(`Loss of pay ${apxMoney(r.lopDeduction)} (${Number(r.lopDays)||0} day(s))`);
+    if(Number(r.epfEmployee)) ded.push('PF ' + apxMoney(r.epfEmployee));
+    if(Number(r.esiEmployee)) ded.push('ESI ' + apxMoney(r.esiEmployee));
+    if(Number(r.otherDeductions)) ded.push('Other ' + apxMoney(r.otherDeductions));
+    facts.push(['Deductions', ded.length ? ded.join(' · ') + ` = <b>${apxMoney(r.totalDeductions)}</b>` : 'None']);
+    facts.push(['Net payable', `<b>${apxMoney(r.netSalary)}</b>`]);
+    facts.push(['Leave this month', `${Number(r.leaveDays) || 0} leave day(s) · ${Number(r.lopDays) || 0} loss-of-pay day(s)`]);
+    const prev = (typeof staffPayrollRecords !== 'undefined' ? staffPayrollRecords : []).filter(x => x.staffId === r.staffId && x.month && x.month < r.month && x.status !== 'Draft')
+      .sort((a, b) => b.month.localeCompare(a.month))[0];
+    if(prev){
+      facts.push(['Last month', `${escapeHtml(prev.month)}: net ${apxMoney(prev.netSalary)}`]);
+      const diff = (Number(r.netSalary) || 0) - (Number(prev.netSalary) || 0);
+      if(prev.netSalary > 0 && Math.abs(diff) / prev.netSalary >= 0.1) flags.push(['warn', `Net pay is ${diff > 0 ? 'higher' : 'lower'} than last month by ${apxMoney(Math.abs(diff))} (${Math.round(Math.abs(diff) * 100 / prev.netSalary)}%). Check before approving.`]);
+    } else flags.push(['info', 'No earlier approved payroll to compare with.']);
+    if(Number(r.netSalary) <= 0) flags.push(['bad', 'Net salary is zero or negative.']);
+    flags.push(['info', 'Approving locks this net salary; later edits to salary or attendance will not change it.']);
+    return { facts, flags };
+  }
+  function apxStudentRow(s, id){
+    return s ? `${escapeHtml(apxStudentName(s))} (${escapeHtml(apxStudentClass(s))})` : escapeHtml(id || 'Unknown student');
+  }
+  function apxRequestDetail(a){
+    const facts = [], flags = [];
+    const who = escapeHtml(a.requestedBy || '—') + (a.requestedByRole ? ' (' + escapeHtml(a.requestedByRole) + ')' : '');
+    const dueOf = id => { const s = students.find(x => x.id === id); if(!s || typeof computeStudentFinance !== 'function') return null; try { return computeStudentFinance(s).totals; } catch(e){ return null; } };
+    if(a.type === 'promote'){
+      const list = a.payload || [];
+      facts.push(['Request', `Promote ${list.length} student(s)`]);
+      const lines = list.map(p => {
+        const s = students.find(x => x.id === p.studentId);
+        const to = p.target === '__graduate__' ? 'Graduate / leaves school' : escapeHtml(p.target || '');
+        const cf = p.carryForwardType && Number(p.carryForwardDue) ? ` — <b>${apxMoney(p.carryForwardDue)}</b> dues carried forward` : '';
+        return `${apxStudentRow(s, p.studentId)} → <b>${to}</b>${cf}`;
+      });
+      facts.push(['Students', '<div style="display:grid; gap:2px;">' + lines.map(l => '<span>' + l + '</span>').join('') + '</div>']);
+      const cfTotal = list.reduce((n, p) => n + (p.carryForwardType ? (Number(p.carryForwardDue) || 0) : 0), 0);
+      if(cfTotal) flags.push(['info', `${apxMoney(cfTotal)} of unpaid fees will move to the new year with these students.`]);
+      const unpaid = list.filter(p => { const t = dueOf(p.studentId); return t && (t.receivable > 0) && !p.carryForwardType; });
+      if(unpaid.length) flags.push(['warn', `${unpaid.length} student(s) still have unpaid fees and no carry-forward chosen: ${unpaid.slice(0,5).map(p => escapeHtml(apxStudentName(students.find(x => x.id === p.studentId), p.studentId))).join(', ')}${unpaid.length > 5 ? '…' : ''}.`]);
+      const grads = list.filter(p => p.target === '__graduate__').length;
+      if(grads) flags.push(['info', `${grads} student(s) will be marked as graduated.`]);
+    } else if(a.type === 'transfer'){
+      const ids = (a.payload && a.payload.studentIds) || [];
+      facts.push(['Request', `Transfer certificate for ${ids.length} student(s)`]);
+      facts.push(['Students', '<div style="display:grid; gap:2px;">' + ids.map(id => '<span>' + apxStudentRow(students.find(x => x.id === id), id) + '</span>').join('') + '</div>']);
+      if(a.payload && a.payload.date) facts.push(['Transfer date', apxDay(a.payload.date)]);
+      if(a.payload && a.payload.reason) facts.push(['Reason', escapeHtml(a.payload.reason)]);
+      const owing = ids.map(id => ({ id, t: dueOf(id) })).filter(x => x.t && x.t.receivable > 0);
+      if(owing.length) flags.push(['warn', 'Unpaid fees: ' + owing.map(x => escapeHtml(apxStudentName(students.find(s => s.id === x.id), x.id)) + ' ' + apxMoney(x.t.receivable)).join(', ') + '.']);
+      else if(ids.length) flags.push(['ok', 'No unpaid fees for these students.']);
+    } else if(a.type === 'section'){
+      const ch = (a.payload && a.payload.changes) || [];
+      facts.push(['Request', `Change section for ${ch.length} student(s)`]);
+      facts.push(['Students', '<div style="display:grid; gap:2px;">' + ch.map(c => { const s = students.find(x => x.id === c.studentId); return '<span>' + apxStudentRow(s, c.studentId) + ' → <b>Section ' + escapeHtml(c.target || '') + '</b></span>'; }).join('') + '</div>']);
+    } else if(a.type === 'inventory_item'){
+      const p = a.payload || {};
+      const old = p.editingId ? (typeof inventoryItems !== 'undefined' ? inventoryItems : []).find(x => x.id === p.editingId) : null;
+      facts.push(['Request', old ? 'Change to existing item' : 'Add a new item']);
+      facts.push(['Item', escapeHtml(p.name || '—') + (p.category ? ' · ' + escapeHtml(p.category) : '')]);
+      const cmp = (label, a1, b1, money) => {
+        const f = v => v === undefined || v === null || v === '' ? '—' : (money ? apxMoney(v) : escapeHtml(String(v)));
+        if(old && String(old[label[0]] ?? '') !== String(b1 ?? '')) return [label[1], f(a1) + ' → <b>' + f(b1) + '</b>'];
+        return [label[1], f(b1)];
+      };
+      [[['quantity','Quantity'], old && old.quantity, p.quantity, false], [['costPrice','Cost price'], old && old.costPrice, p.costPrice, true],
+       [['sellingPrice','Selling price'], old && old.sellingPrice, p.sellingPrice, true], [['threshold','Low-stock alert'], old && old.threshold, p.threshold, false],
+       [['applicableClass','Class'], old && old.applicableClass, p.applicableClass, false]].forEach(x => { if(x[2] !== undefined && x[2] !== '') facts.push(cmp(x[0], x[1], x[2], x[3])); });
+      if(Number(p.sellingPrice) && Number(p.costPrice) && Number(p.sellingPrice) < Number(p.costPrice)) flags.push(['warn', 'Selling price is below cost price.']);
+      if(old && Number(old.quantity) !== Number(p.quantity)) flags.push(['warn', `Stock quantity changes from ${Number(old.quantity)} to ${Number(p.quantity)} — check the reason.`]);
+    } else {
+      facts.push(['Request', escapeHtml(a.type || 'Request')]);
+    }
+    facts.push(['Reason given', escapeHtml(a.explanation || 'No reason given')]);
+    facts.push(['Requested by', who + (a.requestDate ? ' on ' + apxDay(a.requestDate) : '')]);
+    if(!a.explanation) flags.push(['warn', 'No reason was written for this request.']);
+    return { facts, flags };
+  }
+  const APX_RESOURCE_LABELS = { students:'Student', staff:'Staff member', payments:'Fee receipt', 'exam-results':'Exam mark', attendance:'Attendance entry', 'acct-income':'Receipt voucher', 'acct-expenses':'Payment voucher', 'inventory-sales':'Inventory bill', books:'Library book' };
+  function apxDeletionDetail(r){
+    const facts = [], flags = [];
+    facts.push(['What', escapeHtml(APX_RESOURCE_LABELS[r.resource] || r.resource || 'Record') + ': <b>' + escapeHtml(r.recordLabel || r.recordId) + '</b>']);
+    facts.push(['Reason', escapeHtml(r.reason || 'No reason given')]);
+    facts.push(['Requested by', escapeHtml(r.requestedByName || '—') + (r.requestedAt ? ' on ' + apxDay(r.requestedAt) : '')]);
+    if(r.firstApprovedByName) facts.push(['Step 1 approved by', escapeHtml(r.firstApprovedByName) + (r.firstApprovedAt ? ' on ' + apxDay(r.firstApprovedAt) : '')]);
+    facts.push(['Stage', r.status === 'Pending' ? 'Step 2 of 3 (first approval)' : 'Final approval — the record is removed when approved']);
+    if(r.resource === 'students'){
+      const s = students.find(x => x.id === r.recordId);
+      if(s){
+        facts.push(['Student', escapeHtml(apxStudentName(s)) + ' · ' + escapeHtml(apxStudentClass(s))]);
+        try { const t = computeStudentFinance(s).totals; if(t){ facts.push(['Fee position', `Paid ${apxMoney(t.collected)} · balance ${apxMoney(t.receivable !== undefined ? t.receivable : (t.expected - t.collected))}`]); if((t.collected || 0) > 0) flags.push(['warn', 'This student has fee payments on record.']); } } catch(e){}
+      }
+    }
+    if(!r.reason) flags.push(['warn', 'No reason was written for this deletion.']);
+    flags.push(['bad', 'Deletion cannot be undone from the app. Reject it if you are not sure.']);
+    return { facts, flags };
+  }
   async function computeApprovalQueueItems(){
     const items = [];
     const canPromoTransfer = getRolePermission(currentUser.role, 'promotransfer', 'approve');
@@ -971,6 +1183,7 @@ function toggleMoreActions(){
       items.push({
         id: 'pending_'+a.id, icon, title, sourceLabel:'Requests',
         detail: `${escapeHtml(a.explanation||'')} — by ${escapeHtml(a.requestedBy)} (${escapeHtml(a.requestedByRole)}) on ${a.requestDate||''}`,
+        ...(()=>{ try { return apxRequestDetail(a); } catch(e){ return {}; } })(),
         date: a.requestDate || '',
         approveFn: a.type==='inventory_item' ? 'approveInventoryRequest' : 'approveRequest',
         rejectFn: a.type==='inventory_item' ? 'rejectInventoryRequest' : 'rejectRequest',
@@ -985,6 +1198,7 @@ function toggleMoreActions(){
         items.push({
           id: 'discount_'+r.batchId+'_'+r.studentId, icon:'💸', title:'Fee discount request', sourceLabel:'Discounts',
           detail: `${escapeHtml(name)} — ${escapeHtml(r.note||r.type||'')} — by ${escapeHtml(r.requestedBy)}`,
+          ...(()=>{ try { return apxDiscountDetail(r); } catch(e){ return {}; } })(),
           date: requestedDate,
           approveFn:'approveDiscountGroup', rejectFn:'rejectDiscountGroup', args:[r.batchId, r.studentId],
         });
@@ -997,6 +1211,7 @@ function toggleMoreActions(){
         items.push({
           id: 'payroll_'+r.id, icon:'💰', title:'Payroll draft awaiting approval', sourceLabel:'Payroll',
           detail: `${escapeHtml(name)} — ${r.month||''} — Net ${fmtMoney(r.netSalary)}`,
+          ...(()=>{ try { return apxPayrollDetail(r); } catch(e){ return {}; } })(),
           date: r.generatedDate || '',
           approveFn:'approvePayroll', rejectFn:null, args:[r.staffId, r.month],
         });
@@ -1014,6 +1229,7 @@ function toggleMoreActions(){
               title: r.status==='Pending' ? 'Deletion request (step 2 of 3)' : 'Deletion request (final step)',
               sourceLabel:'Deletions',
               detail: `${escapeHtml(r.recordLabel||r.recordId)} — ${escapeHtml(r.reason||'')} — by ${escapeHtml(r.requestedByName)}`,
+              ...(()=>{ try { return apxDeletionDetail(r); } catch(e){ return {}; } })(),
               date: r.requestedAt ? String(r.requestedAt).slice(0,10) : '',
               approveFn:'decideDeletionRequest', rejectFn:'decideDeletionRequest',
               approveArgs:[r.id,'Approve',r.status], rejectArgs:[r.id,'Reject',r.status],
@@ -1032,6 +1248,7 @@ function toggleMoreActions(){
             items.push({
               id: 'staffleave_'+r.id, icon:'🌴', title:'Staff leave request', sourceLabel:'Leave',
               detail: `${escapeHtml(r.staffName||r.staffId)} — ${escapeHtml(staffLeaveSpanLabel(r))} — ${escapeHtml(r.reason||'')}`,
+              ...(()=>{ try { return apxLeaveDetail(r); } catch(e){ return {}; } })(),
               date: r.requestedAt ? String(r.requestedAt).slice(0,10) : '',
               approveFn:'decideStaffLeaveRequest', rejectFn:'decideStaffLeaveRequest',
               approveArgs:[r.id,'Approve'], rejectArgs:[r.id,'Reject'],
@@ -1059,16 +1276,20 @@ function toggleMoreActions(){
       body.innerHTML = `<div class="empty-state"><b>All caught up</b>Nothing is waiting on your approval right now.</div>`;
       return;
     }
+    const TONE = { ok:['#e6f6ec','#1d7a43','✔'], info:['#eaf1fb','#2c5b95','ℹ'], warn:['#fff3d6','#8a5a00','⚠'], bad:['#fde8e8','#a32020','⛔'] };
     body.innerHTML = items.map(it => `
-      <div class="approvals-item-card">
+      <div class="approvals-item-card" style="flex-direction:column; align-items:stretch;">
         <div style="display:flex; gap:10px; align-items:flex-start;">
           <span style="font-size:1.15rem; line-height:1.3;">${it.icon}</span>
-          <div>
+          <div style="flex:1; min-width:0;">
             <div><span class="approvals-source-pill">${it.sourceLabel}</span><b>${it.title}</b></div>
-            <div class="approvals-item-meta">${it.detail}</div>
+            ${it.facts && it.facts.length ? `<div style="display:grid; grid-template-columns:minmax(90px,max-content) 1fr; gap:4px 12px; margin-top:8px; font-size:0.8rem;">
+              ${it.facts.map(f => `<span style="color:var(--ink-soft);">${f[0]}</span><span style="min-width:0; overflow-wrap:anywhere;">${f[1]}</span>`).join('')}</div>`
+              : `<div class="approvals-item-meta">${it.detail}</div>`}
+            ${it.flags && it.flags.length ? `<div style="display:grid; gap:4px; margin-top:8px;">${it.flags.map(f => { const t = TONE[f[0]] || TONE.info; return `<div style="font-size:0.76rem; padding:5px 9px; border-radius:8px; background:${t[0]}; color:${t[1]};">${t[2]} ${f[1]}</div>`; }).join('')}</div>` : ''}
           </div>
         </div>
-        <div class="approvals-item-actions">
+        <div class="approvals-item-actions" style="margin-top:10px; justify-content:flex-end;">
           ${it.approveFn ? `<button class="btn btn-primary btn-sm" onclick='approvalsCenterAct(${JSON.stringify(it.approveFn)}, ${JSON.stringify(it.approveArgs||it.args)})'>Approve</button>` : ''}
           ${it.rejectFn ? `<button class="btn-danger-text" onclick='approvalsCenterAct(${JSON.stringify(it.rejectFn)}, ${JSON.stringify(it.rejectArgs||it.args)})'>Reject</button>` : ''}
         </div>

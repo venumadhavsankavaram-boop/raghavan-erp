@@ -322,6 +322,14 @@ const PENDING_APPROVALS_KEY = "pending-approvals";
     `;
   }
   function approvalDetailSummary(a){
+    if(typeof apxRequestDetail === 'function'){
+      try {
+        const d = apxRequestDetail(a);
+        const skip = { 'Reason given':1, 'Requested by':1, 'Request':1 };
+        return '<div style="display:grid; gap:3px; font-size:0.78rem;">' + d.facts.filter(f => !skip[f[0]]).map(f => '<div><span style="color:var(--ink-soft);">' + f[0] + ':</span> ' + f[1] + '</div>').join('')
+          + d.flags.filter(f => f[0] !== 'ok').map(f => '<div style="color:' + (f[0] === 'bad' ? '#a32020' : f[0] === 'warn' ? '#8a5a00' : '#2c5b95') + ';">' + (f[0] === 'info' ? 'ℹ ' : '⚠ ') + f[1] + '</div>').join('') + '</div>';
+      } catch(e){}
+    }
     if(a.type === 'promote'){
       return a.payload.map(p => { const s = students.find(x=>x.id===p.studentId); return s ? `${s.lastName} ${s.firstName} → ${p.target==='__graduate__'?'Graduate':p.target}` : ''; }).filter(Boolean).join(', ');
     }

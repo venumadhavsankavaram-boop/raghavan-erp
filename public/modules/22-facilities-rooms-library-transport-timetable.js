@@ -935,7 +935,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
           <td>${a.requestedBy} <span class="pill" style="font-size:0.62rem;">${a.requestedByRole}</span></td>
           <td>${a.requestDate}</td>
           <td style="max-width:200px;">${a.explanation}</td>
-          <td>${a.payload.editingId?'Edit':'New'} — Qty: ${a.payload.quantity}, ${fmtMoney(a.payload.sellingPrice)}</td>
+          <td>${typeof approvalDetailSummary === 'function' ? approvalDetailSummary(a) : (a.payload.editingId?'Edit':'New') + ' — Qty: ' + a.payload.quantity + ', ' + fmtMoney(a.payload.sellingPrice)}</td>
           <td>${a.status==='Pending'?'<span class="balance-tag due">Pending</span>':a.status==='Approved'?'<span class="pill">Approved</span>':'<span class="balance-tag due">Rejected</span>'}</td>
           ${isAdmin ? `<td>${a.status==='Pending'?`<button class="btn-edit-text" onclick="approveInventoryRequest('${a.id}')">Approve</button>&nbsp;·&nbsp;<button class="btn-danger-text" onclick="rejectInventoryRequest('${a.id}')">Reject</button>`:''}</td>` : ''}
         </tr>`).join('') : `<tr><td colspan="7"><div class="empty-state"><b>No requests yet</b></div></td></tr>`}
