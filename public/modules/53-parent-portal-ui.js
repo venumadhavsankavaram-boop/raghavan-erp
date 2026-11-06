@@ -166,5 +166,5 @@
     const o = window.portalToggleLang;
     window.portalToggleLang = function(){ const r = o.apply(this, arguments); setTimeout(() => { const d = $('ppDock'); if(d) delete d.dataset.sig; dock(); paint(true); }, 400); return r; };
   }
-  setInterval(() => { if(isParent()){ loadCfg(); dock(); watch(); } else if($('ppDock')) dock(); }, 2000);
+  setInterval(() => { if(isParent()){ loadCfg(); dock(); watch(); const w = document.querySelector('#myProfileBody .sh-wrap'); if(w && !$('ppHero') && !painting) paint(false); /* safety net: if the page was drawn before the watcher started, still build the new layout */ } else if($('ppDock')) dock(); }, 2000);
 })();
