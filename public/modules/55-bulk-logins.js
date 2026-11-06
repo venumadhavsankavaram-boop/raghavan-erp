@@ -194,8 +194,9 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         try{
           const j = await api('POST', '/api/student-logins/link-siblings', { studentIds: ids, keepStudentId: keep, disableExtraLogins: off() });
           toast('Linked ' + j.children + ' children to login “' + j.keepUsername + '”' + (j.disabled ? ' (' + j.disabled + ' extra login switched off).' : '.'));
-          try{ users = await (await fetch('/api/users')).json(); if(typeof refreshUserListViews === 'function') refreshUserListViews(); }catch(e){}
+          try{ users = await (await fetch('/api/users')).json(); }catch(e){}   // do NOT redraw the whole page here: it wiped the Siblings tab
           siblings(card);
+          try{ if(typeof window.lcRefreshStats === 'function') window.lcRefreshStats(); }catch(e){}
         }catch(e){ toast(e.message); }
       };
       card.querySelectorAll('[data-sbl]').forEach(b => b.onclick = () => { const g = groups[+b.dataset.sbl]; doLink(g.students.map(k => k.studentId), (g.students.find(k => k.hasLogin) || g.students[0]).studentId); });
@@ -236,7 +237,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     if(!r.ok) throw new Error((j && j.error) || ('HTTP ' + r.status));
     return j;
   }
-  function out(card, html){ const o = card.querySelector('#blkOut'); if(o) o.innerHTML = html; }
+  function out(card, html){ let o = card && card.isConnected ? card.querySelector('#blkOut') : null; if(!o) o = document.querySelector('#blkCard #blkOut'); if(o) o.innerHTML = html; }
   async function preview(card){
     if(!S.cls){ out(card, ''); return; }
     try{
@@ -254,8 +255,8 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
       const j = await api('POST', '/api/student-logins/bulk', { className: S.cls, section: S.sec, password: S.pw, forceChange: S.force });
       out(card, '<span class="blk-ok">✓ ' + j.created.length + ' login(s) created</span>' + (j.alreadyHave ? ' · ' + j.alreadyHave + ' student(s) already had one' : '') +
         (j.created.length ? '. Now press <b>Print login slips</b> and hand one slip to each parent.' : '.'));
-      try{ if(typeof loadUsers === 'function') await loadUsers(); else if(typeof refreshUserListViews === 'function') refreshUserListViews(); }catch(e){}
-      try{ users = await (await fetch('/api/users')).json(); if(typeof refreshUserListViews === 'function') refreshUserListViews(); }catch(e){}
+      try{ users = await (await fetch('/api/users')).json(); }catch(e){}   // no page redraw: it wiped this message and the Print slips button
+      try{ if(typeof window.lcRefreshStats === 'function') window.lcRefreshStats(); }catch(e){}
     }catch(e){ out(card, '<span style="color:#b3261e;">Could not create: ' + esc(e.message) + '</span>'); }
     b.disabled = false; b.textContent = t;
   }

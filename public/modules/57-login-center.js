@@ -196,6 +196,7 @@
     // the create/siblings/adoption card is mounted by another module a moment later: keep it inside its tab
     let n = 0; const iv = setInterval(() => { n++; const c = card(), h = document.getElementById('lcToolHost'); if(c && h && c.parentNode !== h){ applyMode(); if(F.tab !== 'find' && F.tab !== 'create') autoOpen(); } if(n > 12 || !h) clearInterval(iv); }, 300);
   }
+  window.lcRefreshStats = async function(){ try{ await loadInfo(true); const el = document.getElementById('lcStats'); if(el) el.innerHTML = statsHtml(); }catch(e){} };
   window.lcTab = function(t){
     F.tab = t; try{ sessionStorage.setItem('lcTab', t); }catch(e){}
     document.querySelectorAll('#lc .lc-tab').forEach((b, i) => b.classList.toggle('on', TABS[i][0] === t));
