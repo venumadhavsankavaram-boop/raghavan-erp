@@ -22,9 +22,40 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
   }
   function roomAllotConfig(){ return roomAllotConfigFor(roomAllotExamId); }
   function roomAllotCurrentExam(){ return examDefs.find(e => e.id === roomAllotExamId) || null; }
-  async function saveRoomAllotConfig(){ await storageSet(EXAM_ROOM_CONFIG_KEY, examRoomConfigs); }
+  // Saves for the three Room Allotment lists go through ONE queue per list, so two quick clicks can never both try to
+  // create the same record ("Duplicate entry"). If the server already has a record this screen did not know about, it
+  // is picked up and updated instead of re-created, and the save is retried once.
+  const raSaveChains = {};
+  function raSave(key, getArr){
+    const run = async () => {
+      // Anything this screen thinks is new but the server already has: treat as an update, not a create (no duplicate error).
+      try{
+        const api = (typeof API_BACKED_KEYS !== 'undefined') ? API_BACKED_KEYS[key] : null;
+        const known = new Set((_apiLastSynced[key] || []).map(x => x.id));
+        if(api && getArr().some(x => !known.has(x.id))){
+          const res = await fetch(api);
+          if(res.ok){ const srv = await res.json(); if(Array.isArray(srv)){ const base = (_apiLastSynced[key] || []).slice(); srv.forEach(x => { if(!known.has(x.id)) base.push(JSON.parse(JSON.stringify(x))); }); _apiLastSynced[key] = base; } }
+        }
+      }catch(e){}
+      let ok = await storageSet(key, getArr());
+      if(ok === false && typeof API_BACKED_KEYS !== 'undefined' && API_BACKED_KEYS[key]){
+        try{
+          const res = await fetch(API_BACKED_KEYS[key]);
+          if(res.ok){ const srv = await res.json(); if(Array.isArray(srv)){ _apiLastSynced[key] = JSON.parse(JSON.stringify(srv)); ok = await storageSet(key, getArr()); } }
+        }catch(e){}
+      }
+      return ok;
+    };
+    const next = (raSaveChains[key] || Promise.resolve()).catch(() => {}).then(run);
+    raSaveChains[key] = next;
+    return next;
+  }
+  async function saveRoomAllotConfig(){ return raSave(EXAM_ROOM_CONFIG_KEY, () => examRoomConfigs); }
 
+  let raFreshLoaded = false;
   function renderRoomAllotmentTab(body){
+    // First time this screen opens in a session: pick up the latest saved settings (another person may have changed them), then draw.
+    if(!raFreshLoaded){ raFreshLoaded = true; loadExamRoomConfigs().then(() => { try{ renderRoomAllotmentTab(document.getElementById('resultBody')); }catch(e){} }); }
     if(examDefs.length === 0){
       body.innerHTML = `<div class="empty-state"><b>No exams yet</b>Create an exam under the "Exams" tab first.</div>`;
       return;
@@ -34,7 +65,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     body.innerHTML = `
       <div class="f-field" style="max-width:320px; margin-bottom:16px;">
         <label>Exam</label>
-        <select id="raExamSelect" onchange="roomAllotExamId=this.value; roomAllotHTClass=''; renderResultBody();">${examOptions}</select>
+        <select id="raExamSelect" onchange="roomAllotExamId=this.value; roomAllotHTClass=''; loadExamRoomConfigs().then(renderResultBody);">${examOptions}</select>
       </div>
       <div class="mf-tabs" style="margin-bottom:16px;">
         <button type="button" class="mf-tab ${roomAllotSubTab==='hallTickets'?'active':''}" onclick="switchRoomAllotSubTab('hallTickets')">Hall Ticket Numbers</button>
@@ -126,7 +157,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
       if(existing) existing.htNumber = num;
       else examHallTickets.push({ id: 'ht_'+roomAllotExamId+'_'+s.id, examId: roomAllotExamId, studentId: s.id, htNumber: num });
     });
-    await storageSet(EXAM_HALL_TICKETS_KEY, examHallTickets);
+    await raSave(EXAM_HALL_TICKETS_KEY, () => examHallTickets);
     showToast('Hall ticket numbers generated for ' + studs.length + ' students.');
     renderRoomAllotSubBody();
   }
@@ -135,7 +166,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     const existing = getHallTicket(roomAllotExamId, studentId);
     if(existing) existing.htNumber = val;
     else examHallTickets.push({ id: 'ht_'+roomAllotExamId+'_'+studentId, examId: roomAllotExamId, studentId, htNumber: val });
-    await storageSet(EXAM_HALL_TICKETS_KEY, examHallTickets);
+    await raSave(EXAM_HALL_TICKETS_KEY, () => examHallTickets);
   }
 
   /* --- Select Classes --- */
@@ -287,14 +318,14 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     } else {
       rooms.push({ id: 'examroom_'+Date.now(), name, capacity });
     }
-    await storageSet(ROOMS_KEY, rooms);
+    await raSave(ROOMS_KEY, () => rooms);
     document.getElementById('roomModalWrap').innerHTML = '';
     renderRoomAllotSubBody();
   }
   async function deleteExamRoom(id){
     if(!await showConfirmDialog('Delete this room?')) return;
     rooms = rooms.filter(r => r.id!==id);
-    await storageSet(ROOMS_KEY, rooms);
+    await raSave(ROOMS_KEY, () => rooms);
     renderRoomAllotSubBody();
   }
 
@@ -480,7 +511,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
       const ex = getHallTicket(roomAllotExamId, s.id);
       if(ex) ex.htNumber = num; else examHallTickets.push({ id: 'ht_' + roomAllotExamId + '_' + s.id, examId: roomAllotExamId, studentId: s.id, htNumber: num });
     }));
-    await storageSet(EXAM_HALL_TICKETS_KEY, examHallTickets);
+    await raSave(EXAM_HALL_TICKETS_KEY, () => examHallTickets);
     showToast('Hall ticket numbers generated for ' + total + ' students.');
     renderRoomAllotSubBody();
   }
