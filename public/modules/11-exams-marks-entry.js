@@ -182,9 +182,21 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
         <span style="margin-left:auto; font-size:0.75rem; color:var(--ink-soft);">${count} students</span>
       </label>`;
     }).join('');
-    el.innerHTML = `
+    const sd = raSessionDefs(), curS = raCurrentSession(cfg), canEdS = getResultTabAccess(currentUser.role, 'result_roomallotment', 'edit');
+    const cnt = list => list.reduce((n, c) => n + students.filter(s => s.className === c && isActive(s)).length, 0);
+    const sCard = (name, list) => `<label class="ra-choice${curS === name ? ' on' : ''}" onclick="${canEdS ? `raPickSession('${name}')` : ''}"><b>${name === 'Morning' ? '🌅' : '🌇'} ${name} session</b><small>${list.length ? raEsc(list.join(', ')) : 'No classes set'} · ${cnt(list)} students</small></label>`;
+    const sessionCard = `<div class="profile-card" style="margin-bottom:16px;">
+      <style>.ra-opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:8px 0 12px;}.ra-choice{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border:2px solid var(--border);border-radius:10px;cursor:pointer;}.ra-choice input{display:none;}.ra-choice small{color:var(--ink-soft);font-size:.72rem;}.ra-choice.on{border-color:#1f8a7a;background:rgba(31,138,122,.09);}.ra-tick{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;margin:0 8px 8px 0;font-size:.82rem;}</style>
+      <h4>Quick pick by session</h4>
+      <p style="font-size:0.78rem; color:var(--ink-soft); margin:4px 0 0;">One tap selects every class of that session. Morning and Afternoon are sat in separate rooms and at separate times.</p>
+      <div class="ra-opts">${sCard('Morning', sd.Morning)}${sCard('Afternoon', sd.Afternoon)}
+        <label class="ra-choice" onclick="${canEdS ? `raPickSession('Both')` : ''}"><b>☀️ Both sessions</b><small>All classes of both sessions together</small></label></div>
+      <details><summary style="cursor:pointer;font-size:.82rem;font-weight:600;">Change which classes belong to each session</summary>
+        ${['Morning', 'Afternoon'].map(sn => `<div style="margin:10px 0 2px;font-weight:600;font-size:.8rem;">${sn}</div><div>${CLASS_LEVELS.map(c => `<label class="ra-tick"><input type="checkbox" ${sd[sn].includes(c) ? 'checked' : ''} ${canEdS ? '' : 'disabled'} onchange="raSetSessionClass('${sn}','${c}', this.checked)"> ${c}</label>`).join('')}</div>`).join('')}
+      </details></div>`;
+    el.innerHTML = sessionCard + `
       <div class="profile-card">
-        <h4>Select Classes for This Exam</h4>
+        <h4>Select Classes for This Exam${curS ? ' — ' + curS + ' session' : ''}</h4>
         <p style="font-size:0.78rem; color:var(--ink-soft); margin:4px 0 12px;">Chosen classes scope Hall Ticket generation, the Room Allotment Matrix, the Final Printout, and which class tiles appear on the Admit Cards page for this exam. Leave nothing selected to include every class.</p>
         <div style="display:flex; gap:10px; margin-bottom:12px;">
           <button class="btn btn-ghost btn-sm" onclick="setAllRoomAllotClasses(true)">Select All</button>
@@ -367,6 +379,72 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     });
     return { rooms: roomsOut, corridor };
   }
+  /* ---- Sessions (Morning / Afternoon) and paper timings from the Exams time table ---- */
+  const RA_SESSIONS_ID = '__sessions';
+  function raSessionDefs(){
+    let r = examRoomConfigs.find(c => c.id === RA_SESSIONS_ID);
+    if(!r){
+      r = { id: RA_SESSIONS_ID, Morning: ['8th Class', '9th Class', '10th Class'].filter(c => CLASS_LEVELS.includes(c)), Afternoon: ['6th Class', '7th Class'].filter(c => CLASS_LEVELS.includes(c)) };
+      examRoomConfigs.push(r);
+    }
+    r.Morning = r.Morning || []; r.Afternoon = r.Afternoon || [];
+    return r;
+  }
+  function raCurrentSession(cfg){
+    const sel = (cfg.selectedClasses || []).slice().sort().join('|'), d = raSessionDefs();
+    if(!sel) return '';
+    if(sel === d.Morning.slice().sort().join('|')) return 'Morning';
+    if(sel === d.Afternoon.slice().sort().join('|')) return 'Afternoon';
+    return '';
+  }
+  async function raPickSession(name){
+    const cfg = roomAllotConfig(), d = raSessionDefs();
+    cfg.selectedClasses = name === 'Both' ? CLASS_LEVELS.filter(c => d.Morning.includes(c) || d.Afternoon.includes(c)) : CLASS_LEVELS.filter(c => d[name].includes(c));
+    cfg.paperDate = ''; cfg.paperSubject = ''; cfg.paperTime = '';
+    await saveRoomAllotConfig(); renderRoomAllotSubBody();
+  }
+  async function raSetSessionClass(session, cls, on){
+    const d = raSessionDefs(); d[session] = (d[session] || []).filter(c => c !== cls); if(on) d[session].push(cls);
+    await saveRoomAllotConfig(); renderRoomAllotSubBody();
+  }
+  function raSelectedClassList(examId){
+    const cfg = roomAllotConfigFor(examId);
+    return (cfg.selectedClasses && cfg.selectedClasses.length) ? CLASS_LEVELS.filter(c => cfg.selectedClasses.includes(c)) : CLASS_LEVELS;
+  }
+  // What each class writes on a given date, read from the exam time table (subject + start/end time).
+  function raPaperInfo(exam, classList, date){
+    const by = {};
+    if(!exam || !date) return by;
+    classList.forEach(cls => {
+      const seen = {};
+      sectionsForClass(cls).forEach(sec => getExamSubjects(exam, cls, sec).forEach(sb => {
+        if(sb && sb.date === date){ const time = acTimeText(sb, exam, cls); const k = sb.name + '|' + time; if(!seen[k]){ seen[k] = 1; (by[cls] = by[cls] || []).push({ subject: sb.name || '', time }); } }
+      }));
+    });
+    return by;
+  }
+  function raExamDates(exam, classList){
+    const set = {};
+    classList.forEach(cls => sectionsForClass(cls).forEach(sec => getExamSubjects(exam, cls, sec).forEach(sb => { if(sb && sb.date){ const e = set[sb.date] = set[sb.date] || {}; e[sb.name] = 1; } })));
+    return Object.keys(set).sort().map(d => ({ date: d, subjects: Object.keys(set[d]) }));
+  }
+  function raPaperText(by){
+    const cls = Object.keys(by); if(!cls.length) return { subject: '', time: '' };
+    const subs = {}, times = {};
+    cls.forEach(c => by[c].forEach(x => { subs[x.subject] = 1; if(x.time) times[x.time] = 1; }));
+    const perClass = f => cls.map(c => c + ': ' + Array.from(new Set(by[c].map(f).filter(Boolean))).join(', ')).join('; ');
+    const sameSubject = cls.every(c => by[c].map(x => x.subject).sort().join('|') === by[cls[0]].map(x => x.subject).sort().join('|'));
+    return { subject: sameSubject ? Object.keys(subs).join(' / ') : perClass(x => x.subject), time: Object.keys(times).length <= 1 ? Object.keys(times)[0] || '' : perClass(x => x.time) };
+  }
+  function raFmtDate(d){ const dt = d ? new Date(d + 'T00:00:00') : null; return dt && !isNaN(dt) ? String(dt.getDate()).padStart(2, '0') + '.' + String(dt.getMonth() + 1).padStart(2, '0') + '.' + dt.getFullYear() : ''; }
+  async function raSetPaperDate(date){
+    const cfg = roomAllotConfig(), exam = roomAllotCurrentExam();
+    cfg.paperDate = date || '';
+    const t = raPaperText(raPaperInfo(exam, raSelectedClassList(roomAllotExamId), date));
+    if(date){ cfg.paperSubject = t.subject; cfg.paperTime = t.time; }
+    await saveRoomAllotConfig(); renderRoomAllotSubBody();
+  }
+
   /* ---- Room allotment engine: girls first, then boys, in hall-ticket order ---- */
   function raEsc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   const RA_GIRL_INK = '#c00000';   // red = girls (as on the school's manual sheet), black = boys
@@ -562,8 +640,9 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
       <div class="profile-card" style="margin-bottom:16px;">
         <h4>Sheet Details &amp; Page Setup</h4>
         <div class="form-grid" style="margin-top:10px;">
-          <div class="f-field"><label>Date of paper</label><input type="date" id="raDate" value="${raEsc(cfg.paperDate || '')}" onchange="updateRoomAllotPageSetup()" ${canEd?'':'disabled'}></div>
+          <div class="f-field"><label>Date of paper</label><input type="date" id="raDate" value="${raEsc(cfg.paperDate || '')}" onchange="raSetPaperDate(this.value)" ${canEd?'':'disabled'}></div>
           <div class="f-field"><label>Subject</label><input type="text" id="raSubject" value="${raEsc(cfg.paperSubject || '')}" onchange="updateRoomAllotPageSetup()" ${canEd?'':'disabled'}></div>
+          <div class="f-field"><label>Time</label><input type="text" id="raTime" value="${raEsc(cfg.paperTime || '')}" placeholder="e.g. 9:30 AM – 12:30 PM" onchange="updateRoomAllotPageSetup()" ${canEd?'':'disabled'}></div>
           <div class="f-field"><label>General duty</label><input type="text" id="raDuty" value="${raEsc(cfg.generalDuty || '')}" onchange="updateRoomAllotPageSetup()" ${canEd?'':'disabled'}></div>
           <div class="f-field"><label>Orientation</label>
             <select id="raOrientation" onchange="updateRoomAllotPageSetup()">
@@ -578,7 +657,8 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
             </select>
           </div>
         </div>
-        <span style="font-size:0.72rem; color:var(--ink-soft);">Type the room invigilators straight into the table below. They print on the sheet.</span>
+        ${raDateChips(cfg, exam, canEd)}
+        <span style="font-size:0.72rem; color:var(--ink-soft);">Tap a paper date and the subject and time are filled from the Exams time table. Type the room invigilators straight into the table below. They print on the sheet.</span>
       </div>
       <div class="profile-card" style="margin-bottom:16px;">
         <h4>Check</h4>
@@ -632,6 +712,14 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     const cfg = roomAllotConfig(); cfg.roomsOff = (cfg.roomsOff || []).filter(x => x !== id); if(!on) cfg.roomsOff.push(id);
     await saveRoomAllotConfig(); renderRoomAllotSubBody();
   }
+  function raDateChips(cfg, exam, canEd){
+    const dates = raExamDates(exam, raSelectedClassList(roomAllotExamId));
+    if(!dates.length) return '<div style="font-size:.78rem;color:#b45309;margin:8px 0;">No paper dates found for these classes in the Exams time table — set them under Exams, or type the date, subject and time above.</div>';
+    return '<div style="margin:10px 0 4px;font-weight:600;font-size:.82rem;">Paper dates from the Exams time table</div><div>' + dates.map(x => {
+      const dt = new Date(x.date + 'T00:00:00'), label = dt.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' });
+      return '<button type="button" class="ra-tick" style="cursor:pointer;' + (cfg.paperDate === x.date ? 'border-color:#1f8a7a;background:rgba(31,138,122,.12);font-weight:700;' : '') + '" ' + (canEd ? '' : 'disabled ') + 'onclick="raSetPaperDate(\'' + x.date + '\')">' + raEsc(label) + ' · ' + raEsc(x.subjects.slice(0, 3).join(', ')) + (x.subjects.length > 3 ? '…' : '') + '</button>';
+    }).join('') + '</div>';
+  }
   async function saveRoomInvigilator(inp){
     const cfg = roomAllotConfig(); cfg.invigilators = cfg.invigilators || {};
     cfg.invigilators[inp.getAttribute('data-room')] = inp.value.trim();
@@ -641,8 +729,8 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     const cfg = roomAllotConfig();
     cfg.orientation = document.getElementById('raOrientation').value;
     cfg.pageSize = document.getElementById('raPageSize').value;
-    const d = document.getElementById('raDate'), s = document.getElementById('raSubject'), g = document.getElementById('raDuty');
-    if(d) cfg.paperDate = d.value; if(s) cfg.paperSubject = s.value.trim(); if(g) cfg.generalDuty = g.value.trim();
+    const s = document.getElementById('raSubject'), g = document.getElementById('raDuty'), tm = document.getElementById('raTime');
+    if(s) cfg.paperSubject = s.value.trim(); if(g) cfg.generalDuty = g.value.trim(); if(tm) cfg.paperTime = tm.value.trim();
     await saveRoomAllotConfig();
   }
   function printFinalRoomAllotment(){
@@ -655,8 +743,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     const pageSizeCss = cfg.orientation === 'landscape' ? `${hmm}mm ${wmm}mm` : `${wmm}mm ${hmm}mm`;
     const rowsHtml = renderFinalPrintoutTable(roomBlocks, corridorBlock, true);
     const sum = raSummaryRows(data);
-    const dt = cfg.paperDate ? new Date(cfg.paperDate + 'T00:00:00') : null;
-    const dateTxt = dt && !isNaN(dt) ? String(dt.getDate()).padStart(2, '0') + '.' + String(dt.getMonth() + 1).padStart(2, '0') + '.' + dt.getFullYear() : '';
+    const dateTxt = raFmtDate(cfg.paperDate), sessName = raCurrentSession(cfg);
     const blocks = corridorBlock ? [...roomBlocks, corridorBlock] : roomBlocks;
     const allotted = blocks.reduce((s, b) => s + b.total, 0);
     const w = window.open('', '_blank');
@@ -681,11 +768,12 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
         <div class="frp-head">
           <div class="frp-school">${raEsc(String(schoolInfo.name || '').toUpperCase())}</div>
           <div class="frp-addr">${raEsc(schoolInfo.address || '')}</div>
-          <div class="frp-exam">${exam?raEsc(exam.name.toUpperCase()):''}</div>
+          <div class="frp-exam">${exam?raEsc(exam.name.toUpperCase()):''}${sessName ? ' — ' + sessName.toUpperCase() + ' SESSION' : ''}</div>
         </div>
         <div class="frp-fields">
           <div>DATE: <span>${raEsc(dateTxt) || '&nbsp;'}</span></div>
           <div>SUBJECT: <span>${raEsc(cfg.paperSubject || '') || '&nbsp;'}</span></div>
+          <div>TIME: <span>${raEsc(cfg.paperTime || '') || '&nbsp;'}</span></div>
           <div>GENERAL DUTY: <span>${raEsc(cfg.generalDuty || '') || '&nbsp;'}</span></div>
         </div>
         <table class="ra-tbl${cfg.showGB === false ? ' nogb' : ''}${cfg.colour === false ? ' bw' : ''}">
@@ -727,6 +815,12 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     else if(group === 'room') keys.sort((a, b) => a === 'CORRIDOR' ? 1 : b === 'CORRIDOR' ? -1 : a.localeCompare(b, undefined, { numeric: true }));
     return keys.map(k => ({ key: k, rows: map[k].sort(sorter) }));
   }
+  function raNoticeWhen(g, group, cfg, exam){
+    const d = raFmtDate(cfg.paperDate); if(!d) return '';
+    let sub = cfg.paperSubject || '', time = cfg.paperTime || '';
+    if(group === 'class'){ const by = raPaperInfo(exam, [g.key], cfg.paperDate); if(by[g.key]){ const t = raPaperText(by); sub = t.subject || sub; time = t.time || time; } }
+    return '<div class="nb-when">' + [d, sub, time].filter(Boolean).map(raEsc).join(' &nbsp;·&nbsp; ') + '</div>';
+  }
   function raNoticeSheetHtml(groups, cfg, exam, forPrint){
     const size = { normal: 12, large: 15, xl: 19 }[cfg.nbSize || 'large'] || 15;
     const cols = Number(cfg.nbCols) || 2, group = cfg.nbGroup || 'class';
@@ -740,11 +834,11 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
         return '<div class="nb-row"><span class="nb-no">' + (i + 1) + '</span><span class="nb-ht">' + (r.ht ? raEsc(r.ht) : '—') + '</span><span class="nb-name"' + (r.girl && cfg.nbGirlRed ? ' style="color:' + ink + ';"' : '') + '>' + raEsc(r.name) + '</span><span class="nb-sec">' + left + '</span>' + (group === 'room' ? '' : room) + '</div>';
       }).join('');
       return '<section class="nb-sec-wrap"' + (forPrint && cfg.nbPageBreak !== false && gi > 0 ? ' style="break-before:page;page-break-before:always;"' : '') + '>'
-        + '<div class="nb-head"><div class="nb-sch">' + raEsc(String(schoolInfo.name || '').toUpperCase()) + '</div><div class="nb-ex">' + (exam ? raEsc(exam.name.toUpperCase()) + ' — ' : '') + 'ROOM ALLOTMENT</div>'
-        + '<div class="nb-title">' + title + '</div><div class="nb-cnt">' + g.rows.length + ' children' + (group === 'room' ? ' · girls ' + girls + ' · boys ' + (g.rows.length - girls) : '') + '</div></div>'
+        + '<div class="nb-head"><div class="nb-sch">' + raEsc(String(schoolInfo.name || '').toUpperCase()) + '</div><div class="nb-ex">' + (exam ? raEsc(exam.name.toUpperCase()) + ' — ' : '') + 'ROOM ALLOTMENT' + (raCurrentSession(cfg) ? ' — ' + raCurrentSession(cfg).toUpperCase() + ' SESSION' : '') + '</div>'
+        + '<div class="nb-title">' + title + '</div>' + raNoticeWhen(g, group, cfg, exam) + '<div class="nb-cnt">' + g.rows.length + ' children' + (group === 'room' ? ' · girls ' + girls + ' · boys ' + (g.rows.length - girls) : '') + '</div></div>'
         + '<div class="nb-cols">' + lines + '</div></section>';
     }).join('');
-    const css = '.nb-sec-wrap{margin-bottom:18px;}.nb-head{text-align:center;margin-bottom:10px;}.nb-sch{font-weight:700;font-size:' + (size + 6) + 'px;}.nb-ex{font-size:' + (size - 1) + 'px;color:#444;margin-top:2px;}.nb-title{display:inline-block;margin-top:8px;padding:4px 22px;border:2px solid #000;font-weight:800;font-size:' + (size + 5) + 'px;letter-spacing:1px;}.nb-cnt{font-size:' + (size - 2) + 'px;color:#555;margin-top:4px;}'
+    const css = '.nb-sec-wrap{margin-bottom:18px;}.nb-head{text-align:center;margin-bottom:10px;}.nb-sch{font-weight:700;font-size:' + (size + 6) + 'px;}.nb-ex{font-size:' + (size - 1) + 'px;color:#444;margin-top:2px;}.nb-title{display:inline-block;margin-top:8px;padding:4px 22px;border:2px solid #000;font-weight:800;font-size:' + (size + 5) + 'px;letter-spacing:1px;}.nb-when{font-size:' + (size + 1) + 'px;font-weight:700;margin-top:6px;}.nb-cnt{font-size:' + (size - 2) + 'px;color:#555;margin-top:4px;}'
       + '.nb-cols{column-count:' + cols + ';column-gap:22px;}.nb-row{display:flex;align-items:center;gap:8px;break-inside:avoid;padding:3px 2px;border-bottom:1px solid #999;font-size:' + size + 'px;line-height:1.35;}'
       + '.nb-no{width:2.2em;color:#666;text-align:right;font-size:' + (size - 3) + 'px;}.nb-ht{width:6.6em;font-weight:700;font-variant-numeric:tabular-nums;}.nb-name{flex:1;}.nb-sec{min-width:2em;text-align:center;color:#444;}.nb-room{display:inline-block;white-space:nowrap;flex-shrink:0;min-width:4.6em;text-align:center;padding:1px 8px;border:2px solid #000;border-radius:5px;font-weight:800;}';
     return { css, html: sections };
