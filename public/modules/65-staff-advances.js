@@ -116,13 +116,14 @@ function advancePayrollPart(staffId, monthStr, manualAmount, cap){
         <td>${money(a.amount)}</td>
         <td>${a.instalment > 0 ? money(a.instalment) + '/month' : 'All at once'}${a.startMonth ? '<div class="adv-sub">from ' + monthLabel(a.startMonth) + '</div>' : ''}</td>
         <td>${money(rec)}</td><td><b>${money(bal)}</b></td><td>${state}</td>
+        <td>${a.jvNo ? '<span class="adv-sub">' + esc(a.jvNo) + '</span>' : (ed ? `<button class="btn-edit-text" onclick="advPostGive('${st.id}','${a.id}')">Record in books</button>` : '<span class="adv-sub">Not recorded</span>')}</td>
         <td>${ed && a.status === 'Active' && !cleared ? `<button class="btn-edit-text" onclick="advOpenForm('${st.id}','${a.id}')">Change plan</button> <button class="btn-edit-text" style="color:var(--magenta);" onclick="advClose('${st.id}','${a.id}')">${rec > 0 || bal < a.amount ? 'Close / settle' : 'Cancel'}</button>` : ''}</td>
       </tr>`;
     }).join('');
     return `<div class="adv-card" id="advCard">
       <div class="adv-top"><div><h4>Salary advances</h4><p class="adv-sub">${live.length ? `${live.length} running · <b>${money(owed)}</b> still to recover from staff. Each month's instalment is taken in Payroll automatically.` : 'No advance is running. Give one here and it is recovered from the coming months automatically.'}</p></div>
       ${ed ? `<button class="btn btn-primary btn-sm" onclick="advOpenForm()">+ Give advance</button>` : ''}</div>
-      ${all.length ? `<div class="table-wrap"><table class="adv-tbl" style="min-width:720px;"><thead><tr><th>Staff</th><th>Given</th><th>Amount</th><th>Recovery</th><th>Recovered</th><th>Balance</th><th>Status</th><th></th></tr></thead><tbody>${body}</tbody></table></div>` : ''}
+      ${all.length ? `<div class="table-wrap"><table class="adv-tbl" style="min-width:820px;"><thead><tr><th>Staff</th><th>Given</th><th>Amount</th><th>Recovery</th><th>Recovered</th><th>Balance</th><th>Status</th><th>Accounts</th><th></th></tr></thead><tbody>${body}</tbody></table></div>` : ''}
     </div>`;
   }
 
@@ -214,12 +215,14 @@ function advancePayrollPart(staffId, monthStr, manualAmount, cap){
     if(!$('advDate').value){ err.textContent = 'Choose the date given.'; return; }
     const sal = Number(st.salary) || 0;
     if(sal && amt > sal && !await showConfirmDialog(`This advance (${money(amt)}) is more than ${esc(st.firstName)}'s monthly salary (${money(sal)}). Give it anyway?`)) return;
-    (st.advances = st.advances || []).push({
+    const adv = {
       id: 'adv_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), date: $('advDate').value, amount: amt,
       reason: $('advReason').value.trim(), mode: $('advMode').value, instalment: Math.ceil(amt / n), startMonth: start,
       status: 'Active', givenBy: (currentUser && currentUser.name) || '', createdAt: new Date().toISOString()
-    });
-    await persist(); window.advCloseForm(); showToast('Advance recorded - it will be recovered from payroll.', 'burst'); redraw();
+    };
+    try{ if(!await postGive(st, adv)) return; }catch(e){ err.textContent = 'Could not record it in Accounting: ' + e.message; return; }
+    (st.advances = st.advances || []).push(adv);
+    await persist(); window.advCloseForm(); showToast('Advance recorded in Accounting (' + adv.jvNo + ') - it will be recovered from payroll.', 'burst'); redraw();
   };
   function lockedOk(a, st, amt){
     const rec = advRecoveredIn(a.id, st.id);
@@ -232,19 +235,100 @@ function advancePayrollPart(staffId, monthStr, manualAmount, cap){
     const rec = advRecoveredIn(a.id, st.id); const bal = advOutstanding(a, st.id);
     if(rec <= 0){
       if(!await showConfirmDialog(`Cancel this ${money(a.amount)} advance for ${st.firstName}? Nothing has been recovered yet, so it will be removed.`)) return;
+      if(a.jvId){ try{ await booksReady(); await voidJv(a.jvId, 'Advance cancelled before any recovery'); }catch(e){} }
       st.advances = st.advances.filter(x => x.id !== a.id);
     }else{
-      if(!await showConfirmDialog(`Close this advance? ${money(rec)} is recovered and ${money(bal)} is still owed. Recovery stops now - use this when the balance is settled in cash or written off.`)) return;
+      if(!await showConfirmDialog(`Close this advance? ${money(rec)} is recovered and ${money(bal)} is still owed. Recovery stops now - use this when the balance is settled in cash or written off. In Accounting, record the cash received (or the write-off) with a Journal Voucher against Staff Advances.`)) return;
       a.status = 'Closed'; a.closedOn = today(); a.closedBalance = bal; a.closedBy = (currentUser && currentUser.name) || '';
     }
     await persist(); showToast('Done.'); redraw();
   };
   async function persist(){ try{ await storageSet(STAFF_KEY, staffList); }catch(e){ showToast('Could not save - try again.'); } }
 
+  /* ---------- Accounting (double entry) ----------
+     Giving an advance is NOT an expense: cash goes out, and the school now has a claim on the staff member.
+        Give     : Dr Staff Advances (asset)   Cr Cash / Bank          (Journal Voucher, posted when the advance is given)
+        Recover  : Dr Salaries (expense)       Cr Staff Advances       (Journal Voucher, posted when that month's payroll is approved)
+     The Salaries payment voucher the school enters on pay day is for the NET amount actually paid, so Salaries ends up at the
+     full gross and Staff Advances falls back to zero as each instalment is recovered. Re-opening a payroll voids its recovery
+     voucher (kept for audit, struck through); re-approving posts a fresh one. */
+  const BOOK_ID = 'ledger_staff_adv', BOOK_KEY = 'ledger:' + BOOK_ID;
+  async function booksReady(){
+    await ensureDataLoaded('acctLedger', loadAccountingLedgerData);
+    if(!acctExpenseCategories.length){ try{ await loadAccounting(); }catch(e){} }
+    if(!acctExpenseCategories.includes('Salaries')){ acctExpenseCategories.push('Salaries'); await storageSet(ACCT_EXPENSE_CATS_KEY, acctExpenseCategories); }
+    if(!acctOtherLedgers.some(l => l.id === BOOK_ID)){
+      acctOtherLedgers.push({ id: BOOK_ID, name: 'Staff Advances (to recover)', type: 'Asset', openingBalance: 0, openingDate: today(), active: true });
+      if(await storageSet(ACCT_OTHER_LEDGERS_KEY, acctOtherLedgers) === false) throw new Error('Could not create the Staff Advances account');
+    }
+  }
+  async function postJv(date, narration, lines){
+    let voucherNo;
+    try{ voucherNo = await issueDocNumber('journal_voucher'); }
+    catch(e){ showToast('Could not get a voucher number from the server (' + e.message + ') - nothing was saved. Try again once you are back online.'); return null; }
+    const isAdmin = currentUser && currentUser.role === 'Admin';
+    const rec = { id: 'jv_' + Date.now() + Math.random().toString(36).slice(2, 5), voucherNo, date: isAdmin ? date : today(), type: 'Journal', narration, lines, createdBy: (currentUser && currentUser.name) || '', voided: false, source: 'staff-advance' };
+    acctJournalVouchers.push(rec);
+    if(!(await acctSaveVoucherSafely(ACCT_JOURNAL_KEY, acctJournalVouchers, rec))) return null;
+    return rec;
+  }
+  async function voidJv(jvId, reason){
+    const j = acctJournalVouchers.find(x => x.id === jvId); if(!j || j.voided) return;
+    j.voided = true; j.voidReason = reason; j.voidedBy = (currentUser && currentUser.name) || ''; j.voidedAt = new Date().toISOString();
+    await storageSet(ACCT_JOURNAL_KEY, acctJournalVouchers);
+  }
+  async function postGive(st, a){
+    await booksReady();
+    const bank = 'bank:' + acctBankAccountIdFor({ mode: a.mode });
+    const jv = await postJv(a.date, 'Salary advance to ' + st.firstName + ' ' + (st.lastName || '') + (a.reason ? ' - ' + a.reason : '') + ' (' + a.mode + ')',
+      [{ accountKey: BOOK_KEY, debit: a.amount, credit: 0 }, { accountKey: bank, debit: 0, credit: a.amount }]);
+    if(!jv) return false;
+    a.jvId = jv.id; a.jvNo = jv.voucherNo; return true;
+  }
+  async function postRecovery(rec){
+    if(!rec || rec.advanceJvId) return;
+    const st = staffList.find(x => x.id === rec.staffId); if(!st) return;
+    const booked = (rec.advanceBreakdown || []).filter(b => (st.advances || []).some(a => a.id === b.id && a.jvId));
+    const amt = Math.round(booked.reduce((n, b) => n + (Number(b.amount) || 0), 0) * 100) / 100;
+    if(!(amt > 0)) return;
+    await booksReady();
+    const jv = await postJv(rec.approvedDate || today(), 'Salary advance recovered from ' + st.firstName + ' ' + (st.lastName || '') + ' - ' + rec.month + ' payroll',
+      [{ accountKey: 'expense:Salaries', debit: amt, credit: 0 }, { accountKey: BOOK_KEY, debit: 0, credit: amt }]);
+    if(jv){ rec.advanceJvId = jv.id; rec.advanceJvNo = jv.voucherNo; await storageSet(STAFF_PAYROLL_KEY, staffPayrollRecords); showToast('Advance recovery booked in Accounting (' + jv.voucherNo + ').'); }
+    else showToast('Payroll is approved, but the accounting entry for the advance recovery was not saved. Re-open and approve again to retry.');
+  }
+  window.advPostGive = async function(staffId, advId){
+    if(!canEdit()){ showToast("You don't have permission to change payroll."); return; }
+    const st = staffList.find(x => x.id === staffId); const a = st && (st.advances || []).find(x => x.id === advId); if(!a || a.jvId) return;
+    if(!await showConfirmDialog(`Record this ${money(a.amount)} advance to ${esc(st.firstName)} in Accounting? It posts a Journal Voucher: Staff Advances (debit), ${esc(a.mode)} (credit). Do this only if the money was really paid out and is not already entered as an expense.`)) return;
+    if(await postGive(st, a)){ await persist(); showToast('Booked as ' + a.jvNo + '.'); redraw(); }
+  };
+
   /* ---------- hooks ---------- */
   const origTab = window.renderStaffPayrollTab;
   if(typeof origTab === 'function'){
     window.renderStaffPayrollTab = function(body){ const r = origTab.apply(this, arguments); try{ inject(body); }catch(e){} return r; };
+  }
+  const origApprove = window.approvePayroll;
+  if(typeof origApprove === 'function'){
+    window.approvePayroll = async function(staffId, monthStr){
+      const b = findPayrollRecord(staffId, monthStr); const was = b && b.status === 'Approved';
+      const r = await origApprove.apply(this, arguments);
+      try{ const rec = findPayrollRecord(staffId, monthStr); if(rec && rec.status === 'Approved' && !was){ await postRecovery(rec); renderStaffBody(); } }catch(e){}
+      return r;
+    };
+  }
+  const origReopen = window.reopenPayroll;
+  if(typeof origReopen === 'function'){
+    window.reopenPayroll = async function(staffId, monthStr){
+      const b = findPayrollRecord(staffId, monthStr); const jvId = b && b.advanceJvId;
+      const r = await origReopen.apply(this, arguments);
+      try{
+        const rec = findPayrollRecord(staffId, monthStr);
+        if(jvId && rec && rec.status === 'Draft'){ await booksReady(); await voidJv(jvId, 'Payroll re-opened for correction'); delete rec.advanceJvId; delete rec.advanceJvNo; await storageSet(STAFF_PAYROLL_KEY, staffPayrollRecords); renderStaffBody(); }
+      }catch(e){}
+      return r;
+    };
   }
   const origRows = window.staffPayrollReportRows;
   if(typeof origRows === 'function'){
