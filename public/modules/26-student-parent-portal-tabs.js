@@ -1079,6 +1079,7 @@ function toggleMoreActions(){
     if(Number(r.epfEmployee)) ded.push('PF ' + apxMoney(r.epfEmployee));
     if(Number(r.esiEmployee)) ded.push('ESI ' + apxMoney(r.esiEmployee));
     if(Number(r.otherDeductions)) ded.push('Other ' + apxMoney(r.otherDeductions));
+    if(Number(r.advanceDeduction)) ded.push('Advance recovery ' + apxMoney(r.advanceDeduction));
     facts.push(['Deductions', ded.length ? ded.join(' · ') + ` = <b>${apxMoney(r.totalDeductions)}</b>` : 'None']);
     facts.push(['Net payable', `<b>${apxMoney(r.netSalary)}</b>`]);
     facts.push(['Leave this month', `${Number(r.leaveDays) || 0} leave day(s) · ${Number(r.lopDays) || 0} loss-of-pay day(s)`]);

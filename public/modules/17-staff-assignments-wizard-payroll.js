@@ -48,11 +48,17 @@ function daysInPayrollMonth(monthStr){
     const otherDeductions = overrides.otherDeductions !== undefined ? (Number(overrides.otherDeductions) || 0) : (Number(st.otherMonthlyDeduction) || 0);
     const bonus = overrides.bonus !== undefined ? (Number(overrides.bonus) || 0) : 0;
     const grossSalary = Math.round((basic + bonus) * 100) / 100;
-    const totalDeductions = Math.round((epfEmployee + esiEmployee + lopDeduction + otherDeductions) * 100) / 100;
+    const preAdvance = Math.round((epfEmployee + esiEmployee + lopDeduction + otherDeductions) * 100) / 100;
+    // Salary advance recovery (see 65-staff-advances.js): never takes net pay below zero; the rest carries to next month.
+    const adv = (typeof advancePayrollPart === 'function')
+      ? advancePayrollPart(staffId, monthStr, overrides.advanceDeduction, Math.max(0, grossSalary - preAdvance))
+      : { amount:0, breakdown:[], manual:false, outstanding:0 };
+    const totalDeductions = Math.round((preAdvance + adv.amount) * 100) / 100;
     const netSalary = Math.round((grossSalary - totalDeductions) * 100) / 100;
     return {
       staffId, month: monthStr, basic, quota, leaveDays, lopDays, lopDeduction,
       epfEmployee, epfEmployer, esiEmployee, esiEmployer, epfManual, esiManual, otherDeductions, bonus,
+      advanceDeduction: adv.amount, advanceBreakdown: adv.breakdown, advanceManual: adv.manual, advanceOutstanding: adv.outstanding,
       grossSalary, totalDeductions, netSalary,
     };
   }
@@ -67,6 +73,7 @@ function daysInPayrollMonth(monthStr){
     if(locked) return { rec, preview: rec, locked };
     const overrides = rec ? {
       bonus: rec.bonus, otherDeductions: rec.otherDeductions,
+      advanceDeduction: rec.advanceManual ? rec.advanceDeduction : undefined,
       epfEmployee: rec.epfManual ? rec.epfEmployee : undefined,
       esiEmployee: rec.esiManual ? rec.esiEmployee : undefined,
     } : {};
@@ -91,6 +98,12 @@ function daysInPayrollMonth(monthStr){
       const autoCalc = computeStaffPayroll(staffId, monthStr, {});
       if(epfInput && epfInput.value !== '' && Number(epfInput.value) !== autoCalc.epfEmployee) overrides.epfEmployee = epfInput.value;
       if(esiInput && esiInput.value !== '' && Number(esiInput.value) !== autoCalc.esiEmployee) overrides.esiEmployee = esiInput.value;
+    }
+    // Advance recovery stays automatic unless the typed amount differs from what the schedule would take.
+    const advInput = document.getElementById('payAdv_'+staffId+'_'+monthStr);
+    if(advInput && advInput.value !== ''){
+      const autoAdv = computeStaffPayroll(staffId, monthStr, Object.assign({}, overrides));
+      if(autoAdv && Number(advInput.value) !== autoAdv.advanceDeduction) overrides.advanceDeduction = advInput.value;
     }
     const calc = computeStaffPayroll(staffId, monthStr, overrides);
     if(!calc) return;
@@ -159,11 +172,12 @@ function daysInPayrollMonth(monthStr){
       epfEmployee: acc.epfEmployee + (Number(c.preview.epfEmployee)||0),
       esiEmployee: acc.esiEmployee + (Number(c.preview.esiEmployee)||0),
       otherDeductions: acc.otherDeductions + (Number(c.preview.otherDeductions)||0),
+      advance: acc.advance + (Number(c.preview.advanceDeduction)||0),
       bonus: acc.bonus + (Number(c.preview.bonus)||0),
       grossSalary: acc.grossSalary + (Number(c.preview.grossSalary)||0),
       netSalary: acc.netSalary + (Number(c.preview.netSalary)||0),
-    }), { basic:0, lopDeduction:0, epfEmployee:0, esiEmployee:0, otherDeductions:0, bonus:0, grossSalary:0, netSalary:0 });
-    const totalDeductions = totals.lopDeduction + totals.epfEmployee + totals.esiEmployee + totals.otherDeductions;
+    }), { basic:0, lopDeduction:0, epfEmployee:0, esiEmployee:0, otherDeductions:0, advance:0, bonus:0, grossSalary:0, netSalary:0 });
+    const totalDeductions = totals.lopDeduction + totals.epfEmployee + totals.esiEmployee + totals.otherDeductions + totals.advance;
     const monthLabel = new Date(staffPayrollMonth+'-01').toLocaleString('en-IN',{month:'long',year:'numeric'});
     body.innerHTML = `
       <div class="profile-card" style="margin-bottom:20px; max-width:520px;">
@@ -184,7 +198,7 @@ function daysInPayrollMonth(monthStr){
       <div class="table-wrap">
         <table><thead><tr>
           <th>Staff</th><th>Department</th><th>Basic</th><th>Leaves (Taken/Quota)</th><th>LOP Deduction</th>
-          <th>EPF (Emp)</th><th>ESI (Emp)</th><th>Other Ded.</th><th>Bonus</th><th>Gross</th><th>Net</th><th>Status</th><th>Actions</th>
+          <th>EPF (Emp)</th><th>ESI (Emp)</th><th>Other Ded.</th><th title="Salary advance taken earlier, recovered this month">Advance Rec.</th><th>Bonus</th><th>Gross</th><th>Net</th><th>Status</th><th>Actions</th>
         </tr></thead>
         <tbody>
         ${computed.map(({ st, rec, preview, locked }) => {
@@ -197,6 +211,7 @@ function daysInPayrollMonth(monthStr){
             <td>${locked ? fmtMoney(preview.epfEmployee) : `<input type="number" min="0" step="0.01" id="payEpf_${st.id}_${staffPayrollMonth}" value="${preview.epfEmployee}" style="width:80px;" onchange="saveDraftPayroll('${st.id}','${staffPayrollMonth}')" title="${st.epfEnabled ? 'Auto: ₹'+(Number(st.epfEmployeeAmount)||0)+'/month set on this staff member — edit to override just this month' : 'Not enrolled in EPF — enter an amount only if one applies this month'}">${preview.epfManual ? ` <a onclick="resetPayrollField('${st.id}','${staffPayrollMonth}','epf')" style="font-size:0.7rem; cursor:pointer;" title="Reset to the standing amount">↺</a>` : ``}`}</td>
             <td>${locked ? fmtMoney(preview.esiEmployee) : `<input type="number" min="0" step="0.01" id="payEsi_${st.id}_${staffPayrollMonth}" value="${preview.esiEmployee}" style="width:80px;" onchange="saveDraftPayroll('${st.id}','${staffPayrollMonth}')" title="${st.esiEnabled ? 'Auto: ₹'+(Number(st.esiEmployeeAmount)||0)+'/month set on this staff member — edit to override just this month' : 'Not enrolled in ESI — enter an amount only if one applies this month'}">${preview.esiManual ? ` <a onclick="resetPayrollField('${st.id}','${staffPayrollMonth}','esi')" style="font-size:0.7rem; cursor:pointer;" title="Reset to the standing amount">↺</a>` : ``}`}</td>
             <td>${locked ? fmtMoney(preview.otherDeductions) : `<input type="number" min="0" id="payOther_${st.id}_${staffPayrollMonth}" value="${preview.otherDeductions}" style="width:80px;" onchange="saveDraftPayroll('${st.id}','${staffPayrollMonth}')">`}</td>
+            <td>${locked ? fmtMoney(preview.advanceDeduction||0) : `<input type="number" min="0" step="0.01" id="payAdv_${st.id}_${staffPayrollMonth}" value="${preview.advanceDeduction||0}" style="width:80px;" onchange="saveDraftPayroll('${st.id}','${staffPayrollMonth}')" title="Recovered from this month's pay. Change it to take less or more this month.">${preview.advanceOutstanding>0 ? `<div style="font-size:0.66rem;color:var(--ink-soft);">Owes ${fmtMoney(preview.advanceOutstanding)}</div>` : ''}`}</td>
             <td>${locked ? fmtMoney(preview.bonus) : `<input type="number" min="0" id="payBonus_${st.id}_${staffPayrollMonth}" value="${preview.bonus||0}" style="width:80px;" onchange="saveDraftPayroll('${st.id}','${staffPayrollMonth}')">`}</td>
             <td><b>${fmtMoney(preview.grossSalary)}</b></td>
             <td><b>${fmtMoney(preview.netSalary)}</b></td>
@@ -221,6 +236,7 @@ function daysInPayrollMonth(monthStr){
           <td>${fmtMoney(totals.epfEmployee)}</td>
           <td>${fmtMoney(totals.esiEmployee)}</td>
           <td>${fmtMoney(totals.otherDeductions)}</td>
+          <td>${fmtMoney(totals.advance)}</td>
           <td>${fmtMoney(totals.bonus)}</td>
           <td>${fmtMoney(totals.grossSalary)}</td>
           <td>${fmtMoney(totals.netSalary)}</td>
@@ -260,6 +276,7 @@ function daysInPayrollMonth(monthStr){
       { label:'EPF (Employee)', amount: preview.epfEmployee },
       { label:'ESI (Employee)', amount: preview.esiEmployee },
       { label:'Other Deductions', amount: preview.otherDeductions },
+      { label:'Salary advance recovery', amount: Number(preview.advanceDeduction)||0 },
     ].filter(r => r.amount > 0);
     const totalEarnings = earnings.reduce((s,r)=>s+r.amount,0);
 
