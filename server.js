@@ -7461,8 +7461,25 @@ app.post('/api/student-logins/link-siblings', async (req, res) => {
     // every login that already covers one of these children (a family login covers all its children)
     const covering = (await sql`SELECT id, username, role, linked_student_id AS sid, sibling_ids FROM users WHERE deleted_at IS NULL AND role = 'Parent' AND sibling_ids IS NOT NULL AND sibling_ids <> ''`).filter(f => parseSibs(f.sibling_ids).some(x => ids.includes(x)));
     const pool = new Map(); logins.concat(covering).forEach(l => pool.set(l.id, l));
-    if (!pool.size) return res.status(400).json({ error: 'None of these children has a login yet. Create a login for one of them first.' });
-    const keepStudent = String(b.keepStudentId || ids[0]);
+    const keepStudent = ids.includes(String(b.keepStudentId || '')) ? String(b.keepStudentId) : ids[0];
+    let createdLogin = null;
+    if (!pool.size) {
+      // None of these children has a login yet: make one family login for the kept child (starting password kept so a slip can be printed).
+      const k = (await sql`SELECT id, first_name, last_name, class_name, section, admission_no FROM students WHERE id = ${keepStudent}`)[0];
+      const full = ((k.first_name || '') + ' ' + (k.last_name || '')).trim();
+      const taken = new Set((await sql`SELECT username FROM users`).map(r => String(r.username || '').toLowerCase()));
+      const base = slugName(full); let cand = base, n = 1;
+      while (taken.has(cand)) { n++; cand = base + n; }
+      const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
+      let pw = ''; for (const byte of crypto.randomBytes(8)) pw += alphabet[byte % alphabet.length];
+      const uid = 'u_' + crypto.randomBytes(8).toString('hex');
+      const hash = await bcrypt.hash(pw, 10);
+      await sql`INSERT INTO users (id, name, username, password, role, linked_student_id, recovery_code, must_change_password, initial_pw)
+        VALUES (${uid}, ${full}, ${cand}, ${hash}, 'Parent', ${keepStudent}, ${crypto.randomBytes(6).toString('hex').toUpperCase()}, 1, ${pw})`;
+      const row = { id: uid, username: cand, role: 'Parent', sid: keepStudent, sibling_ids: '' };
+      pool.set(uid, row);
+      createdLogin = { username: cand, password: pw, studentName: full, className: k.class_name, section: k.section };
+    }
     let keep = Array.from(pool.values()).find(l => l.sid === keepStudent) || Array.from(pool.values())[0];
     const all = new Set(ids); pool.forEach(l => { parseSibs(l.sibling_ids).forEach(x => all.add(x)); if (l.sid) all.add(l.sid); });
     const list = Array.from(all);
@@ -7475,7 +7492,7 @@ app.post('/api/student-logins/link-siblings', async (req, res) => {
     await sql`UPDATE users SET sibling_ids = ${JSON.stringify(list)} WHERE id = ${keep.id}`;
     if (disable) for (const l of pool.values()) { if (l.id !== keep.id) await sql`DELETE FROM sessions WHERE user_id = ${l.id}`.catch(() => {}); }
     auditNote(req.authUser.name, req.authUser.role, 'LINK_SIBLINGS', 'users', keep.id, `linked ${list.length} children to login ${keep.username}` + (disabled ? `; switched off ${disabled} extra login(s)` : ''), clientIp(req));
-    return res.status(200).json({ ok: true, keepUsername: keep.username, children: list.length, disabled });
+    return res.status(200).json({ ok: true, keepUsername: keep.username, children: list.length, disabled, createdLogin });
   } catch (err) { console.error('link siblings error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 // GET /api/student-logins/family-check?userId=  (Admin) -> a plain checklist of everything a family login needs, so a

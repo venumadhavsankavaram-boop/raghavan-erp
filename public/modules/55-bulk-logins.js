@@ -195,7 +195,11 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
           const j = await api('POST', '/api/student-logins/link-siblings', { studentIds: ids, keepStudentId: keep, disableExtraLogins: off() });
           toast('Linked ' + j.children + ' children to login “' + j.keepUsername + '”' + (j.disabled ? ' (' + j.disabled + ' extra login switched off).' : '.'));
           try{ users = await (await fetch('/api/users')).json(); }catch(e){}   // do NOT redraw the whole page here: it wiped the Siblings tab
-          siblings(card);
+          await siblings(card);
+          if(j.createdLogin){
+            const box = card.querySelector('#blkOut') || document.querySelector('#blkCard #blkOut');
+            if(box) box.insertAdjacentHTML('afterbegin', '<div style="border:2px solid #0b7a5a;background:#eafaf3;border-radius:12px;padding:10px 14px;margin-bottom:10px;"><b>New family login created</b> (none of these children had one).<br>Username: <b>' + esc(j.createdLogin.username) + '</b> &nbsp; Starting password: <b>' + esc(j.createdLogin.password) + '</b><div class="blk-hint">Give these to the parent; they will be asked to choose their own password at first sign-in. The slip can also be printed again under Print login slips.</div></div>');
+          }
           try{ if(typeof window.lcRefreshStats === 'function') window.lcRefreshStats(); }catch(e){}
         }catch(e){ toast(e.message); }
       };
