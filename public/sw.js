@@ -8,7 +8,7 @@
      - The page itself ('/') is always asked for fresh, but if the network is slow (4 s) or down, the last saved
        copy is shown instead of a blank screen.
    Bump CACHE_NAME whenever this file's behaviour changes so old caches get cleared. */
-const CACHE_NAME = 'school-erp-shell-v20';
+const CACHE_NAME = 'school-erp-shell-v21';
 const SHELL_URLS = ['/', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (event) => {
