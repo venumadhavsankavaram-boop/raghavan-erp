@@ -31,7 +31,7 @@
       #lc .lc-stat{background:#fff;border:1px solid #e3e8f3;border-radius:16px;padding:14px 16px;box-shadow:0 2px 10px rgba(30,40,80,.05);}
       #lc .lc-stat b{display:block;font-size:1.7rem;color:#14325c;line-height:1.1;} #lc .lc-stat span{font-size:.78rem;color:#667;font-weight:600;}
       #lc .lc-stat.ok b{color:#1d9b4d;} #lc .lc-stat.warn b{color:#c47a00;}
-      #lc .lc-tabs{display:flex;gap:6px;overflow-x:auto;padding:4px;background:#eef1f8;border-radius:16px;margin-bottom:16px;-webkit-overflow-scrolling:touch;}
+      #lc .lc-tabs{display:flex;flex-wrap:wrap;gap:6px;padding:4px;background:#eef1f8;border-radius:16px;margin-bottom:16px;-webkit-overflow-scrolling:touch;}
       #lc .lc-tab{flex:1 0 auto;border:0;background:transparent;border-radius:12px;padding:11px 16px;font:inherit;font-weight:700;font-size:.9rem;color:#52607a;cursor:pointer;white-space:nowrap;}
       #lc .lc-tab.on{background:#fff;color:#2f3cc6;box-shadow:0 2px 8px rgba(30,40,80,.12);}
       #lc .lc-bar{background:#fff;border:1px solid #dde3ee;border-radius:16px;padding:14px;margin-bottom:14px;box-shadow:0 2px 10px rgba(30,40,80,.05);}
@@ -141,6 +141,7 @@
   function statsHtml(){
     const a = active(); const has = a.filter(s => { const i = info && info.get(s.id); return i ? i.hasLogin : logins().some(u => u.linkedStudentId === s.id); }).length;
     const signed = info ? a.filter(s => { const i = info.get(s.id); return i && i.signedIn; }).length : null;
+    if(!info) return `<div class="lc-stat"><b>${a.length}</b><span>Active students</span></div><div class="lc-stat ok"><b>…</b><span>With a login</span></div><div class="lc-stat warn"><b>…</b><span>Without a login</span></div>`;
     return `<div class="lc-stat"><b>${a.length}</b><span>Active students</span></div><div class="lc-stat ok"><b>${has}</b><span>With a login</span></div>
       <div class="lc-stat warn"><b>${a.length - has}</b><span>Without a login</span></div>${signed == null ? '' : `<div class="lc-stat ok"><b>${signed}</b><span>Have signed in</span></div>`}`;
   }
