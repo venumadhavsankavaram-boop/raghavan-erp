@@ -8,9 +8,9 @@
   const VIEWS = ['academicyear', 'feestructuresetup', 'promotions'];
   const STEPS = [
     { n:1, view:'academicyear',      t:'Add new year',  hint:'Type next year (for example 2027-28) and press "Add year". Do not make it current yet.' },
-    { n:2, view:'feestructuresetup', t:'Check fees',    hint:'Check every class has its fees for the new year. Promoted students follow the next class\'s fee structure.' },
-    { n:3, view:'promotions',        t:'Promote',       hint:'Start with the highest class (10th) and work down to Baby Class, so classes never get mixed. Review each list, then promote.' },
-    { n:4, view:'academicyear',      t:'Make current',  hint:'When promotion is done, choose the new year and press "Set as current". Everything then follows the new year.' }
+    { n:2, view:'feestructuresetup', t:'Next year\'s fees', hint:'Press "Next year\'s fees", set every class\'s new fees and Save. Current students are not affected; the new fees start when you make the year current (step 4).' },
+    { n:3, view:'promotions',        t:'Promote',       hint:'Start with the highest class (10th) and work down to Baby Class, so classes never get mixed. Each student\'s unpaid fees are carried forward automatically as "Previous Year Dues".' },
+    { n:4, view:'academicyear',      t:'Make current',  hint:'When promotion is done, choose the new year and press "Set as current". The fees you prepared start now, and the system warns you if promotion was not done.' }
   ];
   const get = k => { try{ return sessionStorage.getItem(k); }catch(e){ return null; } };
   const set = (k, v) => { try{ sessionStorage.setItem(k, v); }catch(e){} };

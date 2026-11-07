@@ -123,13 +123,13 @@ function fyhCardHTML(g, mode){
     const h = g.snap;
     badge = h.outcome === 'Graduated'
       ? '<span class="fyh-badge fyh-done">Graduated</span>'
-      : `<span class="fyh-badge fyh-done">Promoted to ${escapeHtml(h.movedTo || 'next class')}</span>`;
+      : (h.outcome === 'Transferred' ? '<span class="fyh-badge fyh-done">Left school</span>' : `<span class="fyh-badge fyh-done">Promoted to ${escapeHtml(h.movedTo || 'next class')}</span>`);
     const carried = fyhNum(h.carried), bal = fyhNum(h.balance);
     if(carried > 0){
       note += `<div class="fyh-note fyh-carry"><b>${fmtMoney(carried)}</b> carried forward${h.carriedAs ? ' as “' + escapeHtml(h.carriedAs) + '”' : ''} into the next class.</div>`;
     }
     if(bal - carried > 0){
-      note += `<div class="fyh-note fyh-warn"><b>${fmtMoney(bal - carried)}</b> was left unpaid and <b>not</b> carried forward.</div>`;
+      note += `<div class="fyh-note fyh-warn"><b>${fmtMoney(bal - carried)}</b> was left unpaid and <b>not</b> carried forward.${/^Written off/.test(h.carriedAs || '') ? ' ' + escapeHtml(h.carriedAs) : ''}</div>`;
     }
     if(bal === 0){
       note += '<div class="fyh-note fyh-ok">Fully settled at year end.</div>';
@@ -251,7 +251,7 @@ executePromotions = async function(payloadStudents){
       if(!s) return;
       let t; try{ t = fyhClassTotals(s); }catch(e){ return; }
       // Carry only the class-fee balance; extra fees / earlier carried dues already stay on the student.
-      p.carryForwardDue = Math.round(t.receivable);
+      p.carryForwardDue = Math.round(t.receivable * 100) / 100;
       const carried = (p.carryForwardType && p.carryForwardDue > 0) ? p.carryForwardDue : 0;
       if(!carried) p.carryForwardType = '';
       recs.push({
@@ -277,7 +277,7 @@ executePromotions = async function(payloadStudents){
         const label = CARRYFORWARD_LABELS[r._type];
         for(let i = studentExtraFees.length - 1; i >= 0; i--){
           const e = studentExtraFees[i];
-          if(e.studentId === r.studentId && e.name === label && Math.round(Number(e.amount)) === r.carried && !e.kind){
+          if(e.studentId === r.studentId && e.name === label && Math.abs(Number(e.amount) - r.carried) < 0.005 && !e.kind){
             e.name = label + ' — ' + r.className + ' (' + r.academicYear + ')';
             e.kind = 'carry';
             renamed = true;
@@ -305,7 +305,7 @@ async function fyhPrintStatement(studentId){
   const block = g => {
     const f = fyhGroupFigures(g);
     const label = g.kind === 'legacy' ? (g.yearsLabel || 'Earlier year') : (g.year || 'Current year');
-    const status = g.kind === 'current' ? 'Current year' : g.kind === 'closed' ? (g.snap.outcome === 'Graduated' ? 'Graduated' : 'Promoted to ' + (g.snap.movedTo || '')) : 'Earlier record';
+    const status = g.kind === 'current' ? 'Current year' : g.kind === 'closed' ? (g.snap.outcome === 'Graduated' ? 'Graduated' : g.snap.outcome === 'Transferred' ? 'Left school' : 'Promoted to ' + (g.snap.movedTo || '')) : 'Earlier record';
     const recs = g.payments.slice().sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
     return `<h3>${escapeHtml(label)} — ${escapeHtml(g.className || '')} <small>(${escapeHtml(status)})</small></h3>
       <table><tr><th>Fee billed</th><th>Discount</th><th>Paid</th><th>Balance</th></tr><tr><td>${m(f.billed)}</td><td>${m(f.discount)}</td><td>${m(f.paid)}</td><td>${m(f.balance)}</td></tr></table>
