@@ -99,7 +99,8 @@
       const tabs = Array.from(row.children).filter(b => b.tagName === 'BUTTON' && !b.classList.contains('px-more-btn'));
       if(tabs.length < 9) return;
       const act = tabs.findIndex(b => b.classList.contains('active') || b.classList.contains('on') || b.getAttribute('aria-selected') === 'true');
-      const KEEP = 6; const keep = new Set(tabs.slice(0, KEEP)); if(act >= 0) keep.add(tabs[act]);
+      const KEEP = 5; const keep = new Set(tabs.slice(0, KEEP)); if(act >= 0) keep.add(tabs[act]);
+      tabs.forEach(b => { if(/Receipt|Defaulter|Reports/i.test(b.textContent)) keep.add(b); });
       const rest = tabs.filter(b => !keep.has(b));
       tabs.forEach(b => { b.style.display = keep.has(b) ? '' : 'none'; });
       let wrap = row.querySelector('.px-more-wrap');
