@@ -7559,6 +7559,192 @@ app.post('/api/student-logins/unlink-sibling', async (req, res) => {
   } catch (err) { console.error('unlink sibling error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 
+// ---------- Login Health: find and repair login problems in one place (Admin) ----------
+// GET  /api/student-logins/health  -> every problem found, grouped, each with the exact fix it offers. Read-only.
+// POST /api/student-logins/repair  {action, ...}  -> one safe, audited repair at a time.
+const HEALTH_CAP = 200;
+async function healthScan() {
+  const kids = await sql`SELECT id, first_name, last_name, class_name, section, admission_no, status, deleted_at FROM students`;
+  const kById = new Map(kids.map(k => [k.id, k]));
+  const isActive = k => k && !k.deleted_at && (!k.status || String(k.status).toLowerCase() === 'active');
+  const kName = k => k ? ((k.last_name || '') + ' ' + (k.first_name || '')).trim() : '(missing student)';
+  const kCls = k => k ? ((k.class_name || '') + (k.section ? ' ' + k.section : '')) : '';
+  const users = await sql`SELECT id, name, username, role, linked_student_id AS sid, sibling_ids, deleted_at, deleted_by, must_change_password AS mcp, initial_pw, first_login_at, last_login_at, created_at FROM users WHERE role IN ('Parent', 'Student')`;
+  const live = users.filter(u => !u.deleted_at);
+  const cover = new Map(); // studentId -> [active logins covering it]
+  const addCover = (sid, u) => { if (!sid) return; if (!cover.has(sid)) cover.set(sid, []); if (!cover.get(sid).some(x => x.id === u.id)) cover.get(sid).push(u); };
+  live.forEach(u => { addCover(u.sid, u); if (u.role === 'Parent') parseSibs(u.sibling_ids).forEach(x => addCover(x, u)); });
+  const P = {};
+  const push = (k, o) => { (P[k] = P[k] || []).push(o); };
+  // 1. active students with no working login
+  for (const k of kids) {
+    if (!isActive(k)) continue;
+    if (cover.has(k.id)) continue;
+    const old = users.filter(u => u.deleted_at && (u.sid === k.id || parseSibs(u.sibling_ids).includes(k.id)));
+    const restorable = old.find(u => !live.some(l => String(l.username || '').toLowerCase() === String(u.username || '').toLowerCase()));
+    push('no_login', { studentId: k.id, name: kName(k), cls: kCls(k), adm: k.admission_no || '', restoreUserId: restorable ? restorable.id : '', restoreUsername: restorable ? restorable.username : '', restoreWhy: restorable ? (String(restorable.deleted_by || '').startsWith('sibling-link:') ? 'switched off when linked as a sibling' : 'was deleted') : '' });
+  }
+  // 2. logins pointing at a student who is gone / inactive
+  for (const u of live) {
+    const k = kById.get(u.sid);
+    const ids = u.role === 'Parent' ? parseSibs(u.sibling_ids) : [];
+    if (!u.sid) { push('orphan', { userId: u.id, username: u.username, role: u.role, why: 'Not linked to any student', studentName: '' }); continue; }
+    if (!k || k.deleted_at) { push('orphan', { userId: u.id, username: u.username, role: u.role, why: 'Its student record was deleted', studentName: '', canRelink: ids.length > 0 }); continue; }
+    if (!isActive(k) && !ids.some(x => isActive(kById.get(x)))) push('orphan', { userId: u.id, username: u.username, role: u.role, why: 'Student is no longer Active (' + (k.status || '?') + ')', studentName: kName(k) });
+  }
+  // 3. broken family logins
+  for (const u of live) {
+    if (u.role !== 'Parent' || !u.sibling_ids) continue;
+    const ids = parseSibs(u.sibling_ids); if (!ids.length) continue;
+    const problems = [];
+    const missing = ids.filter(x => !kById.get(x) || kById.get(x).deleted_at);
+    if (missing.length) problems.push(missing.length + ' linked child(ren) no longer exist');
+    const good = ids.filter(x => !missing.includes(x));
+    if (good.length < 2) problems.push('Only ' + good.length + ' child left in the family');
+    if (u.sid && !ids.includes(u.sid)) problems.push('The child currently open is not in the family');
+    if (!u.sid) problems.push('No child is open');
+    if (problems.length) push('family', { userId: u.id, username: u.username, problems, kids: ids.map(x => kName(kById.get(x))).join(', ') });
+  }
+  // 4. more than one active login for the same child (not counting a family covering a child it owns)
+  const seen = new Set();
+  for (const [sid, list] of cover) {
+    if (list.length < 2) continue;
+    const key = list.map(x => x.id).sort().join('|'); if (seen.has(key)) continue; seen.add(key);
+    push('duplicate', { studentId: sid, name: kName(kById.get(sid)), cls: kCls(kById.get(sid)), logins: list.map(x => ({ userId: x.id, username: x.username, role: x.role, family: parseSibs(x.sibling_ids).length > 1, signedIn: !!(x.first_login_at || x.last_login_at) })) });
+  }
+  // 5. same username used twice
+  const byName = new Map();
+  live.forEach(u => { const k = String(u.username || '').toLowerCase(); if (!k) return; if (!byName.has(k)) byName.set(k, []); byName.get(k).push(u); });
+  for (const [name, list] of byName) if (list.length > 1) push('dupname', { username: name, logins: list.map(x => ({ userId: x.id, studentName: kName(kById.get(x.sid)), role: x.role })) });
+  // 6. locked out right now
+  const lockedSeen = new Set();
+  for (const [k, r] of userFailures) { const s = userBlockSeconds(k); if (s) { lockedSeen.add(k); push('locked', { username: k, seconds: s, kind: 'too many wrong passwords' }); } }
+  for (const [k, r] of loginAttempts) { const s = checkLoginRateLimit(k); if (s) { const uname = k.split('|').slice(1).join('|'); if (!lockedSeen.has(uname)) { lockedSeen.add(uname); push('locked', { username: uname, seconds: s, kind: 'too many tries from one phone' }); } } }
+  // 7. starting password never changed and never signed in for 14+ days (the parent probably lost the slip)
+  const cutoff = Date.now() - 14 * 86400000;
+  for (const u of live) {
+    if (!u.initial_pw || u.first_login_at || u.last_login_at) continue;
+    if (!u.created_at || new Date(u.created_at).getTime() > cutoff) continue;
+    const k = kById.get(u.sid); if (!isActive(k)) continue;
+    push('unused', { userId: u.id, username: u.username, studentName: kName(k), cls: kCls(k), days: Math.floor((Date.now() - new Date(u.created_at).getTime()) / 86400000) });
+  }
+  const summary = {};
+  for (const k of Object.keys(P)) summary[k] = P[k].length;
+  const out = {};
+  for (const k of Object.keys(P)) out[k] = P[k].slice(0, HEALTH_CAP);
+  return { at: new Date().toISOString(), summary, problems: out, total: Object.values(summary).reduce((a, b) => a + b, 0), activeStudents: kids.filter(isActive).length };
+}
+app.get('/api/student-logins/health', async (req, res) => {
+  try {
+    if (!sibAdminOnly(req, res)) return;
+    res.set('Cache-Control', 'no-store');
+    return res.status(200).json(await healthScan());
+  } catch (err) { console.error('login health error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+async function createLoginForStudent(studentId) {
+  const k = (await sql`SELECT id, first_name, last_name, class_name, section FROM students WHERE id = ${studentId} AND deleted_at IS NULL`)[0];
+  if (!k) return null;
+  const full = ((k.first_name || '') + ' ' + (k.last_name || '')).trim();
+  const taken = new Set((await sql`SELECT username FROM users`).map(r => String(r.username || '').toLowerCase()));
+  const base = slugName(full); let cand = base, n = 1;
+  while (taken.has(cand)) { n++; cand = base + n; }
+  const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
+  let pw = ''; for (const byte of crypto.randomBytes(8)) pw += alphabet[byte % alphabet.length];
+  const uid = 'u_' + crypto.randomBytes(8).toString('hex');
+  const hash = await bcrypt.hash(pw, 10);
+  await sql`INSERT INTO users (id, name, username, password, role, linked_student_id, recovery_code, must_change_password, initial_pw)
+    VALUES (${uid}, ${full}, ${cand}, ${hash}, 'Parent', ${studentId}, ${crypto.randomBytes(6).toString('hex').toUpperCase()}, 1, ${pw})`;
+  return { userId: uid, username: cand, password: pw, studentName: full, className: k.class_name, section: k.section };
+}
+app.post('/api/student-logins/repair', async (req, res) => {
+  try {
+    if (!sibAdminOnly(req, res)) return;
+    const b = req.body || {}; const action = String(b.action || '');
+    const note = d => auditNote(req.authUser.name, req.authUser.role, 'LOGIN_REPAIR', 'users', String(b.userId || b.studentId || b.username || ''), action + ': ' + d, clientIp(req));
+    const getUser = async () => (await sql`SELECT * FROM users WHERE id = ${String(b.userId || '')} AND role IN ('Parent','Student')`)[0];
+    if (action === 'create') {
+      const sid = String(b.studentId || '');
+      const exists = await sql`SELECT id FROM users WHERE deleted_at IS NULL AND role IN ('Parent','Student') AND linked_student_id = ${sid}`;
+      if (exists.length) return res.status(409).json({ error: 'This child already has a login. Refresh the list.' });
+      const c = await createLoginForStudent(sid);
+      if (!c) return res.status(404).json({ error: 'Student not found.' });
+      note('created ' + c.username); return res.status(200).json({ ok: true, created: c, message: 'Login created.' });
+    }
+    if (action === 'unlock') {
+      const name = String(b.username || '').toLowerCase(); if (!name) return res.status(400).json({ error: 'Which login?' });
+      userFailures.delete(name);
+      for (const k of Array.from(loginAttempts.keys())) if (k.split('|').slice(1).join('|') === name) loginAttempts.delete(k);
+      note('unlocked ' + name); return res.status(200).json({ ok: true, message: 'Unlocked. They can try again now.' });
+    }
+    if (action === 'recreate') {
+      // Start fresh for one child: every login that covers them is switched off (restorable from Recently Deleted), then a clean one is made.
+      const sid = String(b.studentId || '');
+      const st = (await sql`SELECT id FROM students WHERE id = ${sid} AND deleted_at IS NULL`)[0];
+      if (!st) return res.status(404).json({ error: 'Student not found.' });
+      const cov = await sql`SELECT id, username, linked_student_id AS sid, sibling_ids FROM users WHERE deleted_at IS NULL AND role IN ('Parent','Student') AND (linked_student_id = ${sid} OR sibling_ids LIKE ${'%' + sid + '%'})`;
+      let off = 0, trimmed = 0;
+      for (const l of cov) {
+        const ids = parseSibs(l.sibling_ids);
+        if (ids.length >= 2 && ids.includes(sid)) {
+          const rest = ids.filter(x => x !== sid);
+          await sql`UPDATE users SET sibling_ids = ${rest.length >= 2 ? JSON.stringify(rest) : null}, linked_student_id = ${l.sid === sid ? rest[0] : l.sid} WHERE id = ${l.id}`; trimmed++;
+        } else if (l.id !== req.authUser.id) {
+          await sql`UPDATE users SET deleted_at = now(), deleted_by = ${req.authUser.id}, deleted_by_name = ${req.authUser.name} WHERE id = ${l.id}`;
+          await sql`DELETE FROM sessions WHERE user_id = ${l.id}`.catch(() => {}); off++;
+        }
+      }
+      const c = await createLoginForStudent(sid);
+      note('start fresh for ' + sid + ': ' + off + ' switched off, ' + trimmed + ' family trimmed, created ' + c.username);
+      return res.status(200).json({ ok: true, created: c, message: 'Fresh login created (' + off + ' old login(s) switched off).' });
+    }
+    const u = await getUser();
+    if (!u) return res.status(404).json({ error: 'Login not found.' });
+    if (action === 'restore') {
+      if (!u.deleted_at) return res.status(200).json({ ok: true, message: 'Already active.' });
+      const clash = await sql`SELECT id FROM users WHERE deleted_at IS NULL AND LOWER(username) = LOWER(${u.username})`;
+      if (clash.length) return res.status(409).json({ error: 'That username is now used by another login.' });
+      await sql`UPDATE users SET deleted_at = NULL, deleted_by = NULL, deleted_by_name = NULL WHERE id = ${u.id}`;
+      note('restored ' + u.username); return res.status(200).json({ ok: true, message: 'Login ' + u.username + ' is back.' });
+    }
+    if (u.deleted_at) return res.status(400).json({ error: 'That login is switched off. Restore it first.' });
+    if (action === 'fix_family') {
+      const ids = parseSibs(u.sibling_ids);
+      const rows = ids.length ? await sql.query(`SELECT id FROM students WHERE deleted_at IS NULL AND id IN (${ids.map((_, i) => `$${i + 1}`).join(', ')})`, ids) : [];
+      const good = ids.filter(x => rows.some(r => r.id === x));
+      const sid = good.includes(u.linked_student_id) ? u.linked_student_id : (good[0] || null);
+      await sql`UPDATE users SET sibling_ids = ${good.length >= 2 ? JSON.stringify(good) : null}, linked_student_id = ${sid} WHERE id = ${u.id}`;
+      note('family of ' + u.username + ' cleaned: ' + ids.length + ' -> ' + good.length);
+      return res.status(200).json({ ok: true, message: good.length >= 2 ? 'Family tidied: ' + good.length + ' children kept.' : 'Only one child left, so it is now a normal single login.' });
+    }
+    if (action === 'switch_off') {
+      if (u.id === req.authUser.id) return res.status(400).json({ error: 'You cannot switch off your own login.' });
+      await sql`UPDATE users SET deleted_at = now(), deleted_by = ${req.authUser.id}, deleted_by_name = ${req.authUser.name} WHERE id = ${u.id}`;
+      await sql`DELETE FROM sessions WHERE user_id = ${u.id}`.catch(() => {});
+      note('switched off ' + u.username + ' (restorable)'); return res.status(200).json({ ok: true, message: 'Login ' + u.username + ' switched off. You can restore it any time.' });
+    }
+    if (action === 'sign_out') {
+      await sql`DELETE FROM sessions WHERE user_id = ${u.id}`.catch(() => {});
+      note('signed out ' + u.username + ' everywhere'); return res.status(200).json({ ok: true, message: 'Signed out on every phone.' });
+    }
+    if (action === 'rename') {
+      const taken = new Set((await sql`SELECT username FROM users WHERE id <> ${u.id}`).map(r => String(r.username || '').toLowerCase()));
+      let want = String(b.newUsername || '').toLowerCase().replace(/[^a-z0-9._-]/g, '').slice(0, 30);
+      if (!want) { const base = slugName(u.name || u.username); want = base; let n = 1; while (taken.has(want)) { n++; want = base + n; } }
+      if (taken.has(want)) return res.status(409).json({ error: 'That username is already used.' });
+      await sql`UPDATE users SET username = ${want} WHERE id = ${u.id}`;
+      await sql`DELETE FROM sessions WHERE user_id = ${u.id}`.catch(() => {});
+      note(u.username + ' -> ' + want); return res.status(200).json({ ok: true, username: want, message: 'Username changed to ' + want + '. Tell the parent.' });
+    }
+    if (action === 'relink') {
+      const k = (await sql`SELECT id FROM students WHERE id = ${String(b.studentId || '')} AND deleted_at IS NULL`)[0];
+      if (!k) return res.status(404).json({ error: 'Student not found.' });
+      await sql`UPDATE users SET linked_student_id = ${k.id}, sibling_ids = NULL WHERE id = ${u.id}`;
+      note(u.username + ' now linked to ' + k.id); return res.status(200).json({ ok: true, message: 'Login re-linked.' });
+    }
+    return res.status(400).json({ error: 'Unknown repair.' });
+  } catch (err) { console.error('login repair error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+
 // ---------- Site health: a public "is it alive" address for an outside monitor + an Admin health card ----------
 // GET /api/health  (no sign-in; reveals nothing private): 200 {ok:true} when the server and database answer, 503 otherwise.
 // Point a free uptime monitor (e.g. UptimeRobot) at it and it phones the Admin when the site goes down.

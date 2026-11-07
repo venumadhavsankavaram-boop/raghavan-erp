@@ -156,7 +156,9 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
   }
 
   /* ---------- Link siblings: one parent login for all of a family's children ---------- */
+  let sibSeq = 0;
   async function siblings(card){
+    card = liveCard(card); const seq = ++sibSeq;
     out(card, 'Loading…');
     try{
       const setting = await api('GET', '/api/student-logins/sibling-setting');
@@ -170,6 +172,8 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         bindToggle(); return;
       }
       const [sg, fm] = await Promise.all([api('GET', '/api/student-logins/sibling-suggestions'), api('GET', '/api/student-logins/families')]);
+      if(seq !== sibSeq) return;   // a newer refresh is already running: let it draw
+      card = liveCard(card);
       const groups = sg.groups || [], fams = fm.families || [];
       const kidLine = k => esc(k.name) + ' <span style="color:#5b6784;">· ' + esc(k.className) + ' ' + esc(k.section || '') + '</span> ' +
         (k.hasLogin ? (k.linked ? '<span style="color:#0b7a5a;">(in a family login)</span>' : '<span style="color:#5b6784;">(has own login)</span>') : '<span style="color:#b7791f;">(no login yet)</span>');
@@ -189,8 +193,11 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
           f.children.map(c => esc(c.name) + ' <span style="color:#5b6784;">' + esc(c.className) + ' ' + esc(c.section || '') + '</span> <button class="btn" style="padding:2px 8px;font-size:.72rem;" data-sbu="' + esc(f.userId) + '|' + esc(c.id) + '">Unlink</button>').join('<br>') + '</div>').join('') + '</div>'
         : '<div class="blk-hint">None yet.</div>';
       out(card, h); bindToggle();
-      const off = () => card.querySelector('#sbOff').checked;
+      const off = () => { const e = (liveCard(card)).querySelector('#sbOff'); return e ? e.checked : true; };
+      let linking = false;
       const doLink = async (ids, keep) => {
+        if(linking) return; linking = true;
+        liveCard(card).querySelectorAll('[data-sbl],#sbManual').forEach(x => x.disabled = true);
         try{
           const j = await api('POST', '/api/student-logins/link-siblings', { studentIds: ids, keepStudentId: keep, disableExtraLogins: off() });
           toast('Linked ' + j.children + ' children to login “' + j.keepUsername + '”' + (j.disabled ? ' (' + j.disabled + ' extra login switched off).' : '.'));
@@ -201,7 +208,13 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
             if(box) box.insertAdjacentHTML('afterbegin', '<div style="border:2px solid #0b7a5a;background:#eafaf3;border-radius:12px;padding:10px 14px;margin-bottom:10px;"><b>New family login created</b> (none of these children had one).<br>Username: <b>' + esc(j.createdLogin.username) + '</b> &nbsp; Starting password: <b>' + esc(j.createdLogin.password) + '</b><div class="blk-hint">Give these to the parent; they will be asked to choose their own password at first sign-in. The slip can also be printed again under Print login slips.</div></div>');
           }
           try{ if(typeof window.lcRefreshStats === 'function') window.lcRefreshStats(); }catch(e){}
-        }catch(e){ toast(e.message); }
+        }catch(e){
+          toast(e.message);
+          linking = false;
+          liveCard(card).querySelectorAll('[data-sbl],#sbManual').forEach(x => { x.disabled = false; });
+          try{ await siblings(card); const bx = liveCard(card).querySelector('#blkOut'); if(bx) bx.insertAdjacentHTML('afterbegin', '<div style="border:2px solid #b3261e;background:#fdecea;border-radius:12px;padding:8px 12px;margin-bottom:8px;color:#b3261e;"><b>Could not link:</b> ' + esc(e.message) + '</div>'); }catch(_){}
+        }
+        linking = false;
       };
       card.querySelectorAll('[data-sbl]').forEach(b => b.onclick = () => { const g = groups[+b.dataset.sbl]; doLink(g.students.map(k => k.studentId), (g.students.find(k => k.hasLogin) || g.students[0]).studentId); });
       card.querySelectorAll('[data-sbu]').forEach(b => b.onclick = async () => {
@@ -225,7 +238,11 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         if(!a || !b || a.id === b.id){ toast('Pick two different children from the list that appears as you type.'); return; }
         doLink([a.id, b.id], a.id);
       };
-    }catch(e){ out(card, '<span style="color:#b3261e;">' + esc(e.message) + '</span>'); }
+    }catch(e){
+      if(seq !== sibSeq) return;
+      out(card, '<div style="border:2px solid #b3261e;background:#fdecea;border-radius:12px;padding:10px 14px;color:#b3261e;"><b>Could not load this screen:</b> ' + esc(e.message) + '<div style="margin-top:8px;"><button class="btn btn-primary" id="sbRetry">Try again</button></div></div>');
+      const rb = liveCard(card).querySelector('#sbRetry'); if(rb) rb.onclick = () => siblings(card);
+    }
   }
   async function pushLine(card){
     const el = card.querySelector('#blkPush'); if(!el) return;
@@ -235,12 +252,41 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         : '🔔 Phone notifications are <b style="color:#b3261e;">not set up yet</b> for this school, so parents will not be asked to turn them on. (They still see every alert inside the app.)';
     }catch(e){ el.textContent = ''; }
   }
-  async function api(method, path, body){
-    const r = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
-    let j = null; try{ j = await r.json(); }catch(e){}
-    if(!r.ok) throw new Error((j && j.error) || ('HTTP ' + r.status));
-    return j;
+  // The page can redraw itself while a request is running; always talk to the card that is on screen NOW.
+  const liveCard = c => { const d = document.getElementById('blkCard'); return d && d.isConnected ? d : c; };
+  // One door for every call: time-out, friendly errors, and a clear "sign in again" box if the session ended
+  // (before this, an expired session made the buttons look dead until you logged out and in).
+  function sessionEnded(){
+    if(document.getElementById('lgSessionBar')) return;
+    const d = document.createElement('div'); d.id = 'lgSessionBar';
+    d.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99999;background:#b3261e;color:#fff;padding:12px 16px;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;font-weight:600;';
+    d.innerHTML = 'Your session has ended, so nothing will save. <button style="background:#fff;color:#b3261e;border:0;border-radius:8px;padding:6px 14px;font-weight:700;cursor:pointer;" onclick="location.reload()">Sign in again</button>';
+    document.body.appendChild(d);
   }
+  window.lgSessionEnded = sessionEnded;
+  async function api(method, path, body, opt){
+    const tries = (method === 'GET' ? 2 : 1); let lastErr;
+    for(let t = 0; t < tries; t++){
+      const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), (opt && opt.timeout) || 25000);
+      try{
+        const r = await fetch(path, { method, credentials: 'same-origin', signal: ctl.signal, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+        let j = null; try{ j = await r.json(); }catch(e){}
+        if(r.status === 401){ sessionEnded(); throw new Error('Your session has ended. Please sign in again.'); }
+        if(r.status === 403 && !(j && j.error)) throw new Error('You do not have permission for this.');
+        if(r.status >= 500 && t + 1 < tries){ lastErr = new Error('The server is busy. Retrying…'); await new Promise(z => setTimeout(z, 700)); continue; }
+        if(!r.ok) throw new Error((j && j.error) || (r.status >= 500 ? 'The server had a problem. Please try again in a moment.' : 'Something went wrong (' + r.status + ').'));
+        return j;
+      }catch(e){
+        if(e && e.name === 'AbortError') lastErr = new Error('This is taking too long. Check the internet and try again.');
+        else if(e instanceof TypeError) lastErr = new Error('Cannot reach the server. Check the internet and try again.');
+        else throw e;
+        if(t + 1 >= tries) throw lastErr;
+        await new Promise(z => setTimeout(z, 700));
+      }finally{ clearTimeout(timer); }
+    }
+    throw lastErr || new Error('Something went wrong.');
+  }
+  window.lgApi = api;
   function out(card, html){ let o = card && card.isConnected ? card.querySelector('#blkOut') : null; if(!o) o = document.querySelector('#blkCard #blkOut'); if(o) o.innerHTML = html; }
   async function preview(card){
     if(!S.cls){ out(card, ''); return; }

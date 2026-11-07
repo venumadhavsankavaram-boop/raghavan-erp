@@ -119,7 +119,7 @@
     const s = r.s, cs = esc(s.className || '') + (s.section ? ' – ' + esc(s.section) : '');
     const extra = r.i ? ((r.i.installed ? ' 📲' : '') + (r.i.notifications ? ' 🔔' : '')) : '';
     const acts = r.has && r.u
-      ? `<button class="lc-btn go" onclick="lcViewAs('${esc(r.u.id)}')">👁 Log in as</button><button class="lc-btn" onclick="adminResetPassword('${esc(r.u.id)}')">Reset password</button><button class="lc-btn" onclick="editUser('${esc(r.u.id)}')">Fix login</button>`
+      ? `<button class="lc-btn go" onclick="lcViewAs('${esc(r.u.id)}')">👁 Log in as</button><button class="lc-btn" onclick="adminResetPassword('${esc(r.u.id)}')">Reset password</button><button class="lc-btn" title="Switch off the old login and make a clean new one" onclick="lcFresh('${esc(s.id)}')">Delete &amp; recreate</button><button class="lc-btn" onclick="editUser('${esc(r.u.id)}')">Fix login</button>`
       : r.has ? `<span class="lc-sub">Login on a sibling's account</span>`
       : `<button class="lc-btn pri" onclick="lcCreate('${esc(s.id)}')">+ Create login</button>`;
     return `<div class="lc-row"><div><div class="lc-name">${esc(nm(s))}</div><div class="lc-sub">Adm ${esc(s.admissionNo || '—')}${s.fatherName ? ' · ' + esc(s.fatherName) : ''}</div></div>
@@ -157,6 +157,91 @@
       <div class="urx-resetreqs"></div><div class="lc-list" id="lcList"></div>`;
   }
 
+
+  /* ---------- 🩺 Health check: find every login problem and fix it with one tap ---------- */
+  let H = null, hBusy = false, hMsg = '';
+  const hApi = (m, p, b) => (window.lgApi ? window.lgApi(m, p, b) : fetch(p, { method: m, headers: { 'Content-Type': 'application/json' }, body: b ? JSON.stringify(b) : undefined }).then(async r => { const j = await r.json().catch(() => ({})); if(!r.ok) throw new Error(j.error || 'Failed'); return j; }));
+  const hBox = () => document.getElementById('lcHealth');
+  const hToast = m => { try{ showToast(m); }catch(e){} };
+  async function healthLoad(){
+    const box = hBox(); if(!box) return;
+    if(!H) box.innerHTML = '<div class="lc-sub" style="padding:24px;">Checking every login…</div>';
+    try{ H = await hApi('GET', '/api/student-logins/health'); }
+    catch(e){ if(!hBox()) return; hBox().innerHTML = `<div style="border:2px solid #b3261e;background:#fdecea;border-radius:12px;padding:12px 16px;color:#b3261e;"><b>Could not run the check:</b> ${esc(e.message)}<div style="margin-top:8px;"><button class="lc-btn pri" onclick="lcHealthRun()">Try again</button></div></div>`; return; }
+    healthPaint();
+  }
+  const SECTIONS = [
+    ['locked', '🔒 Locked out right now', 'Too many wrong passwords. They are unblocked automatically after a while; unlock now to let them in.'],
+    ['no_login', '🚫 Students with no working login', 'Create a login, or bring back one that was switched off.'],
+    ['family', '👨‍👩‍👧 Family logins that need tidying', 'A linked child was removed or the open child is wrong, so the parent may see an empty or stuck screen.'],
+    ['duplicate', '👯 More than one login for the same child', 'Keep one and switch the others off (they can be restored).'],
+    ['dupname', '🪪 Same username used twice', 'Two logins with one username confuse sign-in. Rename one.'],
+    ['orphan', '🧩 Logins pointing at nobody', 'The student is gone or no longer Active. Switch the login off, or re-link it.'],
+    ['unused', '📭 Never signed in (14+ days)', 'The parent probably lost the slip. Reset the password and print a new slip.']
+  ];
+  function dur(sec){ return sec >= 60 ? Math.ceil(sec / 60) + ' min' : sec + ' sec'; }
+  function itemHtml(k, x){
+   
+    const q = o => esc(JSON.stringify(o)).replace(/'/g, '&#39;');
+    const act = (label, o, cls) => `<button class="lc-btn ${cls || ''}" onclick='lcHealthAct(${q(o)}, this)'>${label}</button>`;
+    if(k === 'locked') return `<div class="lh-it"><div><b>${esc(x.username)}</b> <span class="lc-sub">· ${esc(x.kind)} · frees itself in ${dur(x.seconds)}</span></div><div class="lc-act">${act('Unlock now', { action: 'unlock', username: x.username }, 'pri')}</div></div>`;
+    if(k === 'no_login') return `<div class="lh-it"><div><b>${esc(x.name)}</b> <span class="lc-sub">· ${esc(x.cls)} · Adm ${esc(x.adm || '—')}${x.restoreUserId ? ' · old login <b>' + esc(x.restoreUsername) + '</b> ' + esc(x.restoreWhy) : ''}</span></div><div class="lc-act">${x.restoreUserId ? act('Restore old login', { action: 'restore', userId: x.restoreUserId }, 'pri') : ''}${act('+ Create new login', { action: 'create', studentId: x.studentId }, x.restoreUserId ? '' : 'pri')}</div></div>`;
+    if(k === 'family') return `<div class="lh-it"><div><b>${esc(x.username)}</b> <span class="lc-sub">· ${esc(x.kids)}</span><div class="lh-bad">${x.problems.map(esc).join(' · ')}</div></div><div class="lc-act">${act('Fix automatically', { action: 'fix_family', userId: x.userId }, 'pri')}</div></div>`;
+    if(k === 'duplicate') return `<div class="lh-it"><div><b>${esc(x.name)}</b> <span class="lc-sub">· ${esc(x.cls)}</span>${x.logins.map(l => `<div class="lh-sub2">${esc(l.username)} <span class="lc-sub">(${l.family ? 'family login' : l.role}${l.signedIn ? ', has signed in' : ', never signed in'})</span> ${act('Switch off this one', { action: 'switch_off', userId: l.userId })}</div>`).join('')}<div class="lh-sub2">${act('Delete all and create one fresh login', { action: 'recreate', studentId: x.studentId })}</div></div></div>`;
+    if(k === 'dupname') return `<div class="lh-it"><div><b>${esc(x.username)}</b>${x.logins.map((l, i) => `<div class="lh-sub2">${esc(l.studentName || l.role)} ${i ? act('Give a new username', { action: 'rename', userId: l.userId }, 'pri') : '<span class="lc-sub">(keeps this username)</span>'}</div>`).join('')}</div></div>`;
+    if(k === 'orphan') return `<div class="lh-it"><div><b>${esc(x.username)}</b> <span class="lc-sub">· ${esc(x.role)}${x.studentName ? ' · ' + esc(x.studentName) : ''}</span><div class="lh-bad">${esc(x.why)}</div></div><div class="lc-act">${x.canRelink ? act('Fix automatically', { action: 'fix_family', userId: x.userId }, 'pri') : ''}${act('Switch off', { action: 'switch_off', userId: x.userId })}</div></div>`;
+    if(k === 'unused') return `<div class="lh-it"><div><b>${esc(x.studentName)}</b> <span class="lc-sub">· ${esc(x.cls)} · login ${esc(x.username)} · ${x.days} days, never opened</span></div><div class="lc-act"><button class="lc-btn pri" onclick="adminResetPassword('${esc(x.userId)}')">Reset password</button></div></div>`;
+    return '';
+  }
+  function healthPaint(){
+    const box = hBox(); if(!box || !H) return;
+    const css2 = `<style>#lcHealth .lh-it{display:flex;gap:12px;justify-content:space-between;align-items:center;flex-wrap:wrap;padding:10px 0;border-top:1px solid #eef1f7}#lcHealth .lh-sec{background:#fff;border:1px solid #e1e6f0;border-radius:14px;padding:12px 16px;margin-bottom:12px}#lcHealth .lh-sec h4{margin:0 0 2px;font-size:1rem}#lcHealth .lh-bad{color:#b3261e;font-size:.82rem;margin-top:2px}#lcHealth .lh-sub2{margin-top:6px}#lcHealth .lh-ok{border:2px solid #0b7a5a;background:#eafaf3;border-radius:14px;padding:16px 18px;font-weight:700;color:#0b7a5a}#lcHealth .lh-msg{border:2px solid #0b7a5a;background:#eafaf3;border-radius:12px;padding:10px 14px;margin-bottom:12px}</style>`;
+    let h = css2;
+    if(hMsg) h += `<div class="lh-msg">${hMsg}</div>`;
+    h += `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;"><div class="lc-sub">Checked ${new Date(H.at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })} · ${H.activeStudents} active students</div><button class="lc-btn" onclick="lcHealthRun()">↻ Check again</button></div>`;
+    if(!H.total) h += `<div class="lh-ok">✅ All logins are healthy. Every active student can sign in, no family is broken, nobody is locked out.</div>`;
+    else SECTIONS.forEach(([k, title, hint]) => {
+      const list = (H.problems[k] || []); if(!list.length) return;
+      const total = H.summary[k];
+      h += `<div class="lh-sec"><h4>${title} <span class="lc-badge ${k === 'unused' ? 'new' : 'none'}">${total}</span></h4><div class="lc-sub" style="margin-bottom:4px;">${hint}</div>${list.slice(0, 50).map(x => itemHtml(k, x)).join('')}${list.length > 50 || total > list.length ? `<div class="lc-sub" style="padding-top:8px;">Showing the first ${Math.min(50, list.length)} of ${total}. Fix these and press “Check again”.</div>` : ''}</div>`;
+    });
+    box.innerHTML = h;
+  }
+  window.lcFresh = async function(sid){
+    let go = true; try{ go = await showConfirmDialog('Delete this child’s login and create a brand-new one? The old login is switched off (you can restore it from the Health check or Recently Deleted). You will get a new starting password to give the parent.'); }catch(e){}
+    if(!go) return;
+    try{
+      const j = await hApi('POST', '/api/student-logins/repair', { action: 'recreate', studentId: sid });
+      const c = j.created;
+      try{ const r = await fetch('/api/users'); if(r.ok) users = await r.json(); await loadInfo(true); paintList(); }catch(e){}
+      const box = document.getElementById('lcList');
+      if(box && c) box.insertAdjacentHTML('beforebegin', `<div class="lh-msg" style="border:2px solid #0b7a5a;background:#eafaf3;border-radius:12px;padding:10px 14px;margin-bottom:10px;"><b>Fresh login for ${esc(c.studentName)}</b><br>Username: <b>${esc(c.username)}</b> &nbsp; Starting password: <b>${esc(c.password)}</b><br><span class="lc-sub">The parent chooses their own password at first sign-in.</span></div>`);
+      hToast(j.message);
+    }catch(e){ hToast(e.message); }
+  };
+  window.lcHealthRun = () => { H = null; healthLoad(); };
+  window.lcHealthAct = async function(o, btn){
+    if(hBusy) return; hBusy = true;
+    const label = btn ? btn.textContent : ''; if(btn){ btn.disabled = true; btn.textContent = 'Working…'; }
+    try{
+      if(o.action === 'switch_off'){ let go = true; try{ go = await showConfirmDialog('Switch this login off? The parent can no longer sign in with it. You can restore it later from the Health check.'); }catch(e){} if(!go){ if(btn){ btn.disabled = false; btn.textContent = label; } hBusy = false; return; } }
+      const j = await hApi('POST', '/api/student-logins/repair', o);
+      hMsg = esc(j.message || 'Done.');
+      if(j.created) hMsg = `<b>Login created for ${esc(j.created.studentName)}</b><br>Username: <b>${esc(j.created.username)}</b> &nbsp; Starting password: <b>${esc(j.created.password)}</b><br><span class="lc-sub">Write it on the slip. The parent chooses their own password at first sign-in.</span>`;
+      if(j.username) hMsg += ` New username: <b>${esc(j.username)}</b>`;
+      hToast(j.message || 'Done.');
+      try{ if(typeof refreshUserListViews === 'function') { /* keep page */ } const r = await fetch('/api/users'); if(r.ok) users = await r.json(); }catch(e){}
+      try{ await loadInfo(true); }catch(e){}
+      H = await hApi('GET', '/api/student-logins/health'); healthPaint();
+      const st = document.getElementById('lcStats'); if(st) st.innerHTML = statsHtml();
+    }catch(e){
+      hToast(e.message); hMsg = '';
+      if(btn){ btn.disabled = false; btn.textContent = label; }
+      const box = hBox(); if(box){ const old = box.querySelector('.lh-err'); if(old) old.remove(); box.insertAdjacentHTML('afterbegin', `<div class="lh-err" style="border:2px solid #b3261e;background:#fdecea;border-radius:12px;padding:10px 14px;margin-bottom:10px;color:#b3261e;"><b>Could not do that:</b> ${esc(e.message)}</div>`); }
+    }
+    hBusy = false;
+  };
+
   /* ---------- reuse the existing create / siblings / adoption tools ---------- */
   function card(){ return document.getElementById('blkCard'); }
   function applyMode(){
@@ -182,26 +267,30 @@
     if(id){ const b = c.querySelector('#' + id); if(b) setTimeout(() => b.click(), 30); }
   }
 
-  const TABS = [['find', '🔎 Find & log in as'], ['create', '➕ Create logins'], ['sib', '👨‍👩‍👧 Siblings'], ['adopt', '📊 Adoption & alerts']];
+  const TABS = [['find', '🔎 Find & log in as'], ['create', '➕ Create logins'], ['sib', '👨‍👩‍👧 Siblings'], ['adopt', '📊 Adoption & alerts'], ['health', '🩺 Health check']];
   function draw(body){
     css();
     body.innerHTML = `<div id="lc"><div class="lc-stats" id="lcStats">${statsHtml()}</div>
       <div class="lc-tabs">${TABS.map(t => `<button class="lc-tab ${F.tab === t[0] ? 'on' : ''}" onclick="lcTab('${t[0]}')">${t[1]}</button>`).join('')}</div>
       <div class="lc-panel" id="lcFind" style="display:${F.tab === 'find' ? 'block' : 'none'}">${findHtml()}</div>
-      <div class="lc-panel" id="lcToolHost" style="display:${F.tab === 'find' ? 'none' : 'block'}"></div></div>`;
+      <div class="lc-panel" id="lcToolHost" style="display:${F.tab === 'find' || F.tab === 'health' ? 'none' : 'block'}"></div>
+      <div class="lc-panel" id="lcHealth" style="display:${F.tab === 'health' ? 'block' : 'none'}"></div></div>`;
     paintList();
-    if(F.tab !== 'find'){ applyMode(); }
+    if(F.tab !== 'find' && F.tab !== 'health'){ applyMode(); }
+    if(F.tab === 'health') healthLoad();
     if(typeof urxLoadResetRequests === 'function') urxLoadResetRequests();
     loadInfo(true).then(paintList);
     // the create/siblings/adoption card is mounted by another module a moment later: keep it inside its tab
-    let n = 0; const iv = setInterval(() => { n++; const c = card(), h = document.getElementById('lcToolHost'); if(c && h && c.parentNode !== h){ applyMode(); if(F.tab !== 'find' && F.tab !== 'create') autoOpen(); } if(n > 12 || !h) clearInterval(iv); }, 300);
+    let n = 0; const iv = setInterval(() => { n++; const c = card(), h = document.getElementById('lcToolHost'); if(c && h && c.parentNode !== h){ applyMode(); if(F.tab !== 'find' && F.tab !== 'create' && F.tab !== 'health') autoOpen(); } if(n > 12 || !h) clearInterval(iv); }, 300);
   }
   window.lcRefreshStats = async function(){ try{ await loadInfo(true); const el = document.getElementById('lcStats'); if(el) el.innerHTML = statsHtml(); }catch(e){} };
   window.lcTab = function(t){
     F.tab = t; try{ sessionStorage.setItem('lcTab', t); }catch(e){}
     document.querySelectorAll('#lc .lc-tab').forEach((b, i) => b.classList.toggle('on', TABS[i][0] === t));
     const find = document.getElementById('lcFind'), host = document.getElementById('lcToolHost');
-    if(find) find.style.display = t === 'find' ? 'block' : 'none'; if(host) host.style.display = t === 'find' ? 'none' : 'block';
+    const hp = document.getElementById('lcHealth');
+    if(find) find.style.display = t === 'find' ? 'block' : 'none'; if(host) host.style.display = (t === 'find' || t === 'health') ? 'none' : 'block'; if(hp) hp.style.display = t === 'health' ? 'block' : 'none';
+    if(t === 'health'){ healthLoad(); return; }
     if(t === 'find'){ loadInfo(true).then(paintList); paintList(); }
     else { applyMode(); autoOpen(); }
   };
@@ -226,5 +315,5 @@
     window[fn] = async function(){ const r = await o.apply(this, arguments); try{ if(document.getElementById('lcList')){ await loadInfo(true); paintList(); } }catch(e){} return r; };
   });
   // the bulk-create card redraws itself when the page is shown: keep it inside its tab
-  new MutationObserver(() => { if(F.tab !== 'find' && document.getElementById('lcToolHost')) applyMode(); }).observe(document.body, { childList: true, subtree: false });
+  new MutationObserver(() => { if(F.tab !== 'find' && F.tab !== 'health' && document.getElementById('lcToolHost')) applyMode(); }).observe(document.body, { childList: true, subtree: false });
 })();
