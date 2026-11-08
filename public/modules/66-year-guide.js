@@ -37,6 +37,27 @@
     document.head.appendChild(s);
   }
 
+
+  /* live status per step - read-only, from data already loaded */
+  let planCache = null, planAsked = false;
+  function askPlan(){
+    if(planAsked) return; planAsked = true;
+    try{ Promise.resolve(storageGet('fee-plan-next', null)).then(v => { planCache = (v && v.structure) ? v : false; draw(); }).catch(() => {}); }catch(e){}
+  }
+  function status(){
+    askPlan();
+    const cur = String(typeof currentAcademicYearValue !== 'undefined' ? currentAcademicYearValue : '');
+    const next = (typeof academicYears !== 'undefined' ? academicYears : []).filter(y => String(y) > cur).sort();
+    const hist = (typeof feeYearHistory !== 'undefined' ? feeYearHistory : []).filter(h => h.academicYear === cur && (h.outcome === 'Promoted' || h.outcome === 'Graduated'));
+    const act = (typeof students !== 'undefined' ? students : []).filter(s => typeof isActive === 'function' ? isActive(s) : true).length;
+    return [
+      { ok: next.length > 0, note: next.length ? 'New year added: ' + next.join(', ') + '. Current year is ' + cur + '.' : 'No new year added yet. Current year is ' + cur + '.' },
+      { ok: !!planCache, note: planCache ? 'Next year\'s fees are prepared and saved.' : (planCache === false ? 'Next year\'s fees are not prepared yet.' : 'Checking next year\'s fees…') },
+      { ok: hist.length > 0 && hist.length >= act, note: hist.length + ' student(s) promoted or graduated for ' + cur + ' (' + act + ' active now).' },
+      { ok: false, note: next.length ? 'Not yet — current year is still ' + cur + '. Do this last.' : 'Add the new year first.' },
+    ];
+  }
+
   function go(n){
     step = Math.min(4, Math.max(1, n)); set('ayStep', String(step));
     const s = STEPS[step - 1];
@@ -53,14 +74,15 @@
     // keep the step in line with the screen the person opened by hand
     if(curView === 'feestructuresetup') step = 2; else if(curView === 'promotions' || curView === 'promotransfer') step = 3; else if(step === 2 || step === 3) step = 1;
     set('ayStep', String(step));
+    const stt = status();
     const box = document.createElement('div'); box.id = 'ayBox'; box.className = 'ayg';
     if(!open){
       box.innerHTML = '<div class="ayg-bar"><div><b>📅 Year-end checklist</b> <span>Moving to a new academic year? Four steps, in order.</span></div><button type="button" class="ayg-link" data-a="open">Show steps</button></div>';
     }else{
       const s = STEPS[step - 1];
       box.innerHTML = '<div class="ayg-bar"><div><b>📅 Year-end checklist</b></div><button type="button" class="ayg-link" data-a="close">Hide</button></div>' +
-        '<div class="ayg-steps">' + STEPS.map(x => '<button type="button" class="ayg-st' + (x.n === step ? ' on' : (x.n < step ? ' done' : '')) + '" data-go="' + x.n + '"><i>Step ' + x.n + '</i>' + x.t + '</button>').join('') + '</div>' +
-        '<div class="ayg-line"><div class="ayg-hint">' + s.hint + '</div><div class="ayg-btns">' +
+        '<div class="ayg-steps">' + STEPS.map(x => '<button type="button" class="ayg-st' + (x.n === step ? ' on' : ((stt[x.n - 1].ok || x.n < step) ? ' done' : '')) + '" data-go="' + x.n + '"><i>Step ' + x.n + (stt[x.n - 1].ok ? ' ✓' : '') + '</i>' + x.t + '</button>').join('') + '</div>' +
+        '<div class="ayg-line"><div class="ayg-hint">' + s.hint + '<br><b style="color:' + (stt[step - 1].ok ? '#1b7f4b' : 'var(--magenta,#c2185b)') + '">' + (stt[step - 1].ok ? '✓ ' : '• ') + stt[step - 1].note + '</b></div><div class="ayg-btns">' +
         (step > 1 ? '<button type="button" class="ayg-b" data-go="' + (step - 1) + '">← Back</button>' : '') +
         (step < 4 ? '<button type="button" class="ayg-b p" data-go="' + (step + 1) + '">Next: ' + STEPS[step].t + ' →</button>' : '<button type="button" class="ayg-b p" data-a="close">Done</button>') + '</div></div>';
     }
