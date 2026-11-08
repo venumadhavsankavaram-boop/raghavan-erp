@@ -450,7 +450,7 @@
     try{ if(can('websiteinquiries') && typeof admissionInquiries !== 'undefined'){ const q = enquiryRows().filter(x => x.q.status !== 'Contacted');
       tiles.push({ k:'enquiries', icon:'📨', n:q.length, label:'new admission enquiries not answered', sub: q.length ? 'Reply quickly to win the family' : 'All clear' }); } }catch(e){}
     if(!tiles.length){ host.innerHTML = ''; return; }
-    host.innerHTML = `<div class="dash-section-title"><div><span class="eyebrow-sm">Smart Insights</span><h3>Needs your attention today</h3></div></div>
+    host.innerHTML = `<div class="dash-section-title"><div><span class="eyebrow-sm">Today's alerts</span><h3>Needs your attention today</h3></div></div>
       <div class="si-dash">${tiles.map(t => `<button type="button" class="si-dash-tile ${t.n ? 'has' : ''}" onclick="siGoFrom('${t.k}')"><span class="si-dash-ico">${t.icon}</span><b>${t.n}</b><span class="si-dash-lbl">${t.label}</span><small>${esc(t.sub)}</small></button>`).join('')}</div>`;
   }
   window.siGoFrom = k => { if(k === 'tuition'){ k = 'fees'; st.feeScope = 'unpaid'; st.feeView = 'classes'; st.feeClass = ''; st.feePaid = ''; } else if(k === 'fees'){ st.feeScope = 'overdue'; } siTab = k; try{ switchView('insights'); }catch(e){} };
