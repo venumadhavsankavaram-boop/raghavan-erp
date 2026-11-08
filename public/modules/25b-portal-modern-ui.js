@@ -115,14 +115,17 @@ function renderMyNotificationsTab(body, s, keepSeen){
   const items = all.filter(i => pmNotifFilter === 'all' || PM_TAGS[i.tag] === pmNotifFilter);
   const chips = [['all', 'Everything'], ['fees', 'Fees'], ['attendance', 'Attendance'], ['exams', 'Exams & results'], ['notices', 'Notices & holidays']]
     .map(([k, n]) => `<button type="button" class="pm-chip ${pmNotifFilter === k ? 'on' : ''}" aria-pressed="${pmNotifFilter === k}" onclick="pmSetNotifFilter('${k}')">${n}<em>${cnt(k)}</em></button>`).join('');
+  /* the most recent alert already sent (not a future-dated holiday) is highlighted */
+  const todayK = localDateStr(new Date()); let latest = null;
+  all.forEach(i => { const k = (i.date || '').slice(0, 10); if(k && k <= todayK && (!latest || i.date > latest.date)) latest = i; });
   const groups = []; const idx = {};
   items.forEach(it => { const k = (it.date || '').slice(0, 10); if(!(k in idx)){ idx[k] = groups.length; groups.push({ k, list: [] }); } groups[idx[k]].list.push(it); });
   const tone = { fees: 'ok', attendance: 'info', exams: 'warn', notices: 'mute' };
   body.innerHTML = `<div class="pm"><div class="pm-chips" role="group" aria-label="Filter updates">${chips}</div>` +
     (groups.length ? groups.map(g => `<section class="pm-day"><h3>${pmEsc(pmDayLabel(g.k))}</h3>${g.list.map(it => {
       const t = tone[PM_TAGS[it.tag]] || 'mute'; const isNew = it.date > lastSeen;
-      return `<article class="pm-item ${it.highlight ? 'is-alert' : ''}"><span class="pm-bub pm-t-${it.highlight ? 'bad' : t}">${pmEsc(it.icon)}</span>
-        <div class="pm-item-b"><div class="pm-item-h"><span class="pm-tag">${pmEsc(it.tag)}</span>${isNew ? '<span class="pm-new">New</span>' : ''}</div>
+      return `<article class="pm-item ${it.highlight ? 'is-alert' : ''} ${it === latest ? 'is-latest' : ''}"><span class="pm-bub pm-t-${it.highlight ? 'bad' : t}">${pmEsc(it.icon)}</span>
+        <div class="pm-item-b"><div class="pm-item-h"><span class="pm-tag">${pmEsc(it.tag)}</span>${it === latest ? '<span class="pm-latest">Latest</span>' : ''}${isNew ? '<span class="pm-new">New</span>' : ''}</div>
         <h4>${pmEsc(it.title)}</h4>${it.detail ? `<p>${pmEsc(it.detail)}</p>` : ''}</div></article>`; }).join('')}</section>`).join('')
       : `<div class="pm-empty">${pmIcon('bell', 28)}<b>You're all caught up</b>Fee payments, attendance, exam schedules, results, holidays and notices will appear here as they happen.</div>`) + `</div>`;
   if(!keepSeen){ currentUser.lastNotificationSeenAt = new Date().toISOString(); storageSet(USERS_KEY, users); updateMyProfileBadge(); setTimeout(pmHero, 50); }
@@ -364,7 +367,7 @@ function pmInjectStyle(){
 .pm button,.pm-hero button{font-family:inherit;cursor:pointer}
 .pm button:focus-visible,.pm a:focus-visible,.pm input:focus-visible,.pm select:focus-visible,.pm textarea:focus-visible,.pm summary:focus-visible,.pm-hero button:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
 .pm-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-.pm-hid{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px}
+.pm-hid{position:absolute;left:-9999px;top:0;opacity:0;pointer-events:none;width:1px;height:1px}
 #view-myprofile>.topbar{display:none}
 #view-myprofile .mf-tabs{position:sticky;top:0;z-index:20;flex-wrap:wrap;background:var(--cream);padding:8px 0;margin-bottom:16px}@media(max-width:700px){#view-myprofile .mf-tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}}
 #view-myprofile .mf-tabs::-webkit-scrollbar{display:none}
@@ -419,7 +422,8 @@ function pmInjectStyle(){
 /* contact */
 .pm-seg{display:inline-flex;background:var(--white);border:1px solid var(--pm-line);border-radius:14px;padding:4px;margin-bottom:16px;max-width:100%;overflow-x:auto}
 .pm-seg button{border:0;background:transparent;padding:9px 16px;border-radius:10px;font-weight:700;font-size:.84rem;color:var(--ink-soft);display:inline-flex;gap:8px;align-items:center;white-space:nowrap}
-.pm-seg button.on{background:var(--navy);color:#fff}.pm-seg button.on em{background:rgba(255,255,255,.25)}
+.pm-seg button.on{background:var(--navy);color:#fff}@media(max-width:700px){.pm-seg{display:flex;width:100%;box-sizing:border-box}.pm-seg button{flex:1 1 auto;justify-content:center;padding:9px 10px;font-size:.8rem}}
+.pm-item.is-latest{border-color:var(--magenta);background:linear-gradient(0deg,rgba(209,16,115,.06),rgba(209,16,115,.06)),var(--white);box-shadow:0 0 0 2px rgba(209,16,115,.18)}.pm-latest{background:var(--navy);color:#fff;border-radius:99px;font-size:.62rem;font-weight:800;padding:1px 8px;letter-spacing:.03em}.pm-seg button.on em{background:rgba(255,255,255,.25)}
 .pm-two{display:grid;grid-template-columns:minmax(0,420px) minmax(0,1fr);gap:18px;align-items:start}@media(max-width:900px){.pm-two{grid-template-columns:1fr}}
 .pm-compose{background:var(--white);border:1px solid var(--pm-line);border-radius:18px;padding:18px;position:sticky;top:64px}@media(max-width:900px){.pm-compose{position:static}}
 .pm-compose h3{margin:0 0 12px;color:var(--navy);font-size:1rem}

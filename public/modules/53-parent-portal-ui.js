@@ -80,7 +80,7 @@
         #view-myprofile .sh-card button{padding:8px 14px;font-size:.82rem;border-radius:10px;align-self:flex-start;}
         .pp-hero{padding:18px 16px;border-radius:18px;} .pp-hero h2{font-size:1.3rem;}
         #view-myprofile .mf-tabs{display:none;}
-        body.pp-on{padding-bottom:74px;}
+        body.pp-on{padding-bottom:0;} body.pp-on .main{padding-bottom:calc(96px + env(safe-area-inset-bottom)) !important;} body.pp-on .toast{left:12px;right:12px;bottom:calc(76px + env(safe-area-inset-bottom));text-align:center;} body.pp-on .mo-sync-badge{bottom:calc(72px + env(safe-area-inset-bottom));} body.pp-on .mo-import-progress{bottom:calc(76px + env(safe-area-inset-bottom));}
         #ppDock{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:900;background:#fff;border-top:1px solid #e3e8f3;box-shadow:0 -6px 20px rgba(20,50,92,.10);padding:6px 6px calc(6px + env(safe-area-inset-bottom));justify-content:space-around;}
         #ppDock button{flex:1;background:none;border:0;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:.68rem;color:#52607a;padding:5px 2px;border-radius:12px;font-family:inherit;}
         #ppDock button .d{font-size:1.25rem;line-height:1;} #ppDock button.on{color:#2f6fed;font-weight:700;background:#eef3ff;}
