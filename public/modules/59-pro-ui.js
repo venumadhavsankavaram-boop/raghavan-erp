@@ -60,7 +60,7 @@
           const ok = (!cur || cur === c.name) && (!q || card.textContent.toLowerCase().includes(q));
           card.style.display = ok ? '' : 'none'; if(ok){ n++; shown++; }
         });
-        c.h.style.display = c.grid.style.display = n ? '' : 'none';
+        c.h.style.display = n ? '' : 'none'; c.grid.style.display = n ? 'grid' : 'none'; /* keep the cards in a grid (clearing the style used to stack them one per row) */
       });
       $('#pxRptCount').textContent = shown === total ? total + ' reports' : shown + ' of ' + total;
       let e = $('#pxRptEmpty', v); if(!shown){ if(!e){ e = document.createElement('div'); e.id = 'pxRptEmpty'; e.className = 'px-empty'; e.textContent = 'No report matches. Try another word or clear the filter.'; bar.after(e); } } else if(e) e.remove();
