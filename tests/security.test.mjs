@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { test, done } from './helpers.mjs';
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
-const m22 = fs.readFileSync(path.join(root, 'public/modules/22-facilities-rooms-library-transport-timetable.js'), 'utf8');
+const m22 = [1, 2, 3].map(n => fs.readFileSync(path.join(root, `public/modules/22-facilities-rooms-library-transport-timetable-part${n}.js`), 'utf8')).join('');
 
 const a = server.indexOf('const COMMON_PASSWORDS'), b = server.indexOf('const LOGIN_MAX_ATTEMPTS');
 const ctx = vm.createContext({}); vm.runInContext(server.slice(a, b) + '\nthis.pp = passwordProblem;', ctx);

@@ -7,7 +7,7 @@ import vm from 'node:vm';
 import { test, done } from './helpers.mjs';
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
-const m22 = fs.readFileSync(path.join(root, 'public/modules/22-facilities-rooms-library-transport-timetable.js'), 'utf8');
+const m22 = [1, 2, 3].map(n => fs.readFileSync(path.join(root, `public/modules/22-facilities-rooms-library-transport-timetable-part${n}.js`), 'utf8')).join('');
 test('the audit endpoint is Admin only', () => { assert.ok(/app\.get\('\/api\/audit-log'[\s\S]{0,400}Admin/.test(server)); });
 test('sign-in, failed sign-in, sign-out, password change and backup are all recorded', () => {
   for (const k of ["'LOGIN'", "'LOGOUT'", "'PASSWORD_CHANGED'", "'BACKUP_DOWNLOAD'", "'TWOFA_FAILED'", 'auditFailedLogin']) assert.ok(server.includes(k), k);

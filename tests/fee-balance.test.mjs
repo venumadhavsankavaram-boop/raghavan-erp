@@ -4,7 +4,7 @@ import { loadMany, test, done } from './helpers.mjs';
 
 function sandbox(o = {}) {
   return loadMany([
-    ['04-finance-data-layer.js', ['classStruct', 'studentBusFare', 'studentHostelFee', 'computeStudentFinance']],
+    ['04-finance-data-layer.js', ['classStruct', 'studentBusFare', 'studentBusExpected', 'studentHostelFee', 'computeStudentFinance']],
     ['08c-fee-refunds.js', ['rfMaps', 'payRefunded', 'payPendingRefund', 'payNet', 'payRefundable']],
   ], {
     CATS: { fee: 'Tuition Fee', bus: 'Bus Fee', stock: 'Stock', hostel: 'Hostel' },
