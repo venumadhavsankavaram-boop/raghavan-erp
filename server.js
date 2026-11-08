@@ -2282,6 +2282,8 @@ const KV_KEY_TO_MODULE = {
   'finance-settings': ['managefee'],
   // Fees prepared for the coming academic year (applied when that year is made current).
   'fee-plan-next': ['managefee'],
+  // Log of mid-year class / section changes (Promotion & Transfer).
+  'class-change-log': ['promotransfer'],
   'fee-types': ['managefee'],
   'discount-types': ['managefee'],
   'extra-fee-defs': ['managefee'],
