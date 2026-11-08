@@ -7,6 +7,7 @@
   const HUBS = [
     { id: 'access', label: 'Users & Access', members: [['usersroles', 'Users & Roles'], ['studentparentlogins', 'Student/Parent Logins'], ['rolespermissions', 'Roles & Permissions']] },
     { id: 'setup', label: 'School Setup', members: [['schoolprofile', 'School Profile'], ['classessetup', 'Classes'], ['academicyear', 'Academic Year'], ['feestructuresetup', 'Fee Structure'], ['refundpolicy', 'Refund Policy']] },
+    { id: 'home', label: 'Dashboard', members: [['dashboard', 'Overview'], ['insights', 'Smart Insights']] },
     { id: 'comms', label: 'Messages & Notices', members: [['announcements', 'Announcements'], ['noticeboard', 'Notice Board'], ['inbox', 'Inbox']] }
   ];
   const $ = (s, r) => (r || document).querySelector(s), $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -97,9 +98,45 @@
     };
     return true;
   }
+  /* the dashboard redraws its whole page when its numbers refresh; put the tab bar back afterwards */
+  function guardDashboard(){
+    if(typeof window.renderDashboard !== 'function' || window.renderDashboard.__pn) return;
+    const o = window.renderDashboard;
+    const w = async function(){
+      const r = await o.apply(this, arguments);
+      try{ const v = document.getElementById('view-dashboard'); if(v && v.style.display !== 'none') syncView('dashboard'); }catch(e){}
+      return r;
+    };
+    w.__pn = true; window.renderDashboard = w;
+  }
+  /* Enter in the menu search: if the words match a screen that now lives inside a tab group (for example "insights"), open that screen itself */
+  function guardSearch(){
+    if(typeof window.sbSearchKeydown !== 'function' || window.sbSearchKeydown.__pn) return;
+    const o = window.sbSearchKeydown;
+    const w = function(e){
+      try{
+        if(e && e.key === 'Enter'){
+          const q = String(((document.getElementById('sbModuleSearch') || {}).value) || '').trim().toLowerCase();
+          if(q){
+            for(const h of HUBS){
+              const vis = h.members.filter(m => canSee(m[0]));
+              if(vis.length < 2) continue;
+              if(String(h.label).toLowerCase().indexOf(q) >= 0 || String(vis[0][1]).toLowerCase().indexOf(q) >= 0) continue;
+              const m = vis.slice(1).find(x => String(x[1]).toLowerCase().indexOf(q) >= 0);
+              if(m){ const n = navOf(m[0]); if(n){ n.click(); if(typeof sbClearSearch === 'function') sbClearSearch(); return; } }
+            }
+          }
+        }
+      }catch(err){}
+      return o.apply(this, arguments);
+    };
+    w.__pn = true; window.sbSearchKeydown = w;
+  }
   function boot(){
     css();
     install();
+    guardDashboard();
+    guardSearch();
     applyHubsToSidebar();
     // permissions are applied after sign-in: re-check a few times, then whenever the sidebar changes
     let n = 0; const iv = setInterval(() => { n++; try{ applyHubsToSidebar(); }catch(e){} if(n > 20) clearInterval(iv); }, 800);
