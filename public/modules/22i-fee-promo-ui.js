@@ -267,7 +267,7 @@ function fpxPoMainHtml(){
     <section class="sf-card fpx-card">
       <div class="fpx-card-head"><span class="fpx-num">3</span><div><h4>Outcome</h4><p>This page applies one outcome to the whole class.</p></div></div>
       <div class="fpx-outcome is-on"><span class="fpx-radio" aria-hidden="true"></span><div><b>${next ? 'Promote to ' + escapeHtml(next) : 'Graduate (last class)'}</b><small>${next ? 'Section stays the same. Roll numbers are not changed.' : 'Status is set to Inactive instead of moving to another class.'}</small></div><span class="sf-badge sf-badge--paid">Selected</span></div>
-      <p class="fpx-alt">Keeping some students back, moving them to another section, or recording a transfer is done student by student in <a href="#" onclick="switchView('promotransfer');return false;">Promotion &amp; Transfer</a>. Do that first if anyone should not move.</p>
+      <p class="fpx-alt">Keeping some students back, moving them to another section, or recording a transfer is done student by student on the other tabs of this page (<a href="#" onclick="switchPromoTransferTab('promote');return false;">Promote Selected Students</a>, <a href="#" onclick="switchPromoTransferTab('section');return false;">Change Section</a>, <a href="#" onclick="switchPromoTransferTab('transfer');return false;">Transfer</a>). Do that first if anyone should not move.</p>
     </section>
 
     <section class="sf-card fpx-card fpx-confirm">

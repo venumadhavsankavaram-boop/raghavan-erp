@@ -84,7 +84,7 @@
       const done = new Set(feeYearHistory.filter(h => h.academicYear === year && (h.outcome === 'Promoted' || h.outcome === 'Graduated')).map(h => h.studentId));
       const todo = list.filter(p => !done.has(p.studentId));
       const skipped = list.length - todo.length;
-      if(skipped) showToast(skipped + ' student(s) were already promoted in ' + year + ' and were skipped. If one was a mistake, use "Promoted by mistake?" on the Promotions page.');
+      if(skipped) showToast(skipped + ' student(s) were already promoted in ' + year + ' and were skipped. If one was a mistake, use "Promoted by mistake?" on the Year-end Promotion tab.');
       if(!todo.length) return Object.assign({}, none, { skippedCount: skipped });
       // unpaid money is carried unless somebody explicitly chose otherwise
       todo.forEach(p => { if(p.carryForwardType === undefined || p.carryForwardType === null) p.carryForwardType = 'previous'; });
@@ -260,7 +260,7 @@
     const promotedThisYear = feeYearHistory.some(h => h.academicYear === prev && (h.outcome === 'Promoted' || h.outcome === 'Graduated'));
     const stillActive = students.filter(isActive).length;
     let msg = '';
-    if(stillActive && !promotedThisYear) msg += 'No student has been promoted in ' + prev + ' yet. If you switch now, last year\'s unpaid fees will NOT be carried forward. Promote first (Setup > Promotions), then make ' + target + ' current.\n\n';
+    if(stillActive && !promotedThisYear) msg += 'No student has been promoted in ' + prev + ' yet. If you switch now, last year\'s unpaid fees will NOT be carried forward. Promote first (Promotion & Transfer > Year-end Promotion), then make ' + target + ' current.\n\n';
     const hasPlan = plan && plan.year === target;
     if(hasPlan) msg += 'The fees you prepared for ' + target + ' will start now for every class.';
     else if(plan) msg += 'Note: the fees you prepared are for ' + plan.year + ', not ' + target + ', so fees stay as they are.';
@@ -309,7 +309,7 @@
     if(cf) await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
     await storageSet(FEE_YEAR_HISTORY_KEY, feeYearHistory);
     showToast('Undone. ' + (s.firstName || 'Student') + ' is back in ' + h.className + '.', 'burst');
-    try{ renderPromotionsTab($('promotionsBody')); }catch(e){}
+    try{ renderPromotionsTab(fpxPoHost || $('promotionsBody')); }catch(e){}
   };
   const _prevMainHtml = (typeof fpxPoMainHtml === 'function') ? fpxPoMainHtml : null;
   if(_prevMainHtml){

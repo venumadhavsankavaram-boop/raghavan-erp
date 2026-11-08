@@ -6,7 +6,7 @@
   'use strict';
   const HUBS = [
     { id: 'access', label: 'Users & Access', members: [['usersroles', 'Users & Roles'], ['studentparentlogins', 'Student/Parent Logins'], ['rolespermissions', 'Roles & Permissions']] },
-    { id: 'setup', label: 'School Setup', members: [['schoolprofile', 'School Profile'], ['classessetup', 'Classes'], ['academicyear', 'Academic Year'], ['feestructuresetup', 'Fee Structure'], ['promotions', 'Promotions'], ['refundpolicy', 'Refund Policy']] },
+    { id: 'setup', label: 'School Setup', members: [['schoolprofile', 'School Profile'], ['classessetup', 'Classes'], ['academicyear', 'Academic Year'], ['feestructuresetup', 'Fee Structure'], ['refundpolicy', 'Refund Policy']] },
     { id: 'comms', label: 'Messages & Notices', members: [['announcements', 'Announcements'], ['noticeboard', 'Notice Board'], ['inbox', 'Inbox']] }
   ];
   const $ = (s, r) => (r || document).querySelector(s), $$ = (s, r) => Array.from((r || document).querySelectorAll(s));

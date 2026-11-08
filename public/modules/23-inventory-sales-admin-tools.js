@@ -400,7 +400,7 @@ const PENDING_APPROVALS_KEY = "pending-approvals";
     const payload = affected.map(s => ({ studentId: s.id, target: next ? next : '__graduate__' }));
     await executePromotions(payload);
     renderAdmissionsBody();
-    renderPromotionsTab(document.getElementById('promotionsBody'));
+    renderPromotionsTab(fpxPoHost || document.getElementById('promotionsBody'));
     showToast(next ? `Promoted to ${next}.` : 'Marked as Graduated.');
   }
 

@@ -5,7 +5,7 @@
 (function(){
   'use strict';
   const $ = id => document.getElementById(id);
-  const VIEWS = ['academicyear', 'feestructuresetup', 'promotions'];
+  const VIEWS = ['academicyear', 'feestructuresetup', 'promotions', 'promotransfer'];
   const STEPS = [
     { n:1, view:'academicyear',      t:'Add new year',  hint:'Type next year (for example 2027-28) and press "Add year". Do not make it current yet.' },
     { n:2, view:'feestructuresetup', t:'Next year\'s fees', hint:'Press "Next year\'s fees", set every class\'s new fees and Save. Current students are not affected; the new fees start when you make the year current (step 4).' },
@@ -44,12 +44,14 @@
   }
 
   function draw(){
-    const old = $('ayBox'); if(old) old.remove();
+    document.querySelectorAll('#ayBox').forEach(e => e.remove());
+    { const pt = $('view-promotransfer'); if(curView === 'promotions' && pt && pt.style.display === 'block') curView = 'promotransfer'; }
     if(!VIEWS.includes(curView)) return;
+    if(curView === 'promotransfer' && (typeof promoTransferTab === 'undefined' || promoTransferTab !== 'yearend')) return;
     const host = $('view-' + curView); if(!host) return;
     css();
     // keep the step in line with the screen the person opened by hand
-    if(curView === 'feestructuresetup') step = 2; else if(curView === 'promotions') step = 3; else if(step === 2 || step === 3) step = 1;
+    if(curView === 'feestructuresetup') step = 2; else if(curView === 'promotions' || curView === 'promotransfer') step = 3; else if(step === 2 || step === 3) step = 1;
     set('ayStep', String(step));
     const box = document.createElement('div'); box.id = 'ayBox'; box.className = 'ayg';
     if(!open){
@@ -75,5 +77,6 @@
       w.__ay = true; window.switchView = w;
     }
   }
+  window.ayDraw = draw;
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
