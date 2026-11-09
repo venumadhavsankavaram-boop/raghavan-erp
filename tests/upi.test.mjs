@@ -29,6 +29,13 @@ test('charge starts only from its effective date', () => {
   const c = { mode: 'flat', flat: 10, effectiveFrom: '2026-12-01' };
   assert.equal(ctx.calc(500, c, '2026-11-30'), 0); assert.equal(ctx.calc(500, c, '2026-12-01'), 10);
 });
+test('no charge up to a limit, then percent with a cap (bank-style MDR) or a small flat fee', () => {
+  const mdr = { mode: 'percent', percent: 0.4, max: 300, freeUpTo: 2000 };
+  assert.equal(ctx.calc(2000, mdr, '2026-11-01'), 0); assert.equal(ctx.calc(2001, mdr, '2026-11-01'), 8);
+  assert.equal(ctx.calc(3000, mdr, '2026-11-01'), 12); assert.equal(ctx.calc(50000, mdr, '2026-11-01'), 200); assert.equal(ctx.calc(200000, mdr, '2026-11-01'), 300);
+  const f5 = { mode: 'flat', flat: 5, freeUpTo: 2000 }; assert.equal(ctx.calc(1999, f5, '2026-11-01'), 0); assert.equal(ctx.calc(2500, f5, '2026-11-01'), 5);
+  assert.equal(ctx.norm({ charge: { mode: 'percent', percent: 0.4, freeUpTo: 2000 } }).charge.freeUpTo, 2000);
+});
 test('bad charge settings are clamped to safe values', () => {
   const n = ctx.norm({ charge: { mode: 'bogus', percent: 999, flat: -5, effectiveFrom: 'soon' } });
   assert.equal(n.charge.mode, 'none'); assert.equal(n.charge.percent, 10); assert.equal(n.charge.flat, 0); assert.equal(n.charge.effectiveFrom, '');

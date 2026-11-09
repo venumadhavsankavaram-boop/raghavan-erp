@@ -5031,12 +5031,13 @@ const UPI_KEY = 'upi-settings';
 const UPI_STAFF = ['Admin', 'Principal', 'Accountant'];
 function upiDefaults() {
   return { enabled: false, upiId: '', payeeName: '', qr: '', instructions: '', requireScreenshot: false, maxAgeDays: 10,
-    charge: { mode: 'none', percent: 0, flat: 0, min: 0, max: 0, label: 'UPI charge', effectiveFrom: '', reason: '' }, changes: [] };
+    charge: { mode: 'none', percent: 0, flat: 0, min: 0, max: 0, freeUpTo: 0, label: 'UPI charge', effectiveFrom: '', reason: '' }, changes: [] };
 }
 function upiCalcCharge(fee, charge, onDate) {
   const c = charge || {}; fee = Number(fee) || 0;
   if (!c.mode || c.mode === 'none' || fee <= 0) return 0;
   if (c.effectiveFrom && onDate && String(onDate) < c.effectiveFrom) return 0;
+  if (Number(c.freeUpTo) > 0 && fee <= Number(c.freeUpTo)) return 0;
   let v = c.mode === 'percent' ? fee * (Number(c.percent) || 0) / 100 : (Number(c.flat) || 0);
   if (Number(c.min) > 0) v = Math.max(v, Number(c.min));
   if (Number(c.max) > 0) v = Math.min(v, Number(c.max));
@@ -5052,7 +5053,7 @@ function upiNormalize(b, old) {
   const qr = typeof b.qr === 'string' ? (b.qr === '' ? '' : (/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(b.qr) && b.qr.length <= 700000 ? b.qr : o.qr)) : o.qr;
   return { enabled: b.enabled === true, upiId, payeeName: str(b.payeeName, 80, o.payeeName), qr, instructions: str(b.instructions, 600, o.instructions),
     requireScreenshot: b.requireScreenshot === true, maxAgeDays: Math.round(num(b.maxAgeDays, 1, 60, o.maxAgeDays || 10)),
-    charge: { mode, percent: num(c.percent, 0, 10, oc.percent), flat: num(c.flat, 0, 1000, oc.flat), min: num(c.min, 0, 1000, oc.min), max: num(c.max, 0, 100000, oc.max),
+    charge: { mode, percent: num(c.percent, 0, 10, oc.percent), flat: num(c.flat, 0, 1000, oc.flat), min: num(c.min, 0, 1000, oc.min), max: num(c.max, 0, 100000, oc.max), freeUpTo: num(c.freeUpTo, 0, 100000, oc.freeUpTo || 0),
       label: str(c.label, 40, oc.label) || 'UPI charge', effectiveFrom: /^\d{4}-\d{2}-\d{2}$/.test(String(c.effectiveFrom || '')) ? c.effectiveFrom : '', reason: str(c.reason, 200, oc.reason) },
     changes: Array.isArray(o.changes) ? o.changes.slice(0, 30) : [] };
 }
@@ -5111,7 +5112,7 @@ app.put('/api/upi/settings', async (req, res) => {
     if (next.enabled && !next.upiId && !next.qr) return res.status(400).json({ error: 'Add the UPI ID or the QR image before switching this on.' });
     const who = req.authUser.name || req.authUser.role, notes = [];
     if (next.enabled !== old.enabled) notes.push(next.enabled ? 'switched ON' : 'switched OFF');
-    if (JSON.stringify(next.charge) !== JSON.stringify(old.charge)) { const c = next.charge; notes.push('charge: ' + (c.mode === 'none' ? 'none' : c.mode === 'percent' ? c.percent + '%' : '₹' + c.flat) + (c.min ? ' min ₹' + c.min : '') + (c.max ? ' max ₹' + c.max : '') + (c.effectiveFrom ? ' from ' + c.effectiveFrom : '') + (c.reason ? ' (' + c.reason + ')' : '')); }
+    if (JSON.stringify(next.charge) !== JSON.stringify(old.charge)) { const c = next.charge; notes.push('charge: ' + (c.mode === 'none' ? 'none' : c.mode === 'percent' ? c.percent + '%' : '₹' + c.flat) + (c.freeUpTo ? ' free up to ₹' + c.freeUpTo : '') + (c.min ? ' min ₹' + c.min : '') + (c.max ? ' max ₹' + c.max : '') + (c.effectiveFrom ? ' from ' + c.effectiveFrom : '') + (c.reason ? ' (' + c.reason + ')' : '')); }
     if (next.upiId !== old.upiId) notes.push('UPI ID changed');
     if (next.qr !== old.qr) notes.push('QR image changed');
     next.changes = (notes.length ? [{ at: new Date().toISOString(), by: who, text: notes.join('; ') }] : []).concat(old.changes || []).slice(0, 30);

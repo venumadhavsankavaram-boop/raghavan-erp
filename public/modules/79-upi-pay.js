@@ -28,6 +28,7 @@
     c = c || {}; fee = Number(fee) || 0;
     if(!c.mode || c.mode === 'none' || fee <= 0) return 0;
     if(c.effectiveFrom && onDate && String(onDate) < c.effectiveFrom) return 0;
+    if(Number(c.freeUpTo) > 0 && fee <= Number(c.freeUpTo)) return 0;
     let v = c.mode === 'percent' ? fee * (Number(c.percent) || 0) / 100 : (Number(c.flat) || 0);
     if(Number(c.min) > 0) v = Math.max(v, Number(c.min));
     if(Number(c.max) > 0) v = Math.min(v, Number(c.max));
@@ -92,7 +93,7 @@
     if(!pset || !pset.enabled || !body.isConnected) return;
     let card = body.querySelector('#upParentCard'); if(card) card.remove();
     card = document.createElement('div'); card.id = 'upParentCard'; card.className = 'up-card';
-    const chg = pset.charge && pset.charge.mode !== 'none' ? `<div class="up-note">A ${esc(pset.charge.label || 'UPI charge')} applies to UPI payments${pset.charge.reason ? ' (' + esc(pset.charge.reason) + ')' : ''}. You will see it before you pay.</div>` : '';
+    const chg = pset.charge && pset.charge.mode !== 'none' ? `<div class="up-note">A ${esc(pset.charge.label || 'UPI charge')} applies to UPI payments${pset.charge.freeUpTo ? ' above ' + money(pset.charge.freeUpTo) : ''}${pset.charge.reason ? ' (' + esc(pset.charge.reason) + ')' : ''}. You will see it before you pay.</div>` : '';
     card.innerHTML = `<h3><span>📲 Pay by UPI (school QR)</span><button class="up-btn bl" id="upPayBtn">Pay by UPI</button></h3>
       <div class="up-note">Scan the school QR with any UPI app, then send us the payment reference (UTR). The office checks the bank and issues your receipt.</div>${chg}
       ${pmine.length ? `<div style="margin-top:10px"><b style="font-size:.9rem">My UPI payments</b>${mineHtml()}</div>` : ''}`;
@@ -318,7 +319,8 @@
       <div style="margin-top:10px"><label class="up-note">Instructions for parents (optional)</label><textarea id="stIns" rows="2" maxlength="600" style="width:100%;box-sizing:border-box;padding:9px;border:1px solid #cfd6e6;border-radius:10px;font:inherit" ${dis}>${esc(set.instructions)}</textarea></div>
       <label style="display:flex;gap:8px;margin-top:10px;align-items:center"><input type="checkbox" id="stShot" ${set.requireScreenshot ? 'checked' : ''} ${dis}> Parents must attach a payment screenshot</label></div>
       <div class="up-card"><h3>UPI charge (government / bank policy)</h3><div class="up-note">If a charge is levied on UPI payments, set it here. Parents see "Fee + charge = amount to pay". Change it any time the policy changes; every change is recorded below.</div>
-      <div class="up-f" style="margin-top:8px"><div><label>Charge type</label><select id="chMode" ${dis}><option value="none" ${c.mode === 'none' ? 'selected' : ''}>No charge</option><option value="percent" ${c.mode === 'percent' ? 'selected' : ''}>Percentage of fee</option><option value="flat" ${c.mode === 'flat' ? 'selected' : ''}>Flat amount per payment</option></select></div>
+      <div class="up-f" style="margin-top:8px"><div style="grid-column:1/-1"><label>Quick presets (you can still edit the boxes after)</label><div class="up-row" style="margin:0">${mg ? `<button type="button" class="btn btn-secondary btn-sm" data-pre="none">No charge</button><button type="button" class="btn btn-secondary btn-sm" data-pre="mdr">0.4% above ₹2,000, max ₹300</button><button type="button" class="btn btn-secondary btn-sm" data-pre="flat5">Flat ₹5 above ₹2,000</button>` : ''}</div></div>
+        <div><label>No charge up to (₹)</label><input id="chFree" type="number" step="1" min="0" value="${c.freeUpTo || 0}" ${dis}></div><div><label>Charge type</label><select id="chMode" ${dis}><option value="none" ${c.mode === 'none' ? 'selected' : ''}>No charge</option><option value="percent" ${c.mode === 'percent' ? 'selected' : ''}>Percentage of fee</option><option value="flat" ${c.mode === 'flat' ? 'selected' : ''}>Flat amount per payment</option></select></div>
         <div><label>Percent (%)</label><input id="chPct" type="number" step="0.01" value="${c.percent || 0}" ${dis}></div><div><label>Flat amount (₹)</label><input id="chFlat" type="number" step="0.01" value="${c.flat || 0}" ${dis}></div>
         <div><label>Minimum charge (₹)</label><input id="chMin" type="number" step="0.01" value="${c.min || 0}" ${dis}></div><div><label>Maximum charge (₹, 0 = none)</label><input id="chMax" type="number" step="0.01" value="${c.max || 0}" ${dis}></div>
         <div><label>Name shown to parents</label><input id="chLbl" value="${esc(c.label || 'UPI charge')}" ${dis}></div><div><label>Applies to payments made from</label><input id="chFrom" type="date" value="${esc(c.effectiveFrom || '')}" ${dis}></div>
@@ -328,10 +330,12 @@
       <div class="up-card"><h3>Change history</h3>${(set.changes || []).length ? (set.changes || []).map(h => `<div class="up-note">${dt(h.at)} · <b>${esc(h.by)}</b> · ${esc(h.text)}</div>`).join('') : '<div class="up-note">No changes yet.</div>'}</div>`;
     let newQr = null;
     if(mg){
+      const PRE = { none: { m: 'none', p: 0, f: 0, mn: 0, mx: 0, fr: 0 }, mdr: { m: 'percent', p: 0.4, f: 0, mn: 0, mx: 300, fr: 2000 }, flat5: { m: 'flat', p: 0, f: 5, mn: 0, mx: 0, fr: 2000 } };
+      p.querySelectorAll('[data-pre]').forEach(b => b.onclick = () => { const x = PRE[b.dataset.pre]; $('chMode').value = x.m; $('chPct').value = x.p; $('chFlat').value = x.f; $('chMin').value = x.mn; $('chMax').value = x.mx; $('chFree').value = x.fr; toast('Filled in. Press Save settings to apply.'); });
       $('stQr').onchange = async ev => { const f = ev.target.files[0]; if(!f) return; try{ newQr = await compress(f); $('stQrPrev').innerHTML = `<img src="${newQr}" style="max-width:180px;margin-top:6px;border:1px solid #e3e8f3;border-radius:10px">`; }catch(e){ toast('Could not read that picture.'); } };
       $('stSave').onclick = async () => {
         const body = { enabled: $('stOn').checked, upiId: $('stId').value, payeeName: $('stNm').value, maxAgeDays: Number($('stAge').value), instructions: $('stIns').value, requireScreenshot: $('stShot').checked,
-          charge: { mode: $('chMode').value, percent: Number($('chPct').value), flat: Number($('chFlat').value), min: Number($('chMin').value), max: Number($('chMax').value), label: $('chLbl').value, effectiveFrom: $('chFrom').value, reason: $('chWhy').value } };
+          charge: { mode: $('chMode').value, percent: Number($('chPct').value), flat: Number($('chFlat').value), freeUpTo: Number($('chFree').value), min: Number($('chMin').value), max: Number($('chMax').value), label: $('chLbl').value, effectiveFrom: $('chFrom').value, reason: $('chWhy').value } };
         if(newQr) body.qr = newQr;
         try{ set = await api('PUT', '/api/upi/settings', body); toast('Saved.'); renderStaff(); }catch(e){ toast(e.message); }
       };
