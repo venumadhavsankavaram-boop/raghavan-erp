@@ -52,6 +52,10 @@ test('routes are registered before the SPA catch-all, and the page script is loa
   assert.ok(server.indexOf("app.post('/api/upi/claims'") < server.indexOf('app.get(/.*/'));
   assert.ok(idx.includes('modules/79-upi-pay.js')); assert.ok(ui.includes('navUpiClaims'));
 });
+test('a parent can only claim for their own linked children, never fall back to another child', () => {
+  assert.ok(block.includes('b.studentId ? kids.find(k => k.id === String(b.studentId)) : kids[0]'));
+  assert.ok(block.includes("'That student is not linked to this login.'"));
+});
 test('the parent screen never trusts the client for the charge', () => {
   assert.ok(block.includes('upiCalcCharge(feeAmount, s.charge, paidOn)'));
 });

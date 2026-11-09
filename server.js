@@ -5136,8 +5136,8 @@ app.post('/api/upi/claims', async (req, res) => {
     if (!upiIsParent(req)) return res.status(403).json({ error: 'Only the parent or student login can send a payment for checking.' });
     const s = await upiSettings(); if (!s.enabled) return res.status(409).json({ error: 'UPI payment is not switched on for this school.' });
     await upiEnsureTable(); const b = req.body || {};
-    const kids = await consentKidsOfUser(req.authUser.id); const kid = kids.find(k => k.id === String(b.studentId || '')) || kids[0];
-    if (!kid) return res.status(400).json({ error: 'No student is linked to this login.' });
+    const kids = await consentKidsOfUser(req.authUser.id); const kid = b.studentId ? kids.find(k => k.id === String(b.studentId)) : kids[0];
+    if (!kid) return res.status(b.studentId && kids.length ? 403 : 400).json({ error: b.studentId && kids.length ? 'That student is not linked to this login.' : 'No student is linked to this login.' });
     const utr = String(b.utr || '').replace(/\s+/g, '');
     if (!/^\d{12}$/.test(utr)) return res.status(400).json({ error: 'The UPI reference (UTR) has 12 digits. Please copy it from your UPI app, under the payment details.' });
     const today = todayInSchoolTz(); const paidOn = String(b.paidOn || '');
