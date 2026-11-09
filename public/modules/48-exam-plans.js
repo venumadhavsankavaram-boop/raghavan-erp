@@ -59,6 +59,7 @@
 
   let plans = [], editing = null, noteFor = null;
   function targets(){
+    if(isMgr()){ const out = []; (typeof subjectsList !== 'undefined' ? subjectsList : []).forEach(sj => (sj.sections || []).forEach(sec => out.push({ subject: sj.name, className: sj.className, section: sec }))); return out; }
     const sc = myTeacherScope(); return (sc && sc.subjectSections) || [];
   }
   const examOptions = cls => (typeof examDefs !== 'undefined' ? examDefs : []).filter(e => { try{ return classAllowedForExamType(e.examType, cls); }catch(x){ return true; } });
@@ -86,6 +87,7 @@
 
   function formHtml(){
     const tg = targets();
+    if(!tg.length && isMgr()) return '<div class="ep-sm">No subjects are set up yet. Add classes and subjects in Manage Subjects first.</div>';
     if(!tg.length) return `<div class="ep-sm">${(myTeacherScope() || {}).unlinked ? 'Your login is not linked to a staff profile yet — please ask the Admin.' : 'No classes or subjects are assigned to you yet — please ask the Admin.'}</div>`;
     const classes = [...new Set(tg.map(t => t.className))];
     const e = editing || {};
@@ -101,7 +103,7 @@
       <div><label>Start time</label><input type="time" id="epTime" value="${esc(e.startTime || '')}"></div>
       <div><label>Duration (minutes)</label><input type="number" id="epDur" min="5" max="600" value="${esc(e.durationMin || 60)}"></div>
       <div class="full"><label>Instructions for students (optional)</label><textarea id="epInstr" rows="2" maxlength="2000" placeholder="e.g. Bring geometry box. No calculators.">${esc(e.instructions || '')}</textarea></div>
-      <div class="full"><button class="btn btn-primary" id="epSubmit" onclick="epSubmit()">${editing ? 'Resubmit for approval' : 'Submit for approval'}</button>${editing ? ' <button class="btn btn-ghost" onclick="epEdit(null)">Cancel</button>' : ''} <span class="ep-sm" id="epMsg"></span></div>
+      <div class="full"><button class="btn btn-primary" id="epSubmit" onclick="epSubmit()">${isMgr() ? (editing ? 'Save and approve' : 'Save and approve') : (editing ? 'Resubmit for approval' : 'Submit for approval')}</button>${editing ? ' <button class="btn btn-ghost" onclick="epEdit(null)">Cancel</button>' : ''} <span class="ep-sm" id="epMsg"></span></div>
     </div>`;
   }
   function wireForm(){
@@ -131,11 +133,11 @@
     const mgr = isMgr();
     const waiting = plans.filter(p => p.status === 'Submitted');
     el.innerHTML = `<div class="topbar"><div><h1>Exam Plans</h1><p>${mgr ? 'Teachers submit their exam plans here. Approve them or send them back with a note.' : 'Plan an exam for your subject and submit it. The Principal approves it before students see it.'}</p></div></div>
-      ${mgr ? `<div class="ep-card"><h3>Waiting for your approval ${waiting.length ? `<span style="background:#fdf0d0;color:#8a5a00;border-radius:999px;padding:2px 10px;font-size:.8rem;">${waiting.length}</span>` : ''}</h3>${waiting.length ? waiting.map(p => planCard(p, true)).join('') : '<div class="ep-sm">Nothing is waiting. 🎉</div>'}</div>
+      ${mgr ? `<div class="ep-card"><h3>${editing ? 'Edit plan' : 'Plan a new exam'}</h3><div class="ep-sm" style="margin:-4px 0 10px;">Plans you create here are approved straight away and shown to the class.</div>${formHtml()}</div><div class="ep-card"><h3>Waiting for your approval ${waiting.length ? `<span style="background:#fdf0d0;color:#8a5a00;border-radius:999px;padding:2px 10px;font-size:.8rem;">${waiting.length}</span>` : ''}</h3>${waiting.length ? waiting.map(p => planCard(p, true)).join('') : '<div class="ep-sm">Nothing is waiting. 🎉</div>'}</div>
         <div class="ep-card"><h3>All plans</h3>${plans.filter(p => p.status !== 'Submitted').length ? plans.filter(p => p.status !== 'Submitted').map(p => planCard(p, true)).join('') : '<div class="ep-sm">No other plans yet.</div>'}</div>`
       : `<div class="ep-card"><h3>${editing ? 'Edit plan' : 'Plan a new exam'}</h3>${formHtml()}</div>
          <div class="ep-card"><h3>My exam plans</h3>${plans.length ? plans.map(p => planCard(p, false)).join('') : '<div class="ep-sm">You have not planned any exam yet.</div>'}</div>`}`;
-    if(!mgr) wireForm();
+    wireForm();
   }
 
   window.epEdit = function(id){ editing = id ? plans.find(p => p.id === id) || null : null; render().then(() => window.scrollTo({ top: 0, behavior: 'smooth' })); };
@@ -148,8 +150,11 @@
       maxMarks: $('epMarks').value, examDate: $('epDate').value, startTime: $('epTime').value, durationMin: $('epDur').value, instructions: $('epInstr').value };
     const btn = $('epSubmit'); btn.disabled = true;
     try{
-      if(editing) await api('PUT', '/api/exam-plans/' + encodeURIComponent(editing.id), body); else await api('POST', '/api/exam-plans', body);
-      toast('Submitted for approval.'); editing = null; render();
+      let res;
+      if(editing) res = await api('PUT', '/api/exam-plans/' + encodeURIComponent(editing.id), body); else res = await api('POST', '/api/exam-plans', body);
+      const wasEditing = editing; editing = null;
+      if(isMgr()){ await render(); const pid = wasEditing ? wasEditing.id : (res && res.id); if(pid) await window.epApprove(pid); else toast('Saved.'); }
+      else { toast('Submitted for approval.'); render(); }
     }catch(e){ toast(e.message); btn.disabled = false; }
   };
   window.epDelete = async function(id){

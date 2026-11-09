@@ -102,7 +102,10 @@
   }
 
   let exams = [], draft = null, noteFor = null, viewing = null, resData = null, marking = null;
-  const targets = () => { const sc = (typeof myTeacherScope === 'function') ? myTeacherScope() : null; return (sc && sc.subjectSections) || []; };
+  const targets = () => {
+    if(isMgr()){ const out = []; (typeof subjectsList !== 'undefined' ? subjectsList : []).forEach(sj => (sj.sections || []).forEach(sec => out.push({ subject: sj.name, className: sj.className, section: sec }))); return out; }
+    const sc = (typeof myTeacherScope === 'function') ? myTeacherScope() : null; return (sc && sc.subjectSections) || [];
+  };
   const blankQ = type => type === 'tf' ? { type: 'tf', text: '', answer: 0, marks: 1 } : type === 'short' ? { type: 'short', text: '', keyAnswer: '', marks: 5 } : { type: 'mcq', text: '', options: ['', '', '', ''], answer: 0, marks: 1 };
   const newDraft = () => { const t = targets()[0] || {}; const now = Date.now(); const start = Math.ceil((now + 3600000) / 900000) * 900000; return { id: '', title: '', className: t.className || '', section: t.section || '', subject: t.subject || '', durationMin: 30, startMs: start, endMs: start + 3 * 3600000, instructions: '', showKey: false, questions: [blankQ('mcq')] }; };
 
@@ -137,6 +140,7 @@
 
   function builderHtml(){
     const tg = targets();
+    if(!tg.length && isMgr()) return '<div class="oe-sm">No subjects are set up yet. Add classes and subjects in Manage Subjects first.</div>';
     if(!tg.length) return `<div class="oe-sm">${(typeof myTeacherScope === 'function' && (myTeacherScope() || {}).unlinked) ? 'Your login is not linked to a staff profile yet — please ask the Admin.' : 'No classes or subjects are assigned to you yet — please ask the Admin.'}</div>`;
     const d = draft; const classes = [...new Set(tg.map(t => t.className))];
     const total = mk(d.questions.reduce((a, q) => a + num(q.marks), 0));
@@ -155,7 +159,7 @@
     <h3 style="margin:16px 0 8px;font-size:1rem;color:var(--navy,#14325c);">Questions <span class="oe-sm">· ${d.questions.length} question${d.questions.length === 1 ? '' : 's'} · ${total} marks in total</span></h3>
     ${d.questions.map(questionEditor).join('')}
     <div class="oe-acts"><button class="btn btn-ghost btn-sm" type="button" onclick="oeAddQ('mcq')">+ Multiple choice</button><button class="btn btn-ghost btn-sm" type="button" onclick="oeAddQ('tf')">+ True / False</button><button class="btn btn-ghost btn-sm" type="button" onclick="oeAddQ('short')">+ Written answer</button></div>
-    <div class="oe-acts" style="margin-top:16px;"><button class="btn btn-primary" id="oeSave" type="button" onclick="oeSubmit()">${d.id ? 'Resubmit for approval' : 'Submit for approval'}</button>${d.id ? ' <button class="btn btn-ghost" type="button" onclick="oeEdit(null)">Cancel</button>' : ''}<span class="oe-sm" id="oeMsg"></span></div>`;
+    <div class="oe-acts" style="margin-top:16px;"><button class="btn btn-primary" id="oeSave" type="button" onclick="oeSubmit()">${isMgr() ? 'Save and approve' : (d.id ? 'Resubmit for approval' : 'Submit for approval')}</button>${d.id ? ' <button class="btn btn-ghost" type="button" onclick="oeEdit(null)">Cancel</button>' : ''}<span class="oe-sm" id="oeMsg"></span></div>`;
   }
   function wireBuilder(){
     if(!$('oeClass')) return; const tg = targets(), d = draft;
@@ -182,8 +186,11 @@
     const body = { title: d.title, className: d.className, section: d.section, subject: d.subject, durationMin: d.durationMin, startMs: d.startMs, endMs: d.endMs, instructions: d.instructions, showKey: d.showKey,
       questions: d.questions.map(q => ({ type: q.type, text: q.text, marks: q.marks, options: q.options, answer: q.answer, keyAnswer: q.keyAnswer })) };
     try{
-      if(d.id) await api('PUT', '/api/online-exams/' + encodeURIComponent(d.id), body); else await api('POST', '/api/online-exams', body);
-      toast('Submitted for approval.'); draft = null; render();
+      let res;
+      if(d.id) res = await api('PUT', '/api/online-exams/' + encodeURIComponent(d.id), body); else res = await api('POST', '/api/online-exams', body);
+      const pid = d.id || (res && res.id); draft = null;
+      if(isMgr()){ await render(); if(pid) await window.oeApprove(pid); else toast('Saved.'); }
+      else { toast('Submitted for approval.'); render(); }
     }catch(e){ toast(e.message); btn.disabled = false; $('oeMsg').textContent = e.message; }
   };
   window.oeNote = function(id){ noteFor = id; render(true); };
@@ -269,9 +276,11 @@
     if(!keep){ try{ exams = await api('GET', '/api/online-exams'); }catch(e){ exams = []; } }
     const mgr = isMgr(); const waiting = exams.filter(e => e.status === 'Submitted');
     if(mgr){
-      el.innerHTML = `<div class="topbar"><div><h1>Online Exams</h1><p>Teachers set timed exams for their classes. Approve one and it goes live to the students at its opening time.</p></div></div>
+      el.innerHTML = `<div class="topbar"><div><h1>Online Exams</h1><p>Teachers set timed exams for their classes. Approve one and it goes live to the students at its opening time. You can also set an exam yourself: it is approved as soon as you save it.</p></div></div>
+        <div class="oe-card"><h3>${draft ? (draft.id ? 'Edit exam' : 'New online exam') : 'Create an online exam'}</h3>${draft ? builderHtml() : '<button class="btn btn-primary" onclick="oeEdit(null)">+ New online exam</button>'}</div>
         <div class="oe-card"><h3>Waiting for your approval ${waiting.length ? `<span style="background:#fdf0d0;color:#8a5a00;border-radius:999px;padding:2px 10px;font-size:.8rem;">${waiting.length}</span>` : ''}</h3>${waiting.length ? waiting.map(e => examCard(e, true)).join('') : '<div class="oe-sm">Nothing is waiting. 🎉</div>'}</div>
         <div class="oe-card"><h3>All online exams</h3>${exams.filter(e => e.status !== 'Submitted').length ? exams.filter(e => e.status !== 'Submitted').map(e => examCard(e, true)).join('') : '<div class="oe-sm">No other online exams yet.</div>'}</div>`;
+      wireBuilder();
       return;
     }
     if(!draft) draft = null;
