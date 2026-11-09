@@ -126,6 +126,7 @@ function renderAcctOverview(body){
 }
 
 /* ---------- 2. Daily Collections (Admin only) ---------- */
+var acctDcView = 'rcptAsc', acctDcSearch = '';
 function renderAcctDailyCollectionsTab(body){
   const d = acctDailyCollectionsDate || acctToday();
   const todayStr = acctToday();
@@ -153,7 +154,27 @@ function renderAcctDailyCollectionsTab(body){
     ...feePays.map(p => ({ type:Number(p.amount) < 0 ? 'Refund' : 'Fee payment', party:p.studentName||'Student', detail:FEE[p.category]||p.category, mode:p.mode||'—', ref:p.receiptNo||'—', amount:Number(p.amount)||0 })),
     ...otherInc.map(i => ({ type:'Other income', party:i.party||'—', detail:i.category, mode:i.mode||'—', ref:i.voucherNo||'—', amount:Number(i.amount)||0 })),
     ...invSales.map(s => ({ type:'Inventory sale', party:s.buyerName||s.buyerType, detail:s.itemName, mode:s.mode||'—', ref:'—', amount:Number(s.paidAmount)||0 })),
-  ].sort((a,b) => b.amount - a.amount);
+  ];
+  const dcView = acctDcView || 'rcptAsc', dcQ = (acctDcSearch || '').trim().toLowerCase();
+  const rcptNo = t => (t.ref && t.ref !== '—') ? String(t.ref) : '';
+  const byRcpt = dir => (a, b) => { const x = rcptNo(a), y = rcptNo(b); if(!x && !y) return b.amount - a.amount; if(!x) return 1; if(!y) return -1; return dir * x.localeCompare(y, undefined, { numeric:true }) || b.amount - a.amount; };
+  const txAll = tx.length;
+  const txShown = dcQ ? tx.filter(t => [t.type, t.detail, t.party, t.mode, t.ref].join(' ').toLowerCase().includes(dcQ)) : tx.slice();
+  let groups;   // [[title, rows]]
+  if(dcView === 'amount'){ txShown.sort((a,b) => b.amount - a.amount); groups = [['', txShown]]; }
+  else if(dcView === 'rcptDesc'){ txShown.sort(byRcpt(-1)); groups = [['', txShown]]; }
+  else if(dcView === 'mode' || dcView === 'source' || dcView === 'type'){
+    const keyOf = t => dcView === 'mode' ? (t.mode && t.mode !== '—' ? t.mode : 'Unspecified') : dcView === 'type' ? t.type : (t.type === 'Fee payment' || t.type === 'Refund' ? (t.detail || 'Fee payment') : t.type + ' — ' + (t.detail || ''));
+    const map = new Map(); txShown.forEach(t => { const k = keyOf(t); if(!map.has(k)) map.set(k, []); map.get(k).push(t); });
+    groups = Array.from(map.entries()).map(([k, rows]) => [k, rows.sort(byRcpt(1))]).sort((a, b) => a[0].localeCompare(b[0]));
+  } else { txShown.sort(byRcpt(1)); groups = [['', txShown]]; }
+  const dcOpts = [['rcptAsc','Receipt no. (lowest first)'],['rcptDesc','Receipt no. (highest first)'],['mode','Group by payment mode'],['source','Group by source'],['type','Group by type'],['amount','Amount (highest first)']];
+  const dcRow = t => `<tr><td>${t.type}</td><td>${escapeHtml(t.detail||'—')}</td><td>${escapeHtml(t.party||'—')}</td><td>${escapeHtml(t.mode)}</td><td><b>${escapeHtml(t.ref)}</b></td><td class="acx-r"><b class="${acxMoneyTone(t.amount)}">${fmtMoney(t.amount)}</b></td></tr>`;
+  const dcSum = rows => rows.reduce((s, t) => s + t.amount, 0);
+  const dcTable = txShown.length ? `<div class="table-wrap"><table class="iv-table"><thead><tr><th>Type</th><th>Detail</th><th>Party</th><th>Mode</th><th>Receipt / Voucher</th><th class="acx-r">Amount</th></tr></thead><tbody>
+        ${groups.map(([k, rows]) => (k ? `<tr><td colspan="4" style="background:#f4f7fd;font-weight:700">${escapeHtml(k)} <span style="font-weight:500;color:#667">· ${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}</span></td><td style="background:#f4f7fd"></td><td class="acx-r" style="background:#f4f7fd"><b>${fmtMoney(dcSum(rows))}</b></td></tr>` : '') + rows.map(dcRow).join('')).join('')}
+        <tr><td colspan="5" style="text-align:right"><b>${dcQ ? 'Total of ' + txShown.length + ' shown' : 'Total'}</b></td><td class="acx-r"><b>${fmtMoney(dcSum(txShown))}</b></td></tr>
+      </tbody></table></div>` : acxEmpty(txAll ? 'Nothing matches your search' : 'No transactions on this date');
 
   body.innerHTML = `
     <div class="iv-toolbar">
@@ -171,9 +192,11 @@ function renderAcctDailyCollectionsTab(body){
     </div>
     <section class="sf-card acx-card">
       <h4>Transaction detail</h4>
-      ${tx.length ? `<div class="table-wrap"><table class="iv-table"><thead><tr><th>Type</th><th>Detail</th><th>Party</th><th>Mode</th><th>Receipt / Voucher</th><th class="acx-r">Amount</th></tr></thead><tbody>
-        ${tx.map(t => `<tr><td>${t.type}</td><td>${escapeHtml(t.detail||'—')}</td><td>${escapeHtml(t.party||'—')}</td><td>${escapeHtml(t.mode)}</td><td>${escapeHtml(t.ref)}</td><td class="acx-r"><b class="${acxMoneyTone(t.amount)}">${fmtMoney(t.amount)}</b></td></tr>`).join('')}
-      </tbody></table></div>` : acxEmpty('No transactions on this date')}
+      <div class="iv-toolbar" style="margin-bottom:10px">
+        <label class="acx-date"><span>Show in order</span><select class="input" onchange="acctDcView=this.value; renderAcctDailyCollectionsTab(document.getElementById('accountingBody'));">${dcOpts.map(([v, l]) => `<option value="${v}" ${v === dcView ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <input class="input iv-search" id="acctDcSearch" type="search" placeholder="Search name, receipt, mode" value="${escapeHtml(acctDcSearch || '')}" oninput="acctDcSearch=this.value; clearTimeout(window.__dcT); window.__dcT=setTimeout(function(){ renderAcctDailyCollectionsTab(document.getElementById('accountingBody')); var e=document.getElementById('acctDcSearch'); if(e){ e.focus(); e.setSelectionRange(e.value.length, e.value.length); } }, 250);">
+      </div>
+      ${dcTable}
     </section>`;
 }
 
