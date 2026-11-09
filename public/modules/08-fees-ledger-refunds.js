@@ -363,8 +363,15 @@ let refundPaymentId = null;
     renderFeeBody();
     const totalPaid = studentIds.reduce((sum,sid) => sum + byStudent[sid].reduce((s,h)=>s+h.amount,0), 0);
     showToast(results.length + ' receipt(s) generated for ' + results.length + ' student(s): ' + results.map(r => r.receiptNo).join(', ') + '.', 'radial', totalPaid);
-    if(await showConfirmDialog('Payment(s) recorded — Receipt No. ' + results.map(r => r.receiptNo).join(', ') + '. Print receipt(s) now?')){
-      results.forEach(r => printReceiptByNo(r.receiptNo));
+    // Browsers allow only one print window per click, so ask for each student's receipt in turn.
+    for(let i = 0; i < results.length; i++){
+      const r = results[i];
+      const nm = (students.find(s => s.id === r.studentId) || {}).name || 'student';
+      const amt = r.records.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+      const msg = results.length > 1
+        ? 'Receipt ' + (i + 1) + ' of ' + results.length + ': ' + nm + ' — Receipt No. ' + r.receiptNo + ', ' + fmtMoney(amt) + '. Print it now?'
+        : 'Payment recorded — Receipt No. ' + r.receiptNo + '. Print receipt now?';
+      if(await showConfirmDialog(msg, { title: 'Print receipt', okText: 'Print', cancelText: 'Skip' })) await printReceiptByNo(r.receiptNo);
     }
   }
 
