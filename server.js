@@ -5023,6 +5023,278 @@ app.get('/api/users/activity', async (req, res) => {
   } catch (err) { console.error('users activity error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 
+// ---------- UPI payment claims (parents pay by QR, the office verifies, a receipt is issued) ----------
+// Nothing is marked paid on a parent's word. A claim needs a 12-digit UTR (unique across the whole school), is checked by the
+// office against the bank credit, and only then becomes a normal fee receipt (once only, under a lock).
+// The optional UPI charge (a flat or percentage convenience fee) is set by the Admin and recomputed on the server.
+const UPI_KEY = 'upi-settings';
+const UPI_STAFF = ['Admin', 'Principal', 'Accountant'];
+function upiDefaults() {
+  return { enabled: false, upiId: '', payeeName: '', qr: '', instructions: '', requireScreenshot: false, maxAgeDays: 10,
+    charge: { mode: 'none', percent: 0, flat: 0, min: 0, max: 0, label: 'UPI charge', effectiveFrom: '', reason: '' }, changes: [] };
+}
+function upiCalcCharge(fee, charge, onDate) {
+  const c = charge || {}; fee = Number(fee) || 0;
+  if (!c.mode || c.mode === 'none' || fee <= 0) return 0;
+  if (c.effectiveFrom && onDate && String(onDate) < c.effectiveFrom) return 0;
+  let v = c.mode === 'percent' ? fee * (Number(c.percent) || 0) / 100 : (Number(c.flat) || 0);
+  if (Number(c.min) > 0) v = Math.max(v, Number(c.min));
+  if (Number(c.max) > 0) v = Math.min(v, Number(c.max));
+  return Math.round(v * 100) / 100;
+}
+function upiNormalize(b, old) {
+  const d = upiDefaults(); b = (b && typeof b === 'object') ? b : {}; const o = old || d;
+  const str = (x, n, def) => (typeof x === 'string' ? x.trim().slice(0, n) : def);
+  const num = (x, lo, hi, def) => { const n = Number(x); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n * 100) / 100)) : def; };
+  const c = b.charge || {}; const oc = o.charge || d.charge;
+  const mode = ['none', 'percent', 'flat'].includes(c.mode) ? c.mode : oc.mode;
+  const upiId = str(b.upiId, 100, o.upiId).replace(/\s+/g, '');
+  const qr = typeof b.qr === 'string' ? (b.qr === '' ? '' : (/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(b.qr) && b.qr.length <= 700000 ? b.qr : o.qr)) : o.qr;
+  return { enabled: b.enabled === true, upiId, payeeName: str(b.payeeName, 80, o.payeeName), qr, instructions: str(b.instructions, 600, o.instructions),
+    requireScreenshot: b.requireScreenshot === true, maxAgeDays: Math.round(num(b.maxAgeDays, 1, 60, o.maxAgeDays || 10)),
+    charge: { mode, percent: num(c.percent, 0, 10, oc.percent), flat: num(c.flat, 0, 1000, oc.flat), min: num(c.min, 0, 1000, oc.min), max: num(c.max, 0, 100000, oc.max),
+      label: str(c.label, 40, oc.label) || 'UPI charge', effectiveFrom: /^\d{4}-\d{2}-\d{2}$/.test(String(c.effectiveFrom || '')) ? c.effectiveFrom : '', reason: str(c.reason, 200, oc.reason) },
+    changes: Array.isArray(o.changes) ? o.changes.slice(0, 30) : [] };
+}
+let _upiCache = { at: 0, v: null }, _upiTable = false;
+async function upiSettings() {
+  if (_upiCache.v && Date.now() - _upiCache.at < 5000) return _upiCache.v;
+  let v = upiDefaults();
+  try { const r = await sql`SELECT value FROM kv_store WHERE \`key\` = ${UPI_KEY}`; if (r.length) { let x = r[0].value; if (typeof x === 'string') x = JSON.parse(x); v = Object.assign(upiNormalize(x, upiDefaults()), { enabled: !!(x && x.enabled), changes: (x && x.changes) || [] }); } } catch (_) { /* defaults */ }
+  _upiCache = { at: Date.now(), v }; return v;
+}
+async function upiEnsureTable() {
+  if (_upiTable) return;
+  await sql`CREATE TABLE IF NOT EXISTS upi_claims (
+    id VARCHAR(40) PRIMARY KEY, student_id VARCHAR(191) NOT NULL, user_id VARCHAR(191) NOT NULL, user_name TEXT,
+    fee_lines TEXT NOT NULL, fee_amount DECIMAL(14,2) NOT NULL, charge_amount DECIMAL(14,2) NOT NULL DEFAULT 0, paid_total DECIMAL(14,2) NOT NULL,
+    utr VARCHAR(20) NOT NULL, utr_key VARCHAR(20) NULL, ref_code VARCHAR(12) NOT NULL, paid_on VARCHAR(12) NOT NULL, paid_time VARCHAR(8) NOT NULL DEFAULT '',
+    payer_note VARCHAR(300) NOT NULL DEFAULT '', screenshot MEDIUMTEXT NULL, status VARCHAR(12) NOT NULL DEFAULT 'submitted', flags TEXT, bank_check VARCHAR(20) NOT NULL DEFAULT '',
+    reviewed_by TEXT, reviewed_role VARCHAR(40), reviewed_at DATETIME NULL, reject_reason VARCHAR(300) NOT NULL DEFAULT '', credited_amount DECIMAL(14,2) NULL, received_total DECIMAL(14,2) NULL,
+    receipt_nos TEXT, history TEXT, class_at_payment TEXT, ip VARCHAR(64), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_upi_utr_key (utr_key), UNIQUE KEY uq_upi_ref (ref_code))`;
+  await createIndexIfMissing('idx_upi_claims_status', 'upi_claims', 'status');
+  await createIndexIfMissing('idx_upi_claims_student', 'upi_claims', 'student_id');
+  _upiTable = true;
+}
+const upiIsParent = req => !!req.authUser && PARENT_LOGIN_ROLES.includes(req.authUser.role) && !req.authUser.impersonatedBy;
+const upiIsStaff = req => !!req.authUser && UPI_STAFF.includes(req.authUser.role) && !req.authUser.impersonatedBy;
+const upiHist = (row, who, what) => { let h = []; try { h = JSON.parse(row.history || '[]'); } catch (_) {} h.push({ at: new Date().toISOString(), by: who, what }); return JSON.stringify(h.slice(-30)); };
+const upiParse = (s, def) => { try { const v = JSON.parse(s); return v == null ? def : v; } catch (_) { return def; } };
+function upiOut(r, withShot) {
+  const lines = upiParse(r.fee_lines, []);
+  return { id: r.id, studentId: r.student_id, studentName: r.student_name || '', className: r.class_name || r.class_at_payment || '', section: r.section || '', admissionNo: r.admission_no || '', userName: r.user_name || '',
+    lines, feeAmount: Number(r.fee_amount), chargeAmount: Number(r.charge_amount), paidTotal: Number(r.paid_total), utr: r.utr, refCode: r.ref_code, paidOn: r.paid_on, paidTime: r.paid_time, note: r.payer_note,
+    status: r.status, flags: upiParse(r.flags, []), bankCheck: r.bank_check, reviewedBy: r.reviewed_by || '', reviewedAt: r.reviewed_at ? new Date(r.reviewed_at).toISOString() : '', rejectReason: r.reject_reason,
+    creditedAmount: r.credited_amount == null ? null : Number(r.credited_amount), receivedTotal: r.received_total == null ? null : Number(r.received_total), receiptNos: upiParse(r.receipt_nos, []),
+    hasShot: !!Number(r.has_shot), createdAt: new Date(r.created_at).toISOString(), history: withShot ? upiParse(r.history, []) : undefined };
+}
+const UPI_SELECT = `SELECT c.id, c.student_id, c.user_id, c.user_name, c.fee_lines, c.fee_amount, c.charge_amount, c.paid_total, c.utr, c.ref_code, c.paid_on, c.paid_time, c.payer_note, c.status, c.flags, c.bank_check,
+  c.reviewed_by, c.reviewed_at, c.reject_reason, c.credited_amount, c.received_total, c.receipt_nos, c.history, c.class_at_payment, c.created_at, (c.screenshot IS NOT NULL AND c.screenshot <> '') AS has_shot,
+  CONCAT(COALESCE(s.last_name, ''), ' ', COALESCE(s.first_name, '')) AS student_name, s.class_name, s.section, s.admission_no
+  FROM upi_claims c LEFT JOIN students s ON s.id = c.student_id`;
+
+app.get('/api/upi/settings', async (req, res) => {
+  try {
+    if (!req.authUser) return res.status(401).json({ error: 'Please sign in.' });
+    const s = await upiSettings();
+    if (upiIsStaff(req)) return res.status(200).json(s);
+    if (!upiIsParent(req) || !s.enabled) return res.status(200).json({ enabled: false });
+    return res.status(200).json({ enabled: true, upiId: s.upiId, payeeName: s.payeeName, qr: s.qr, instructions: s.instructions, requireScreenshot: s.requireScreenshot, maxAgeDays: s.maxAgeDays, charge: s.charge });
+  } catch (err) { console.error('upi settings error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.put('/api/upi/settings', async (req, res) => {
+  try {
+    if (!req.authUser || !MATERIAL_MGR.includes(req.authUser.role) || req.authUser.impersonatedBy) return res.status(403).json({ error: 'Only the Admin or Principal can change this.' });
+    const old = await upiSettings(); const body = req.body || {}; const next = upiNormalize(body, old);
+    if (next.upiId && !/^[a-zA-Z0-9.\-_]{2,100}@[a-zA-Z0-9]{2,40}$/.test(next.upiId)) return res.status(400).json({ error: 'That UPI ID does not look right. It should look like name@sbi.' });
+    if (next.enabled && !next.upiId && !next.qr) return res.status(400).json({ error: 'Add the UPI ID or the QR image before switching this on.' });
+    const who = req.authUser.name || req.authUser.role, notes = [];
+    if (next.enabled !== old.enabled) notes.push(next.enabled ? 'switched ON' : 'switched OFF');
+    if (JSON.stringify(next.charge) !== JSON.stringify(old.charge)) { const c = next.charge; notes.push('charge: ' + (c.mode === 'none' ? 'none' : c.mode === 'percent' ? c.percent + '%' : '₹' + c.flat) + (c.min ? ' min ₹' + c.min : '') + (c.max ? ' max ₹' + c.max : '') + (c.effectiveFrom ? ' from ' + c.effectiveFrom : '') + (c.reason ? ' (' + c.reason + ')' : '')); }
+    if (next.upiId !== old.upiId) notes.push('UPI ID changed');
+    if (next.qr !== old.qr) notes.push('QR image changed');
+    next.changes = (notes.length ? [{ at: new Date().toISOString(), by: who, text: notes.join('; ') }] : []).concat(old.changes || []).slice(0, 30);
+    await sql`INSERT INTO kv_store (\`key\`, value) VALUES (${UPI_KEY}, ${JSON.stringify(next)}) ON DUPLICATE KEY UPDATE value = VALUES(value)`;
+    _upiCache = { at: 0, v: null };
+    if (notes.length) auditNote(req.authUser.name, req.authUser.role, 'PUT', 'upi-settings', UPI_KEY, notes.join('; ').slice(0, 300), clientIp(req));
+    return res.status(200).json(next);
+  } catch (err) { console.error('upi settings save error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+// Parent: the claims for their own child (or children), newest first. The screenshot itself is never sent here.
+app.get('/api/upi/mine', async (req, res) => {
+  try {
+    if (!upiIsParent(req)) return res.status(200).json([]);
+    await upiEnsureTable(); const kids = await consentKidsOfUser(req.authUser.id); if (!kids.length) return res.status(200).json([]);
+    const ph = kids.map((_, i) => `$${i + 1}`).join(', ');
+    const rows = await sql.query(`${UPI_SELECT} WHERE c.student_id IN (${ph}) ORDER BY c.created_at DESC LIMIT 40`, kids.map(k => k.id));
+    return res.status(200).json(rows.map(r => upiOut(r, false)));
+  } catch (err) { console.error('upi mine error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/upi/claims', async (req, res) => {
+  try {
+    if (!upiIsParent(req)) return res.status(403).json({ error: 'Only the parent or student login can send a payment for checking.' });
+    const s = await upiSettings(); if (!s.enabled) return res.status(409).json({ error: 'UPI payment is not switched on for this school.' });
+    await upiEnsureTable(); const b = req.body || {};
+    const kids = await consentKidsOfUser(req.authUser.id); const kid = kids.find(k => k.id === String(b.studentId || '')) || kids[0];
+    if (!kid) return res.status(400).json({ error: 'No student is linked to this login.' });
+    const utr = String(b.utr || '').replace(/\s+/g, '');
+    if (!/^\d{12}$/.test(utr)) return res.status(400).json({ error: 'The UPI reference (UTR) has 12 digits. Please copy it from your UPI app, under the payment details.' });
+    const today = todayInSchoolTz(); const paidOn = String(b.paidOn || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn)) return res.status(400).json({ error: 'Please choose the date you paid.' });
+    if (paidOn > today) return res.status(400).json({ error: 'The payment date cannot be in the future.' });
+    const ageDays = Math.round((new Date(today) - new Date(paidOn)) / 86400000);
+    if (ageDays > (s.maxAgeDays || 10)) return res.status(400).json({ error: `Payments older than ${s.maxAgeDays || 10} days cannot be sent here. Please visit the school office with your phone.` });
+    const rawLines = Array.isArray(b.lines) ? b.lines.slice(0, 8) : []; if (!rawLines.length) return res.status(400).json({ error: 'Please choose what you paid for.' });
+    const lines = []; const seen = new Set();
+    for (const l of rawLines) {
+      const amount = Math.round(Number(l && l.amount) * 100) / 100; const type = l && l.type === 'extra' ? 'extra' : 'fee'; const key = String((l && l.key) || '');
+      if (!amount || amount <= 0 || amount > ONLINE_PAY_MAX) return res.status(400).json({ error: 'Invalid amount.' });
+      if (seen.has(type + ':' + key)) return res.status(400).json({ error: 'The same fee is listed twice.' }); seen.add(type + ':' + key);
+      let category = 'fee', extraId = null, extraName = null;
+      if (type === 'extra') {
+        const rows = await sql`SELECT * FROM student_extra_fees WHERE id = ${key} AND student_id = ${kid.id}`;
+        if (!rows.length) return res.status(400).json({ error: 'That fee was not found for this student.' });
+        const owed = (Number(rows[0].amount) || 0) - (Number(rows[0].paid_amount) || 0);
+        if (amount > owed + 0.005) return res.status(400).json({ error: 'That is more than is due for this fee. Refresh the page and try again.' });
+        category = 'extra'; extraId = rows[0].id; extraName = rows[0].name;
+      } else { if (!/^[A-Za-z0-9_-]{1,40}$/.test(key)) return res.status(400).json({ error: 'Invalid fee type.' }); category = key; }
+      lines.push({ type, key, category, extraFeeId: extraId, extraFeeName: extraName, label: String(l.label || '').slice(0, 100), amount });
+    }
+    const feeAmount = Math.round(lines.reduce((t, l) => t + l.amount, 0) * 100) / 100; const charge = upiCalcCharge(feeAmount, s.charge, paidOn);
+    const paidTotal = Math.round(Number(b.paidTotal) * 100) / 100; if (!paidTotal || paidTotal <= 0 || paidTotal > ONLINE_PAY_MAX) return res.status(400).json({ error: 'Please type the total amount you paid.' });
+    let shot = null; if (b.screenshot) { shot = String(b.screenshot); if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(shot) || shot.length > 700000) return res.status(400).json({ error: 'The screenshot is not a valid picture, or is too large.' }); }
+    if (s.requireScreenshot && !shot) return res.status(400).json({ error: 'Please attach a screenshot of the successful payment.' });
+    const dayCount = await sql`SELECT COUNT(*) AS c FROM upi_claims WHERE user_id = ${req.authUser.id} AND created_at > (NOW() - INTERVAL 1 DAY)`; if (Number(dayCount[0].c) >= 10) return res.status(429).json({ error: 'Too many submissions today. Please contact the school office.' });
+    const open = await sql`SELECT COUNT(*) AS c FROM upi_claims WHERE student_id = ${kid.id} AND status = 'submitted'`; if (Number(open[0].c) >= 5) return res.status(429).json({ error: 'Several payments are already waiting to be checked. Please wait for the office to verify them.' });
+    // Duplicate protection: one UTR is one payment, school-wide.
+    const dup = await sql`SELECT id, student_id, status FROM upi_claims WHERE utr = ${utr} AND (utr_key IS NOT NULL OR (status = 'rejected' AND student_id = ${kid.id})) LIMIT 1`;
+    if (dup.length) return res.status(409).json({ error: dup[0].status === 'rejected' ? 'This reference was already checked and could not be matched. Please visit the school office.' : 'This UTR has already been sent. If it is your payment, the office is checking it. Please do not send it again.' });
+    const have = await sql`SELECT receipt_no, student_id FROM payments WHERE ref = ${utr} AND (voided IS NULL OR voided = 0) LIMIT 1`;
+    if (have.length) return res.status(409).json({ error: 'This payment is already recorded' + (have[0].student_id === kid.id ? ' as receipt ' + have[0].receipt_no + '.' : '.') + ' No need to send it again.' });
+    const flags = [];
+    if (!shot) flags.push('no_screenshot');
+    if (ageDays > 5) flags.push('older_payment');
+    if (Math.abs(paidTotal - (feeAmount + charge)) > 0.5) flags.push('amount_differs');
+    const sim = await sql`SELECT id FROM upi_claims WHERE student_id = ${kid.id} AND status IN ('submitted','approved') AND ABS(paid_total - ${paidTotal}) < 0.01 AND paid_on = ${paidOn} LIMIT 1`; if (sim.length) flags.push('similar_claim');
+    const same = await sql`SELECT receipt_no FROM payments WHERE student_id = ${kid.id} AND date = ${paidOn} AND ABS(amount - ${feeAmount}) < 0.01 AND (voided IS NULL OR voided = 0) LIMIT 1`; if (same.length) flags.push('same_amount_recorded');
+    const recent = await sql`SELECT COUNT(*) AS c FROM upi_claims WHERE student_id = ${kid.id} AND created_at > (NOW() - INTERVAL 7 DAY)`; if (Number(recent[0].c) >= 3) flags.push('many_claims');
+    let ref = String(b.refCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10); if (ref.length < 4) ref = 'RF' + crypto.randomBytes(3).toString('hex').toUpperCase();
+    const taken = await sql`SELECT 1 AS x FROM upi_claims WHERE ref_code = ${ref}`; if (taken.length) ref = 'RF' + crypto.randomBytes(4).toString('hex').toUpperCase().slice(0, 8);
+    const id = 'upc_' + crypto.randomBytes(8).toString('hex'); const stu = await sql`SELECT class_name FROM students WHERE id = ${kid.id}`;
+    const hist = JSON.stringify([{ at: new Date().toISOString(), by: req.authUser.name || 'Parent', what: 'Sent for checking' }]);
+    await sql`INSERT INTO upi_claims (id, student_id, user_id, user_name, fee_lines, fee_amount, charge_amount, paid_total, utr, utr_key, ref_code, paid_on, paid_time, payer_note, screenshot, flags, class_at_payment, ip, history)
+      VALUES (${id}, ${kid.id}, ${req.authUser.id}, ${req.authUser.name || ''}, ${JSON.stringify(lines)}, ${feeAmount}, ${charge}, ${paidTotal}, ${utr}, ${utr}, ${ref}, ${paidOn}, ${String(b.paidTime || '').slice(0, 8)}, ${String(b.note || '').slice(0, 300)}, ${shot}, ${JSON.stringify(flags)}, ${(stu[0] && stu[0].class_name) || ''}, ${clientIp(req)}, ${hist})`;
+    auditNote(req.authUser.name, req.authUser.role, 'POST', 'upi-claim', id, `UTR ${utr} ${paidTotal} for ${kid.name}`, clientIp(req));
+    res.status(200).json({ ok: true, id, refCode: ref, flags });
+    notifyUsersByRole(['Admin', 'Accountant'], { title: 'UPI payment to verify', body: `${kid.name} (${kid.className} ${kid.section}): ${fmtMoneyServer(paidTotal)}`, tag: 'upi-claim', url: '/' }).catch(() => {});
+  } catch (err) {
+    if (err && /Duplicate entry/i.test(String(err.message))) return res.status(409).json({ error: 'This UTR has already been sent. Please do not send it again.' });
+    console.error('upi claim error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+app.post('/api/upi/claims/:id/cancel', async (req, res) => {
+  try {
+    if (!upiIsParent(req)) return res.status(403).json({ error: 'Not allowed.' }); await upiEnsureTable();
+    const r = await sql`SELECT * FROM upi_claims WHERE id = ${req.params.id} AND user_id = ${req.authUser.id}`; if (!r.length) return res.status(404).json({ error: 'Not found.' });
+    if (r[0].status !== 'submitted') return res.status(409).json({ error: 'This payment has already been checked.' });
+    await sql`UPDATE upi_claims SET status = 'cancelled', utr_key = NULL, history = ${upiHist(r[0], req.authUser.name || 'Parent', 'Withdrawn by the parent')} WHERE id = ${req.params.id} AND status = 'submitted'`;
+    return res.status(200).json({ ok: true });
+  } catch (err) { console.error('upi cancel error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.get('/api/upi/claims', async (req, res) => {
+  try {
+    if (!upiIsStaff(req)) return res.status(403).json({ error: 'You do not have permission to open this.' }); await upiEnsureTable();
+    const st = String(req.query.status || 'submitted'); const where = ['submitted', 'approved', 'rejected', 'cancelled'].includes(st) ? `WHERE c.status = '${st}'` : '';
+    const rows = await sql.query(`${UPI_SELECT} ${where} ORDER BY c.created_at DESC LIMIT 400`);
+    const all = await sql`SELECT status, COUNT(*) AS n, COALESCE(SUM(paid_total), 0) AS amt FROM upi_claims GROUP BY status`;
+    const today = todayInSchoolTz();
+    const td = await sql`SELECT COALESCE(SUM(credited_amount), 0) AS fee, COALESCE(SUM(charge_amount), 0) AS chg, COUNT(*) AS n FROM upi_claims WHERE status = 'approved' AND DATE(reviewed_at) = ${today}`;
+    const mo = await sql`SELECT COALESCE(SUM(charge_amount), 0) AS chg FROM upi_claims WHERE status = 'approved' AND reviewed_at >= ${today.slice(0, 8) + '01'}`;
+    const by = {}; all.forEach(r => { by[r.status] = { n: Number(r.n), amt: Number(r.amt) }; });
+    return res.status(200).json({ claims: rows.map(r => upiOut(r, true)), counts: by, today: { n: Number(td[0].n), fee: Number(td[0].fee), charge: Number(td[0].chg) }, monthCharge: Number(mo[0].chg) });
+  } catch (err) { console.error('upi list error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.get('/api/upi/count', async (req, res) => {
+  try {
+    if (!upiIsStaff(req)) return res.status(200).json({ waiting: 0 }); await upiEnsureTable();
+    const r = await sql`SELECT COUNT(*) AS n FROM upi_claims WHERE status = 'submitted'`; return res.status(200).json({ waiting: Number(r[0].n) });
+  } catch (err) { return res.status(200).json({ waiting: 0 }); }
+});
+app.get('/api/upi/claims/:id/screenshot', async (req, res) => {
+  try {
+    if (!req.authUser) return res.status(401).json({ error: 'Please sign in.' }); await upiEnsureTable();
+    const r = await sql`SELECT user_id, screenshot FROM upi_claims WHERE id = ${req.params.id}`; if (!r.length || !r[0].screenshot) return res.status(404).json({ error: 'No screenshot.' });
+    if (!upiIsStaff(req) && r[0].user_id !== req.authUser.id) return res.status(403).json({ error: 'Not allowed.' });
+    return res.status(200).json({ image: r[0].screenshot });
+  } catch (err) { console.error('upi screenshot error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/upi/claims/:id/reject', async (req, res) => {
+  try {
+    if (!upiIsStaff(req)) return res.status(403).json({ error: 'Only the Admin, Principal or Accountant can do this.' }); await upiEnsureTable();
+    const reason = String((req.body || {}).reason || '').trim().slice(0, 300); if (reason.length < 3) return res.status(400).json({ error: 'Please give a reason. The parent will see it.' });
+    const out = await withKeyLock('upiclaim:' + req.params.id, async () => {
+      const r = await sql`SELECT * FROM upi_claims WHERE id = ${req.params.id}`; if (!r.length) return { code: 404, error: 'Not found.' };
+      if (r[0].status !== 'submitted') return { code: 409, error: 'This payment has already been ' + r[0].status + '.' };
+      const who = (req.authUser.name || req.authUser.role);
+      await sql`UPDATE upi_claims SET status = 'rejected', utr_key = NULL, reject_reason = ${reason}, bank_check = ${String((req.body || {}).bankMatch || '').slice(0, 20)}, reviewed_by = ${who}, reviewed_role = ${req.authUser.role}, reviewed_at = NOW(),
+        history = ${upiHist(r[0], who, 'Rejected: ' + reason)} WHERE id = ${req.params.id}`;
+      return { ok: true, row: r[0] };
+    });
+    if (!out.ok) return res.status(out.code).json({ error: out.error });
+    auditNote(req.authUser.name, req.authUser.role, 'POST', 'upi-reject', req.params.id, reason.slice(0, 200), clientIp(req));
+    res.status(200).json({ ok: true });
+    sendPushToStudent(out.row.student_id, { title: 'Your UPI payment could not be matched', body: reason + ' Please contact the school office.', tag: 'upi-claim', url: '/' }).catch(() => {});
+  } catch (err) { console.error('upi reject error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/upi/claims/:id/approve', async (req, res) => {
+  try {
+    if (!upiIsStaff(req)) return res.status(403).json({ error: 'Only the Admin, Principal or Accountant can do this.' }); await upiEnsureTable();
+    const b = req.body || {}; const bankMatch = ['matched', 'amount_differs', 'not_found', 'manual'].includes(b.bankMatch) ? b.bankMatch : 'manual';
+    if (bankMatch !== 'matched' && b.seenInBank !== true) return res.status(400).json({ error: 'Please confirm that you have seen this credit in the bank account (UTR and amount).' });
+    const s = await upiSettings();
+    const out = await withKeyLock('upiclaim:' + req.params.id, async () => {
+      const rows = await sql`SELECT * FROM upi_claims WHERE id = ${req.params.id}`; if (!rows.length) return { code: 404, error: 'Not found.' };
+      const c = rows[0]; if (c.status !== 'submitted') return { code: 409, error: 'This payment has already been ' + c.status + '.' };
+      const lines = upiParse(c.fee_lines, []); let credit = Number(c.fee_amount); const origCredit = credit;
+      if (b.creditAmount != null && b.creditAmount !== '') {
+        credit = Math.round(Number(b.creditAmount) * 100) / 100;
+        if (!credit || credit <= 0 || credit > ONLINE_PAY_MAX) return { code: 400, error: 'Invalid amount.' };
+        if (lines.length > 1 && Math.abs(credit - origCredit) > 0.005) return { code: 400, error: 'This payment covers several fees, so the amount cannot be changed. Reject it and ask the parent to send it again.' };
+        if (credit > origCredit + 0.005) return { code: 400, error: 'The amount cannot be more than what the parent listed.' };
+      }
+      const charge = Math.abs(credit - origCredit) < 0.005 ? Number(c.charge_amount) : upiCalcCharge(credit, s.charge, c.paid_on);
+      const received = b.receivedTotal != null && b.receivedTotal !== '' ? Math.round(Number(b.receivedTotal) * 100) / 100 : Number(c.paid_total);
+      if (Math.abs(received - (credit + charge)) > 0.5 && b.acceptDifference !== true) return { code: 409, error: `The money received (${fmtMoneyServer(received)}) is not the fee plus charge (${fmtMoneyServer(credit + charge)}). Tick "accept the difference" if that is right.`, needsAccept: true };
+      const dup = await sql`SELECT receipt_no FROM payments WHERE ref = ${c.utr} AND (voided IS NULL OR voided = 0) LIMIT 1`; if (dup.length) return { code: 409, error: 'This UTR is already recorded as receipt ' + dup[0].receipt_no + '.' };
+      const lineCredits = lines.length === 1 ? [credit] : lines.map(l => Number(l.amount));
+      // Re-check extra fees against what is owed right now (the office may have recorded a payment meanwhile).
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].type === 'extra') { const e = await sql`SELECT amount, paid_amount FROM student_extra_fees WHERE id = ${lines[i].key} AND student_id = ${c.student_id}`; if (!e.length) return { code: 409, error: 'The extra fee no longer exists.' };
+          if (lineCredits[i] > (Number(e[0].amount) || 0) - (Number(e[0].paid_amount) || 0) + 0.005) return { code: 409, error: 'The fee has been paid or changed since this was sent. Reject it, or ask the parent.' }; }
+      }
+      const who = req.authUser.name || req.authUser.role, prefix = await receiptPrefixServer(), name = await studentFullName(c.student_id);
+      const nos = await issueReceiptNumbers({ prefix, count: lines.length, start: await receiptStartServer(), draftKey: ('upi_' + c.id).slice(0, 40), by: who, role: req.authUser.role });
+      const date = (c.paid_on && c.paid_on <= todayInSchoolTz()) ? c.paid_on : todayInSchoolTz(); const note = `Paid by UPI, UTR ${c.utr}${charge ? ' (UPI charge ' + fmtMoneyServer(charge) + ' collected separately)' : ''}. Verified by ${who}.`;
+      for (let i = 0; i < lines.length; i++) {
+        const l = lines[i], payRowId = 'pay_upi_' + c.id + '_' + i;
+        if (!(await sql`SELECT id FROM payments WHERE id = ${payRowId}`).length) {
+          await sql`INSERT INTO payments (id, receipt_no, student_id, student_name, category, mode, amount, discount, instalment, date, note, class_at_payment, extra_fee_name, extra_fee_id, ref, collected_by)
+            VALUES (${payRowId}, ${nos[i]}, ${c.student_id}, ${name}, ${l.category || 'fee'}, 'UPI', ${lineCredits[i]}, 0, '', ${date}, ${note}, ${c.class_at_payment || ''}, ${l.extraFeeName || null}, ${l.extraFeeId || null}, ${i === 0 ? c.utr : c.utr + '-' + (i + 1)}, ${who + ' (UPI verified)'})`;
+          if (l.type === 'extra' && l.extraFeeId) await sql`UPDATE student_extra_fees SET paid = (COALESCE(paid_amount, 0) + ${lineCredits[i]} >= amount AND amount > 0), paid_amount = COALESCE(paid_amount, 0) + ${lineCredits[i]} WHERE id = ${l.extraFeeId}`;
+        }
+      }
+      await sql`UPDATE upi_claims SET status = 'approved', credited_amount = ${credit}, charge_amount = ${charge}, received_total = ${received}, bank_check = ${bankMatch}, receipt_nos = ${JSON.stringify(nos)},
+        reviewed_by = ${who}, reviewed_role = ${req.authUser.role}, reviewed_at = NOW(), history = ${upiHist(c, who, `Approved ${fmtMoneyServer(credit)} · receipt ${nos.join(', ')} · bank check: ${bankMatch}${Math.abs(received - (credit + charge)) > 0.5 ? ' · difference accepted' : ''}`)} WHERE id = ${c.id}`;
+      return { ok: true, nos, studentId: c.student_id, credit };
+    });
+    if (!out.ok) return res.status(out.code).json({ error: out.error, needsAccept: !!out.needsAccept });
+    auditNote(req.authUser.name, req.authUser.role, 'POST', 'upi-approve', req.params.id, 'receipts ' + out.nos.join(','), clientIp(req));
+    res.status(200).json({ ok: true, receiptNos: out.nos });
+    notifyFeePayment({ studentId: out.studentId, amount: out.credit, mode: 'UPI', receiptNo: out.nos.join(', ') }).catch(err => console.error('fee payment notification failed:', err));
+  } catch (err) { console.error('upi approve error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+
 // ---------- Exam plans: a teacher plans an exam for their own subject, the Principal/Admin approves ----------
 // Teacher -> Submitted -> (Approved | Returned with a note -> teacher edits and resubmits). Approved plans are
 // shown to the class (syllabus, date, marks, instructions); the Admin screen also writes the date/marks into the
