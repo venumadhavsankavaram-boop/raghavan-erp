@@ -4938,8 +4938,11 @@ async function consentStatusRows(req) {
   let scope = null;
   if (req.authUser.role === 'Teacher') { const sc = await getTeacherScope(req.authUser.id); if (!sc.classTeacherOf) return { s, rows: [], noClass: true }; scope = sc.classTeacherOf; }
   else if (!MATERIAL_MGR.includes(req.authUser.role)) return null;
-  const kids = await sql`SELECT id, first_name, last_name, class_name, section, admission_no, extra FROM students
+  // Sort only the narrow columns (sorting the big "extra" column ran the database out of sort memory on a full school); fetch "extra" separately.
+  const kids = await sql`SELECT id, first_name, last_name, class_name, section, admission_no FROM students
     WHERE deleted_at IS NULL AND (status IS NULL OR LOWER(status) = 'active') ORDER BY class_name, section, first_name, last_name`;
+  const extras = new Map((await sql`SELECT id, extra FROM students WHERE deleted_at IS NULL AND (status IS NULL OR LOWER(status) = 'active')`).map(r => [r.id, r.extra]));
+  kids.forEach(k => { k.extra = extras.get(k.id); });
   const list = kids.filter(k => !scope || (k.class_name === scope.className && k.section === scope.section));
   const latest = await consentLatest(list.map(k => k.id));
   const us = await sql`SELECT u.id, u.linked_student_id AS sid, u.first_login_at, u.last_login_at, (SELECT COUNT(*) FROM push_subscriptions p WHERE p.user_id = u.id) AS devices
