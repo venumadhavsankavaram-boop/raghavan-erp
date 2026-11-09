@@ -1170,6 +1170,9 @@ async function createSession(req, res, user) {
   `;
   if (user.role === 'Parent' || user.role === 'Student') {
     sql`UPDATE users SET first_login_at = COALESCE(first_login_at, now()), last_login_at = now(), last_seen_at = now() WHERE id = ${user.id}`.catch(() => {});
+  } else {
+    // staff: remember the last sign-in so the Users & Roles screen can show it
+    sql`UPDATE users SET last_login_at = now() WHERE id = ${user.id}`.catch(() => {});
   }
   const secureFlag = isHttpsRequest(req) ? '; Secure' : '';
   res.setHeader('Set-Cookie', `sid=${token}; HttpOnly${secureFlag}; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_ABSOLUTE_MAX_MS / 1000)}`);
@@ -4747,6 +4750,274 @@ app.get('/api/study-material/:id/file', async (req, res) => {
     res.setHeader('Content-Length', buf.length);
     return res.status(200).end(buf);
   } catch (err) { console.error('study-material file error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+
+// ---------- Privacy & consent (data-protection) ----------
+// A school-wide switch (OFF by default) that asks each child's parent to read the privacy notice and tick what they agree to.
+// Every answer is saved as a new row in consent_history (rows are only ever added, never changed), so there is a full audit trail.
+// Nothing here blocks fees, marks or attendance: it only records answers and reminds people.
+const CONSENT_KEY = 'consent-settings';
+const CONSENT_PURPOSES = [
+  { id: 'core', required: true, label: 'My child\'s information may be used for school records, attendance, marks, fees and school messages.',
+    labelTe: 'పాఠశాల రికార్డులు, హాజరు, మార్కులు, ఫీజులు మరియు పాఠశాల సందేశాల కోసం నా బిడ్డ సమాచారాన్ని ఉపయోగించడానికి నేను అంగీకరిస్తున్నాను.' },
+  { id: 'notify', required: false, label: 'The school may send app notifications to this phone.',
+    labelTe: 'ఈ ఫోన్‌కు పాఠశాల నోటిఫికేషన్లు పంపడానికి నేను అంగీకరిస్తున్నాను.' },
+  { id: 'photoWeb', required: false, label: 'My child\'s photo may be used on the school website and notice boards.',
+    labelTe: 'పాఠశాల వెబ్‌సైట్ మరియు నోటీసు బోర్డులపై నా బిడ్డ ఫోటో ఉపయోగించడానికి నేను అంగీకరిస్తున్నాను.' },
+  { id: 'health', required: false, label: 'I am giving health and blood-group details so the school can help in an emergency.',
+    labelTe: 'అత్యవసర పరిస్థితుల్లో సహాయం కోసం ఆరోగ్య మరియు రక్త గ్రూపు వివరాలను ఇవ్వడానికి నేను అంగీకరిస్తున్నాను.' },
+];
+const CONSENT_NOTICE_EN = [
+  'How {school} uses your child\'s information',
+  'Who we are: {school} is responsible for your child\'s information. Our school software is run for us by SVM EdTech, who may only use the information on our instructions.',
+  'What we collect: your child\'s name, date of birth, photo, class and admission number; parents\' names, phone numbers and address; attendance; exam marks; fee payments; bus and hostel details if used; and, only where you choose to give them, Aadhaar number, caste, religion, blood group and health notes.',
+  'Why: to admit and teach your child, record attendance and marks, collect fees, run transport and hostel, send you school messages and notifications, and meet government and board requirements. We do not use it for advertising, and we do not track or profile your child.',
+  'Who sees it: school staff, only the parts their job needs; our software company SVM EdTech, which stores it securely; and government bodies or boards where the law requires. We never sell it.',
+  'How long we keep it: while your child studies here and afterwards for as long as the law and our retention schedule require.',
+  'Your rights: you can ask to see, correct, complete or delete your child\'s information, and withdraw your consent, at any time. Contact {officer}. If you are not satisfied you may complain to the Data Protection Board of India.',
+  'If something goes wrong: if your child\'s information is lost or seen by someone it should not be, we will tell you without delay.',
+].join('\n\n');
+const CONSENT_NOTICE_TE = [
+  '{school} మీ బిడ్డ సమాచారాన్ని ఎలా ఉపయోగిస్తుంది',
+  'మేము ఎవరు: మీ బిడ్డ సమాచారానికి {school} బాధ్యత వహిస్తుంది. మా పాఠశాల సాఫ్ట్‌వేర్‌ను SVM EdTech మా కోసం నిర్వహిస్తుంది; వారు మా సూచనల ప్రకారం మాత్రమే సమాచారాన్ని ఉపయోగించగలరు.',
+  'మేము ఏమి సేకరిస్తాము: మీ బిడ్డ పేరు, పుట్టిన తేదీ, ఫోటో, తరగతి మరియు అడ్మిషన్ నంబర్; తల్లిదండ్రుల పేర్లు, ఫోన్ నంబర్లు, చిరునామా; హాజరు; పరీక్ష మార్కులు; ఫీజు చెల్లింపులు; బస్సు, హాస్టల్ వివరాలు (వాడితే); మీరు ఇవ్వాలనుకుంటే మాత్రమే ఆధార్ నంబర్, కులం, మతం, రక్త గ్రూపు, ఆరోగ్య వివరాలు.',
+  'ఎందుకు: మీ బిడ్డకు అడ్మిషన్ ఇవ్వడానికి, బోధించడానికి, హాజరు మరియు మార్కులు నమోదు చేయడానికి, ఫీజులు వసూలు చేయడానికి, రవాణా మరియు హాస్టల్ నిర్వహణకు, పాఠశాల సందేశాలు పంపడానికి, ప్రభుత్వ మరియు బోర్డు నిబంధనలు పాటించడానికి. దీనిని ప్రకటనల కోసం ఉపయోగించము; మీ బిడ్డను ట్రాక్ చేయము.',
+  'ఎవరు చూస్తారు: పాఠశాల సిబ్బంది (వారి పనికి అవసరమైన భాగాలు మాత్రమే); సమాచారాన్ని భద్రంగా నిల్వ చేసే మా సాఫ్ట్‌వేర్ సంస్థ SVM EdTech; చట్టం కోరినప్పుడు ప్రభుత్వ సంస్థలు లేదా బోర్డులు. మేము దీనిని ఎప్పుడూ అమ్మము.',
+  'ఎంతకాలం ఉంచుతాము: మీ బిడ్డ ఇక్కడ చదివినంత కాలం, ఆ తర్వాత చట్టం మరియు మా నిలుపుదల షెడ్యూల్ కోరినంత కాలం.',
+  'మీ హక్కులు: మీ బిడ్డ సమాచారాన్ని చూడమని, సరిదిద్దమని, పూర్తి చేయమని లేదా తొలగించమని కోరవచ్చు, మరియు ఎప్పుడైనా మీ సమ్మతిని ఉపసంహరించుకోవచ్చు. సంప్రదించండి: {officer}. మీకు సంతృప్తి లేకపోతే డేటా ప్రొటెక్షన్ బోర్డ్ ఆఫ్ ఇండియాకు ఫిర్యాదు చేయవచ్చు.',
+  'ఏదైనా తప్పు జరిగితే: మీ బిడ్డ సమాచారం పోయినా లేదా చూడకూడని వారు చూసినా, ఆలస్యం లేకుండా మీకు తెలియజేస్తాము.',
+].join('\n\n');
+function consentDefaults() {
+  return { enabled: false, mode: 'remind', maxSkips: 3, startDate: '', version: 1,
+    school: { name: '', address: '' }, officer: { name: '', phone: '', email: '' },
+    noticeEn: CONSENT_NOTICE_EN, noticeTe: CONSENT_NOTICE_TE, purposes: CONSENT_PURPOSES.map(p => ({ ...p })) };
+}
+function consentNormalize(b) {
+  const d = consentDefaults(); b = (b && typeof b === 'object') ? b : {};
+  const str = (x, n, def) => (typeof x === 'string' ? x.trim().slice(0, n) : def);
+  const sc = b.school || {}, of = b.officer || {};
+  let purposes = Array.isArray(b.purposes) ? b.purposes.map(p => ({
+    id: String((p && p.id) || '').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 30),
+    label: str(p && p.label, 400, ''), labelTe: str(p && p.labelTe, 600, ''), required: !!(p && p.required) })).filter(p => p.id && p.label) : d.purposes;
+  const seen = new Set(); purposes = purposes.filter(p => !seen.has(p.id) && seen.add(p.id)).slice(0, 8);
+  if (!purposes.some(p => p.id === 'core')) purposes.unshift({ ...d.purposes[0] });
+  purposes.forEach(p => { if (p.id === 'core') p.required = true; else p.required = false; if (!p.labelTe) p.labelTe = p.label; });
+  const mode = ['remind', 'skip', 'required'].includes(b.mode) ? b.mode : 'remind';
+  const maxSkips = Math.max(1, Math.min(10, parseInt(b.maxSkips, 10) || 3));
+  return { enabled: b.enabled === true, mode, maxSkips,
+    startDate: /^\d{4}-\d{2}-\d{2}$/.test(String(b.startDate || '')) ? b.startDate : '',
+    version: Math.max(1, parseInt(b.version, 10) || 1),
+    school: { name: str(sc.name, 200, ''), address: str(sc.address, 400, '') },
+    officer: { name: str(of.name, 120, ''), phone: str(of.phone, 40, ''), email: str(of.email, 120, '') },
+    noticeEn: str(b.noticeEn, 8000, d.noticeEn) || d.noticeEn, noticeTe: str(b.noticeTe, 10000, d.noticeTe) || d.noticeTe, purposes };
+}
+let _consentCache = { at: 0, v: null }, _consentTables = false;
+async function consentEnsureTables() {
+  if (_consentTables) return;
+  await sql`CREATE TABLE IF NOT EXISTS consent_history (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY, student_id VARCHAR(191), user_id VARCHAR(191), status VARCHAR(20) NOT NULL,
+    notice_version INT NOT NULL DEFAULT 1, purposes TEXT, method VARCHAR(20) NOT NULL DEFAULT 'app',
+    recorded_by_name TEXT, recorded_by_role VARCHAR(40), ip VARCHAR(64), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`;
+  await createIndexIfMissing('idx_consent_student', 'consent_history', 'student_id, id');
+  await createIndexIfMissing('idx_consent_user', 'consent_history', 'user_id, status');
+  _consentTables = true;
+}
+async function consentSettings() {
+  if (_consentCache.v && Date.now() - _consentCache.at < 5000) return _consentCache.v;
+  let v = null;
+  try { const r = await sql`SELECT value FROM kv_store WHERE \`key\` = ${CONSENT_KEY}`; v = r.length ? r[0].value : null; if (typeof v === 'string') v = JSON.parse(v); } catch (_) { v = null; }
+  _consentCache = { at: Date.now(), v: consentNormalize(v) };
+  return _consentCache.v;
+}
+const consentFill = (txt, s) => String(txt || '').split('{school}').join(s.school.name || 'the school').split('{officer}').join(
+  [s.officer.name, s.officer.phone, s.officer.email].filter(Boolean).join(', ') || 'the school office');
+function consentStarted(s) { return s.enabled && (!s.startDate || s.startDate <= localDateStrServer()); }
+function localDateStrServer() { const d = new Date(Date.now() + 5.5 * 3600000); return d.toISOString().slice(0, 10); }
+const CONSENT_ANSWERED = ['given', 'paper', 'declined', 'withdrawn'];
+async function consentLatest(studentIds) {
+  const out = new Map(); if (!studentIds.length) return out;
+  await consentEnsureTables();
+  const ph = studentIds.map((_, i) => `$${i + 1}`).join(', ');
+  const rows = await sql.query(`SELECT h.* FROM consent_history h JOIN (SELECT student_id, MAX(id) AS mid FROM consent_history
+    WHERE status IN ('given','paper','declined','withdrawn') AND student_id IN (${ph}) GROUP BY student_id) m ON h.id = m.mid`, studentIds);
+  rows.forEach(r => out.set(r.student_id, r));
+  return out;
+}
+const consentIsAnswered = (row, s) => !!row && Number(row.notice_version) >= s.version;
+async function consentKidsOfUser(userId) {
+  const u = await sql`SELECT linked_student_id, sibling_ids FROM users WHERE id = ${userId} AND deleted_at IS NULL`;
+  if (!u.length) return [];
+  let ids = u[0].linked_student_id ? [String(u[0].linked_student_id)] : [];
+  if (await siblingsEnabled()) parseSibs(u[0].sibling_ids).forEach(x => { if (!ids.includes(x)) ids.push(x); });
+  if (!ids.length) return [];
+  const ph = ids.map((_, i) => `$${i + 1}`).join(', ');
+  const rows = await sql.query(`SELECT id, first_name, last_name, class_name, section FROM students WHERE id IN (${ph}) AND deleted_at IS NULL`, ids);
+  const by = new Map(rows.map(r => [r.id, r]));
+  return ids.filter(id => by.has(id)).map(id => { const r = by.get(id); return { id, name: ((r.last_name || '') + ' ' + (r.first_name || '')).trim(), className: r.class_name, section: r.section }; });
+}
+function consentParse(v) { try { const o = JSON.parse(v || '{}'); return (o && typeof o === 'object') ? o : {}; } catch (_) { return {}; } }
+function consentIsParent(req) { return !!(req.authUser && PARENT_LOGIN_ROLES.includes(req.authUser.role)); }
+async function consentInsert(studentId, userId, status, s, purposes, method, req) {
+  await sql`INSERT INTO consent_history (student_id, user_id, status, notice_version, purposes, method, recorded_by_name, recorded_by_role, ip)
+    VALUES (${studentId}, ${userId || ''}, ${status}, ${s.version}, ${JSON.stringify(purposes || {})}, ${method}, ${(req.authUser && (req.authUser.name || req.authUser.username)) || ''}, ${(req.authUser && req.authUser.role) || ''}, ${clientIp(req)})`;
+}
+app.get('/api/consent/settings', async (req, res) => {
+  try {
+    if (!req.authUser || !MATERIAL_MGR.includes(req.authUser.role)) return res.status(403).json({ error: 'Only the Admin or Principal can open this.' });
+    return res.status(200).json(await consentSettings());
+  } catch (err) { console.error('consent settings error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.put('/api/consent/settings', async (req, res) => {
+  try {
+    if (!req.authUser || !MATERIAL_MGR.includes(req.authUser.role) || req.authUser.impersonatedBy) return res.status(403).json({ error: 'Only the Admin or Principal can change this.' });
+    const old = await consentSettings(); const body = req.body || {};
+    const next = consentNormalize(Object.assign({}, body, { version: old.version }));
+    const changed = next.noticeEn !== old.noticeEn || next.noticeTe !== old.noticeTe || JSON.stringify(next.purposes) !== JSON.stringify(old.purposes);
+    if (changed || body.reaskAll === true) next.version = old.version + 1;
+    await sql`INSERT INTO kv_store (\`key\`, value) VALUES (${CONSENT_KEY}, ${JSON.stringify(next)}) ON DUPLICATE KEY UPDATE value = VALUES(value)`;
+    _consentCache = { at: 0, v: null };
+    auditNote(req.authUser.name, req.authUser.role, 'PUT', 'consent-settings', CONSENT_KEY, `${next.enabled ? 'ON' : 'OFF'} mode=${next.mode} version=${next.version}`, clientIp(req));
+    return res.status(200).json(next);
+  } catch (err) { console.error('consent settings save error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+// The parent's own view: is the screen due, what to show, what they answered before.
+app.get('/api/consent/me', async (req, res) => {
+  try {
+    if (!consentIsParent(req)) return res.status(200).json({ enabled: false });
+    const s = await consentSettings();
+    if (!consentStarted(s) || req.authUser.impersonatedBy) return res.status(200).json({ enabled: false });
+    await consentEnsureTables();
+    const kids = await consentKidsOfUser(req.authUser.id);
+    if (!kids.length) return res.status(200).json({ enabled: false });
+    const latest = await consentLatest(kids.map(k => k.id));
+    const children = kids.map(k => { const r = latest.get(k.id); return { ...k, status: r ? r.status : '', answered: consentIsAnswered(r, s), purposes: r ? consentParse(r.purposes) : {}, at: r ? r.created_at : null, method: r ? r.method : '' }; });
+    const due = children.some(c => !c.answered);
+    let skipsLeft = null;
+    if (s.mode === 'skip') { const c = await sql`SELECT COUNT(*) AS n FROM consent_history WHERE user_id = ${req.authUser.id} AND status = 'skipped' AND notice_version = ${s.version}`; skipsLeft = Math.max(0, s.maxSkips - Number(c[0].n)); }
+    return res.status(200).json({ enabled: true, due, mode: s.mode, skipsLeft, version: s.version, school: s.school, officer: s.officer,
+      noticeEn: consentFill(s.noticeEn, s), noticeTe: consentFill(s.noticeTe, s), purposes: s.purposes, children });
+  } catch (err) { console.error('consent me error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/consent/answer', async (req, res) => {
+  try {
+    if (!consentIsParent(req) || req.authUser.impersonatedBy) return res.status(403).json({ error: 'Only the parent can answer this.' });
+    const s = await consentSettings(); if (!consentStarted(s)) return res.status(409).json({ error: 'Consent is not switched on.' });
+    const b = req.body || {}; const status = ['given', 'declined', 'withdrawn'].includes(b.status) ? b.status : '';
+    if (!status) return res.status(400).json({ error: 'Unknown answer.' });
+    const kids = await consentKidsOfUser(req.authUser.id); const ok = new Set(kids.map(k => k.id));
+    const ids = [...new Set((Array.isArray(b.studentIds) ? b.studentIds : []).map(String))].filter(id => ok.has(id));
+    if (!ids.length) return res.status(400).json({ error: 'Please choose a child.' });
+    const given = {}; s.purposes.forEach(p => { given[p.id] = status === 'given' ? !!(b.purposes && b.purposes[p.id]) : false; });
+    if (status === 'given' && s.purposes.some(p => p.required && !given[p.id])) return res.status(400).json({ error: 'Please tick the first box to agree, or choose "I do not agree".' });
+    await consentEnsureTables();
+    for (const id of ids) await consentInsert(id, req.authUser.id, status, s, given, 'app', req);
+    auditNote(req.authUser.name, req.authUser.role, 'POST', 'consent', ids.join(','), `${status} v${s.version}`, clientIp(req));
+    res.status(200).json({ ok: true });
+    if (status !== 'given') notifyUsersByRole(['Admin', 'Principal'], { title: status === 'declined' ? 'A parent did not agree to the privacy notice' : 'A parent withdrew consent',
+      body: kids.filter(k => ids.includes(k.id)).map(k => `${k.name} (${k.className} ${k.section})`).join(', '), tag: 'consent', url: '/' }).catch(() => {});
+  } catch (err) { console.error('consent answer error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/consent/skip', async (req, res) => {
+  try {
+    if (!consentIsParent(req) || req.authUser.impersonatedBy) return res.status(403).json({ error: 'Not available.' });
+    const s = await consentSettings(); if (!consentStarted(s)) return res.status(200).json({ ok: true });
+    if (s.mode === 'required') return res.status(403).json({ error: 'The school asks every parent to answer this before continuing.' });
+    await consentEnsureTables();
+    if (s.mode === 'skip') {
+      const c = await sql`SELECT COUNT(*) AS n FROM consent_history WHERE user_id = ${req.authUser.id} AND status = 'skipped' AND notice_version = ${s.version}`;
+      if (Number(c[0].n) >= s.maxSkips) return res.status(403).json({ error: 'You have used all your "ask me later" choices. Please answer now.' });
+    }
+    await consentInsert('', req.authUser.id, 'skipped', s, {}, 'app', req);
+    return res.status(200).json({ ok: true });
+  } catch (err) { console.error('consent skip error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+// Admin / Principal (and a class teacher for their own class): who has answered, who has not.
+async function consentStatusRows(req) {
+  const s = await consentSettings(); await consentEnsureTables();
+  let scope = null;
+  if (req.authUser.role === 'Teacher') { const sc = await getTeacherScope(req.authUser.id); if (!sc.classTeacherOf) return { s, rows: [], noClass: true }; scope = sc.classTeacherOf; }
+  else if (!MATERIAL_MGR.includes(req.authUser.role)) return null;
+  const kids = await sql`SELECT id, first_name, last_name, class_name, section, admission_no, extra FROM students
+    WHERE deleted_at IS NULL AND (status IS NULL OR LOWER(status) = 'active') ORDER BY class_name, section, first_name, last_name`;
+  const list = kids.filter(k => !scope || (k.class_name === scope.className && k.section === scope.section));
+  const latest = await consentLatest(list.map(k => k.id));
+  const us = await sql`SELECT u.id, u.linked_student_id AS sid, u.first_login_at, u.last_login_at, (SELECT COUNT(*) FROM push_subscriptions p WHERE p.user_id = u.id) AS devices
+    FROM users u WHERE u.deleted_at IS NULL AND u.role IN ('Student', 'Parent') AND u.linked_student_id IS NOT NULL AND u.linked_student_id <> ''`;
+  const bySid = new Map(); us.forEach(u => { const cur = bySid.get(u.sid); if (!cur || Number(u.devices) > Number(cur.devices) || (u.first_login_at && !cur.first_login_at)) bySid.set(u.sid, u); });
+  const fam = await sql`SELECT id, sibling_ids FROM users WHERE sibling_ids IS NOT NULL AND sibling_ids <> '' AND deleted_at IS NULL`;
+  fam.forEach(f => { const u = us.find(x => x.id === f.id); if (u) parseSibs(f.sibling_ids).forEach(sid => { if (!bySid.has(sid)) bySid.set(sid, u); }); });
+  const rem = await sql`SELECT student_id, MAX(created_at) AS at FROM consent_history WHERE status = 'reminded' GROUP BY student_id`;
+  const remBy = new Map(rem.map(r => [r.student_id, r.at]));
+  const rows = list.map(k => {
+    let extra = k.extra; if (typeof extra === 'string') { try { extra = JSON.parse(extra); } catch (_) { extra = {}; } } extra = extra || {};
+    const r = latest.get(k.id), u = bySid.get(k.id);
+    const status = !r ? 'pending' : !consentIsAnswered(r, s) ? 'outdated' : (r.status === 'paper' ? 'paper' : r.status);
+    return { studentId: k.id, name: ((k.last_name || '') + ' ' + (k.first_name || '')).trim(), className: k.class_name, section: k.section, admissionNo: k.admission_no || '',
+      status, method: r ? r.method : '', at: r ? r.created_at : null, by: r ? r.recorded_by_name : '', version: r ? Number(r.notice_version) : 0, purposes: r ? consentParse(r.purposes) : {},
+      phone: extra.fatherPhone || extra.motherPhone || extra.guardianPhone || extra.parentPhone || '', hasLogin: !!u, signedIn: !!(u && u.first_login_at), notifications: !!(u && Number(u.devices) > 0),
+      remindedAt: remBy.get(k.id) || null };
+  });
+  return { s, rows };
+}
+app.get('/api/consent/status', async (req, res) => {
+  try {
+    if (!req.authUser) return res.status(401).json({ error: 'Please sign in.' });
+    const r = await consentStatusRows(req); if (!r) return res.status(403).json({ error: 'You do not have permission to open this.' });
+    const count = {}; r.rows.forEach(x => { count[x.status] = (count[x.status] || 0) + 1; });
+    return res.status(200).json({ enabled: r.s.enabled, started: consentStarted(r.s), version: r.s.version, total: r.rows.length, count, rows: r.rows, noClass: !!r.noClass, purposes: r.s.purposes });
+  } catch (err) { console.error('consent status error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+// Office staff record a paper form: Admin / Principal only.
+app.post('/api/consent/paper', async (req, res) => {
+  try {
+    if (!req.authUser || !MATERIAL_MGR.includes(req.authUser.role) || req.authUser.impersonatedBy) return res.status(403).json({ error: 'Only the Admin or Principal can record paper forms.' });
+    const s = await consentSettings(); await consentEnsureTables();
+    const b = req.body || {}; const ids = [...new Set((Array.isArray(b.studentIds) ? b.studentIds : []).map(String))].slice(0, 2000);
+    if (!ids.length) return res.status(400).json({ error: 'Please choose at least one child.' });
+    const ph = ids.map((_, i) => `$${i + 1}`).join(', ');
+    const valid = new Set((await sql.query(`SELECT id FROM students WHERE id IN (${ph}) AND deleted_at IS NULL`, ids)).map(r => r.id));
+    const given = {}; s.purposes.forEach(p => { given[p.id] = p.required ? true : !!(b.purposes && b.purposes[p.id]); });
+    let n = 0; for (const id of ids) { if (!valid.has(id)) continue; await consentInsert(id, '', 'paper', s, given, 'paper', req); n++; }
+    auditNote(req.authUser.name, req.authUser.role, 'POST', 'consent-paper', ids.slice(0, 20).join(','), `${n} paper form(s) recorded v${s.version}`, clientIp(req));
+    return res.status(200).json({ ok: true, recorded: n });
+  } catch (err) { console.error('consent paper error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+// Remind parents who have not answered (app notification; at most one reminder per child per day).
+app.post('/api/consent/remind', async (req, res) => {
+  try {
+    if (!req.authUser || !MATERIAL_MGR.includes(req.authUser.role) || req.authUser.impersonatedBy) return res.status(403).json({ error: 'Only the Admin or Principal can send reminders.' });
+    const s = await consentSettings(); if (!consentStarted(s)) return res.status(409).json({ error: 'Switch consent on first.' });
+    const r = await consentStatusRows(req); const want = new Set((Array.isArray((req.body || {}).studentIds) ? req.body.studentIds : []).map(String));
+    const pending = r.rows.filter(x => ['pending', 'outdated'].includes(x.status) && (!want.size || want.has(x.studentId)));
+    const out = { reminded: 0, withDevice: 0, noLogin: 0, tooSoon: 0 };
+    for (const x of pending) {
+      if (!x.hasLogin) { out.noLogin++; continue; }
+      if (x.remindedAt && Date.now() - new Date(x.remindedAt).getTime() < 20 * 3600000) { out.tooSoon++; continue; }
+      await sendPushToStudent(x.studentId, { title: 'Please read the school privacy notice', body: `Open the app and tick your answer for ${x.name}. It takes one minute.`, tag: 'consent', url: '/' }).catch(() => {});
+      await consentInsert(x.studentId, '', 'reminded', s, {}, 'app', req);
+      out.reminded++; if (x.notifications) out.withDevice++;
+    }
+    auditNote(req.authUser.name, req.authUser.role, 'POST', 'consent-remind', '', `reminded ${out.reminded}`, clientIp(req));
+    return res.status(200).json(out);
+  } catch (err) { console.error('consent remind error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.get('/api/consent/history/:studentId', async (req, res) => {
+  try {
+    if (!req.authUser || !MATERIAL_MGR.includes(req.authUser.role)) return res.status(403).json({ error: 'Only the Admin or Principal can open this.' });
+    await consentEnsureTables();
+    const rows = await sql`SELECT status, notice_version, purposes, method, recorded_by_name, recorded_by_role, created_at FROM consent_history WHERE student_id = ${req.params.studentId} AND status <> 'skipped' ORDER BY id DESC LIMIT 100`;
+    return res.status(200).json(rows.map(r => ({ status: r.status, version: Number(r.notice_version), purposes: consentParse(r.purposes), method: r.method, by: r.recorded_by_name, role: r.recorded_by_role, at: r.created_at })));
+  } catch (err) { console.error('consent history error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+// Staff sign-in activity for the Users & Roles screen (Admin only).
+app.get('/api/users/activity', async (req, res) => {
+  try {
+    if (!req.authUser || req.authUser.role !== 'Admin') return res.status(403).json({ error: 'Only the Admin can open this.' });
+    const rows = await sql`SELECT id, last_login_at, last_seen_at, twofa_method FROM users WHERE deleted_at IS NULL AND role NOT IN ('Student', 'Parent')`;
+    const iso = d => d ? new Date(d).toISOString() : '';
+    return res.status(200).json(rows.map(r => ({ id: r.id, lastLogin: iso(r.last_login_at), lastSeen: iso(r.last_seen_at), twofa: r.twofa_method || '' })));
+  } catch (err) { console.error('users activity error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 
 // ---------- Exam plans: a teacher plans an exam for their own subject, the Principal/Admin approves ----------

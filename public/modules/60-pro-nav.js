@@ -5,7 +5,7 @@
 (function(){
   'use strict';
   const HUBS = [
-    { id: 'access', label: 'Users & Access', members: [['usersroles', 'Users & Roles'], ['studentparentlogins', 'Student/Parent Logins'], ['rolespermissions', 'Roles & Permissions']] },
+    { id: 'access', label: 'Users & Access', members: [['usersroles', 'Users & Roles'], ['studentparentlogins', 'Student/Parent Logins'], ['rolespermissions', 'Roles & Permissions'], ['privacyconsent', 'Privacy & Consent']] },
     { id: 'setup', label: 'School Setup', members: [['schoolprofile', 'School Profile'], ['classessetup', 'Classes'], ['academicyear', 'Academic Year'], ['feestructuresetup', 'Fee Structure'], ['refundpolicy', 'Refund Policy']] },
     { id: 'home', label: 'Dashboard', members: [['dashboard', 'Overview'], ['insights', 'Smart Insights']] },
     { id: 'comms', label: 'Messages & Notices', members: [['announcements', 'Announcements'], ['noticeboard', 'Notice Board'], ['inbox', 'Inbox']] }
