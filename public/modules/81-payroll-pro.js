@@ -98,7 +98,20 @@
   const origCompute = window.computeStaffPayroll;
   window.computeStaffPayroll = function(staffId, monthStr){
     const r = origCompute.apply(this, arguments);
-    if(r){ const p = periodOf(monthStr); r.periodFrom = p.from; r.periodTo = p.to; r.periodDays = p.days; }
+    if(r){
+      const p = periodOf(monthStr); r.periodFrom = p.from; r.periodTo = p.to; r.periodDays = p.days;
+      // Salary is worked out in whole rupees: no paise anywhere.
+      const R = x => { x = Math.round(Number(x) || 0); return x === 0 ? 0 : x; };
+      const advBefore = Number(r.advanceDeduction) || 0;
+      ['basic', 'lopDeduction', 'epfEmployee', 'epfEmployer', 'esiEmployee', 'esiEmployer', 'otherDeductions', 'bonus', 'advanceDeduction'].forEach(k => { if(k in r) r[k] = R(r[k]); });
+      if(Array.isArray(r.advanceBreakdown) && r.advanceBreakdown.length){
+        const diff = r.advanceDeduction - advBefore, last = r.advanceBreakdown[r.advanceBreakdown.length - 1];
+        if(diff && last) last.amount = Math.max(0, Math.round((Number(last.amount) + diff) * 100) / 100);
+      }
+      r.grossSalary = r.basic + r.bonus;
+      r.totalDeductions = R(r.lopDeduction + r.epfEmployee + r.esiEmployee + r.otherDeductions + r.advanceDeduction);
+      r.netSalary = r.grossSalary - r.totalDeductions;
+    }
     return r;
   };
   const origMonthChange = window.onStaffPayrollMonthChange;

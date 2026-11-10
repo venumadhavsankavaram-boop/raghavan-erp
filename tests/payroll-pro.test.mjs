@@ -61,7 +61,14 @@ test('attendance is counted over the pay period, and loss of pay uses the days i
 });
 test('a fixed 30-day basis divides the salary by 30 whatever the period length', async () => {
   const { ctx } = boot({ periodStartDay: 26, lopBasis: 'fixed', lopFixed: 30 }, staff(), []); await ctx.loadStaffPayroll();
-  ctx.__leave = 3; assert.equal(ctx.computeStaffPayroll('a', '2026-11', {}).lopDeduction, 2066.67);
+  ctx.__leave = 3; const x = ctx.computeStaffPayroll('a', '2026-11', {}); assert.equal(x.lopDeduction, 2067); assert.equal(x.netSalary, 28933);
+});
+test('salary is worked out in whole rupees, with no paise anywhere', async () => {
+  const st = staff(); st[0].salary = 20001.5; st[0].epfEnabled = true; st[0].epfEmployeeAmount = 1800.4;
+  const { ctx } = boot({ lopBasis: 'fixed', lopFixed: 30 }, st, []); await ctx.loadStaffPayroll(); ctx.__leave = 2.5;
+  const r = ctx.computeStaffPayroll('a', '2026-11', {});
+  for (const k of ['basic', 'lopDeduction', 'epfEmployee', 'grossSalary', 'totalDeductions', 'netSalary']) assert.ok(Number.isInteger(r[k]), k + ' = ' + r[k]);
+  assert.equal(r.netSalary, r.grossSalary - r.totalDeductions);
 });
 test('settings are cleaned: bad values fall back to safe ones', async () => {
   const { ctx } = boot({ periodStartDay: 40, payDay: 99, lopBasis: 'x', lopFixed: 5, defaultMode: 'Bitcoin' }, staff(), []); await ctx.loadStaffPayroll();
