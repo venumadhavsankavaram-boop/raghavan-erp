@@ -334,7 +334,7 @@ function advancePayrollPart(staffId, monthStr, manualAmount, cap){
   if(typeof origRows === 'function'){
     window.staffPayrollReportRows = function(){
       const rows = origRows.apply(this, arguments);
-      try{ const act = staffList.filter(staffIsActive); rows.forEach((r, i) => { const p = act[i] && staffPayrollRowData(act[i].id, staffPayrollMonth).preview; r['Advance Recovery'] = p ? (Number(p.advanceDeduction) || 0) : 0; }); }catch(e){}
+      try{ const act = payrollStaffList(); rows.forEach((r, i) => { const p = act[i] && staffPayrollRowData(act[i].id, staffPayrollMonth).preview; r['Advance Recovery'] = p ? (Number(p.advanceDeduction) || 0) : 0; }); }catch(e){}
       return rows;
     };
   }

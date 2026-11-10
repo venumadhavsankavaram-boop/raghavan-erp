@@ -11,10 +11,10 @@
   function stats() {
     const m = staffPayrollMonth;
     const deptF = document.getElementById('staffDeptFilter') ? document.getElementById('staffDeptFilter').value : '';
-    const list = staffList.filter(staffIsActive).filter(st => !deptF || st.department === deptF);
+    const list = payrollStaffList().filter(st => !deptF || st.department === deptF);
     let marked = 0, drafts = 0, approved = 0, adv = 0, advN = 0;
     list.forEach(st => {
-      try { if (computeStaffAttendanceStats(st.id, m + '-01', m + '-31').total > 0) marked++; } catch (e) {}
+      try { const pp = typeof payrollPeriod === 'function' ? payrollPeriod(m) : { from: m + '-01', to: m + '-31' }; if (computeStaffAttendanceStats(st.id, pp.from, pp.to).total > 0) marked++; } catch (e) {}
       const d = staffPayrollRowData(st.id, m);
       if (d.rec && d.rec.status === 'Approved') approved++; else if (d.rec) drafts++;
       const a = Number(d.preview && d.preview.advanceDeduction) || 0; if (a > 0) { adv += a; advN++; }

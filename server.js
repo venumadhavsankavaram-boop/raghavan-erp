@@ -2285,6 +2285,7 @@ const KV_KEY_TO_MODULE = {
   // Public-website content (alumni, achievements, safety, vehicles, admission copy) — edited in Website Gallery > Website Content.
   'website-extras': ['websitegallery'],
   'finance-settings': ['managefee'],
+  'payroll-settings': ['staff'],
   // Fees prepared for the coming academic year (applied when that year is made current).
   'fee-plan-next': ['managefee'],
   // Log of mid-year class / section changes (Promotion & Transfer).

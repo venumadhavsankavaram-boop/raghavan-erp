@@ -157,7 +157,7 @@ function daysInPayrollMonth(monthStr){
     const canEditPayroll = getStaffSubpageAccess(currentUser.role, 'staff_payroll', 'edit');
     const canPrintPayroll = getStaffSubpageAccess(currentUser.role, 'staff_payroll', 'print');
     const deptF = document.getElementById('staffDeptFilter') ? document.getElementById('staffDeptFilter').value : '';
-    const list = staffList.filter(staffIsActive).filter(st => !deptF || st.department === deptF)
+    const list = payrollStaffList().filter(st => !deptF || st.department === deptF)
       .sort((a,b) => (a.firstName+a.lastName).localeCompare(b.firstName+b.lastName));
     // Computed once per staff member so both the table rows and the totals below use
     // the exact same numbers — every active staff member counts here (Draft or
@@ -326,6 +326,7 @@ function daysInPayrollMonth(monthStr){
             <div><span>Department:</span> ${st.department || '—'}</div>
             <div><span>Bank Account:</span> ${st.bankAccountNumber || '—'}</div>
             <div><span>IFSC:</span> ${st.bankIfsc || '—'}</div>
+            ${typeof payslipExtraMeta === 'function' ? payslipExtraMeta(st, monthStr, preview) : ''}
           </div>
           <div class="ps-cols">
             <div class="ps-col">
@@ -365,7 +366,7 @@ function daysInPayrollMonth(monthStr){
      paid-leave quota — same numbers as the Payroll table above, just presented in the familiar
      compact format. Every active staff member, whatever their approval status this month. */
   function staffSalaryRegisterRows(monthStr){
-    const list = staffList.filter(staffIsActive).sort((a,b) => (a.firstName+a.lastName).localeCompare(b.firstName+b.lastName));
+    const list = payrollStaffList().sort((a,b) => (a.firstName+a.lastName).localeCompare(b.firstName+b.lastName));
     return list.map((st, i) => {
       const { preview } = staffPayrollRowData(st.id, monthStr);
       const cl = Math.round((preview.leaveDays||0)*10)/10;

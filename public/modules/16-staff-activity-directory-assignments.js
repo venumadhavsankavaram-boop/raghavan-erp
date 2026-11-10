@@ -559,6 +559,8 @@ let saSelectedTeacherId = '';
         document.getElementById('stfBankAccountName').value = st.bankAccountName || '';
         document.getElementById('stfBankAccountNumber').value = st.bankAccountNumber || '';
         document.getElementById('stfBankIfsc').value = st.bankIfsc || '';
+        document.getElementById('stfPayMode').value = st.payMode || '';
+        document.getElementById('stfPayrollExcluded').checked = !!st.payrollExcluded;
         document.getElementById('stfWorkSession').value = st.workSession || 'Both';
         document.getElementById('stfClassTeacherOf').value = st.classTeacherClass ? (st.classTeacherClass+'|'+st.classTeacherSection) : '';
         document.getElementById('stfPhone').value = st.phone || '';
@@ -608,6 +610,8 @@ let saSelectedTeacherId = '';
       document.getElementById('stfBankAccountName').value = '';
       document.getElementById('stfBankAccountNumber').value = '';
       document.getElementById('stfBankIfsc').value = '';
+      document.getElementById('stfPayMode').value = '';
+      document.getElementById('stfPayrollExcluded').checked = false;
     }
     renderStaffJobTypeCheckboxes(existingJobTypes);
     switchStaffWizardTab('personal');
@@ -678,6 +682,7 @@ let saSelectedTeacherId = '';
       otherMonthlyDeduction: g('stfOtherDeduction') || 0,
       bankName: g('stfBankName').trim(), bankAccountName: g('stfBankAccountName').trim(),
       bankAccountNumber: g('stfBankAccountNumber').trim(), bankIfsc: g('stfBankIfsc').trim().toUpperCase(),
+      payMode: g('stfPayMode'), payrollExcluded: document.getElementById('stfPayrollExcluded').checked,
       classTeacherClass: ctClass, classTeacherSection: ctSection,
       workSession: (['Morning','Afternoon'].includes(g('stfWorkSession')) ? g('stfWorkSession') : 'Both'),
       phone: g('stfPhone').trim(), email: g('stfEmail').trim(), address: g('stfAddress').trim(),

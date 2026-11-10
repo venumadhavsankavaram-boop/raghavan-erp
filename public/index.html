@@ -4509,6 +4509,10 @@
             <div class="f-field"><label>IFSC Code</label><input type="text" id="stfBankIfsc" placeholder="e.g. SBIN0001234" style="text-transform:uppercase;" maxlength="11" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,11)"></div>
           </div>
           <p style="font-size:0.76rem; color:var(--ink-soft); margin:8px 0 0;">Optional — only used to prefill the Salary Disbursement Report (Staff → Payroll) so it's ready to hand off to your bank or accountant. Nobody outside Payroll access can see this.</p>
+          <div class="form-grid" style="margin-top:14px;">
+            <div class="f-field"><label>How is the salary paid?</label><select id="stfPayMode"><option value="">School default</option><option>Bank Transfer</option><option>Cheque</option><option>Cash</option></select></div>
+            <div class="f-field"><label>Payroll</label><label class="admission-toggle" style="justify-content:flex-start; margin-top:6px;"><input type="checkbox" id="stfPayrollExcluded"> Keep off the payroll (for example the Principal or a trustee)</label></div>
+          </div>
         </div>
 
         <div class="wtab-panel" id="stfpanel-contact" style="display:none;">
@@ -5074,6 +5078,7 @@
 <script src="modules/77-access-polish.js"></script>
 <script src="modules/79-upi-pay.js"></script>
 <script src="modules/80-switch-login.js"></script>
+<script src="modules/81-payroll-pro.js"></script>
 
 <!-- PWA installability — registered standalone, after everything else, so a
      school whose deploy doesn't yet include sw.js/manifest.json just skips

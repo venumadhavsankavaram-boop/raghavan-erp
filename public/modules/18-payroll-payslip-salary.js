@@ -1,5 +1,5 @@
 function salaryDisbursementData(monthStr){
-    const list = staffList.filter(staffIsActive).sort((a,b) => (a.firstName+a.lastName).localeCompare(b.firstName+b.lastName));
+    const list = payrollStaffList().sort((a,b) => (a.firstName+a.lastName).localeCompare(b.firstName+b.lastName));
     const ready = [], missingBank = [], notApproved = [];
     list.forEach(st => {
       const rec = findPayrollRecord(st.id, monthStr);
@@ -88,7 +88,7 @@ function salaryDisbursementData(monthStr){
     storageSet(STAFF_PAYROLL_KEY, staffPayrollRecords).then(() => renderStaffBody());
   }
   function staffPayrollReportRows(){
-    const rows = staffList.filter(staffIsActive).map(st => {
+    const rows = payrollStaffList().map(st => {
       const { preview } = staffPayrollRowData(st.id, staffPayrollMonth);
       return {
         'Staff': st.firstName+' '+st.lastName, 'Department': st.department||'', 'Designation': st.designation||'',
