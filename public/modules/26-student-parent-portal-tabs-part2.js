@@ -118,11 +118,11 @@
     const takenMonth = mine.filter(x => x.status === 'Approved').reduce((n, x) => n + spanIn(x, ym), 0);
     const takenYear = mine.filter(x => x.status === 'Approved').reduce((n, x) => n + spanIn(x, yr), 0);
     const thisInMonth = r.session ? 0.5 : dates.filter(d => d.startsWith(ym)).length;
-    const quotaRaw = st && st.paidLeavesPerMonth !== undefined && st.paidLeavesPerMonth !== '' ? Number(st.paidLeavesPerMonth) : 1;
+    const quotaRaw = (st && typeof payrollQuotaFor === 'function') ? payrollQuotaFor(st, ym) : (st && st.paidLeavesPerMonth !== undefined && st.paidLeavesPerMonth !== '' ? Number(st.paidLeavesPerMonth) : 1);
     const quota = Number.isFinite(quotaRaw) ? quotaRaw : 1;
     facts.push(['This month', `${takenMonth} day(s) already approved + ${thisInMonth} requested · paid allowance ${quota} day(s)/month`]);
     facts.push(['This year', `${takenYear} day(s) approved so far this year`]);
-    const lop = Math.max(0, takenMonth + thisInMonth - quota);
+    const lop = (typeof payrollLopDays === 'function') ? payrollLopDays(takenMonth + thisInMonth, quota) : Math.max(0, takenMonth + thisInMonth - quota);
     if(lop > 0) flags.push(['warn', `${lop} day(s) of this month would be beyond the ${quota}-day paid allowance, so salary is reduced for those days (loss of pay).`]);
     else flags.push(['ok', `Within the paid allowance (${takenMonth + thisInMonth} of ${quota} day(s) this month).`]);
     const todayIso = (typeof localISODate === 'function') ? localISODate() : new Date().toISOString().slice(0,10);

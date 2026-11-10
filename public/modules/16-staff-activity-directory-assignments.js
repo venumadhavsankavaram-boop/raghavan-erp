@@ -553,7 +553,7 @@ let saSelectedTeacherId = '';
         document.getElementById('stfEsiEnabled').checked = !!st.esiEnabled;
         document.getElementById('stfEsiEmployeeAmt').value = st.esiEmployeeAmount !== undefined && st.esiEmployeeAmount !== '' ? st.esiEmployeeAmount : '';
         document.getElementById('stfEsiEmployerAmt').value = st.esiEmployerAmount !== undefined && st.esiEmployerAmount !== '' ? st.esiEmployerAmount : '';
-        document.getElementById('stfPaidLeaves').value = st.paidLeavesPerMonth !== undefined && st.paidLeavesPerMonth !== '' ? st.paidLeavesPerMonth : 1;
+        document.getElementById('stfPaidLeaves').value = st.paidLeavesPerMonth !== undefined && st.paidLeavesPerMonth !== '' ? st.paidLeavesPerMonth : '';
         document.getElementById('stfOtherDeduction').value = st.otherMonthlyDeduction || '';
         document.getElementById('stfBankName').value = st.bankName || '';
         document.getElementById('stfBankAccountName').value = st.bankAccountName || '';
@@ -604,7 +604,7 @@ let saSelectedTeacherId = '';
       document.getElementById('stfEsiEnabled').checked = false;
       document.getElementById('stfEsiEmployeeAmt').value = '';
       document.getElementById('stfEsiEmployerAmt').value = '';
-      document.getElementById('stfPaidLeaves').value = 1;
+      document.getElementById('stfPaidLeaves').value = '';
       document.getElementById('stfOtherDeduction').value = '';
       document.getElementById('stfBankName').value = '';
       document.getElementById('stfBankAccountName').value = '';
@@ -678,7 +678,7 @@ let saSelectedTeacherId = '';
       epfEmployeeAmount: g('stfEpfEmployeeAmt') || 0, epfEmployerAmount: g('stfEpfEmployerAmt') || 0,
       esiEnabled: document.getElementById('stfEsiEnabled').checked,
       esiEmployeeAmount: g('stfEsiEmployeeAmt') || 0, esiEmployerAmount: g('stfEsiEmployerAmt') || 0,
-      paidLeavesPerMonth: g('stfPaidLeaves') === '' ? 1 : g('stfPaidLeaves'),
+      paidLeavesPerMonth: g('stfPaidLeaves') === '' ? '' : g('stfPaidLeaves'),
       otherMonthlyDeduction: g('stfOtherDeduction') || 0,
       bankName: g('stfBankName').trim(), bankAccountName: g('stfBankAccountName').trim(),
       bankAccountNumber: g('stfBankAccountNumber').trim(), bankIfsc: g('stfBankIfsc').trim().toUpperCase(),

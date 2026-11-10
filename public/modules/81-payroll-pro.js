@@ -13,7 +13,8 @@
   'use strict';
   const KEY = 'payroll-settings';
   const MODES = ['Bank Transfer', 'Cheque', 'Cash'];
-  const DEF = { periodStartDay: 1, payDay: 0, payInNextMonth: false, lopBasis: 'period', lopFixed: 30, defaultMode: 'Bank Transfer', excludeDesignations: [] };
+  const DEF = { periodStartDay: 1, payDay: 0, payInNextMonth: false, lopBasis: 'period', lopFixed: 30, defaultMode: 'Bank Transfer', excludeDesignations: [],
+    pageOrientation: 'landscape', slipOrientation: 'portrait', paidLeaveDefault: 1, leaveCounting: 'both', carryForward: false, carryCap: 12, leaveYearStart: 4, halfDayRule: 'deduct' };
   try{ OBJECT_BACKED_KEYS[KEY] = '/api/kv/' + KEY; }catch(e){}
 
   const $ = id => document.getElementById(id);
@@ -45,6 +46,14 @@
       lopBasis: o.lopBasis === 'fixed' ? 'fixed' : 'period',
       lopFixed: (n(o.lopFixed) >= 20 && n(o.lopFixed) <= 31) ? n(o.lopFixed) : 30,
       defaultMode: MODES.includes(o.defaultMode) ? o.defaultMode : 'Bank Transfer',
+      pageOrientation: o.pageOrientation === 'portrait' ? 'portrait' : 'landscape',
+      slipOrientation: o.slipOrientation === 'landscape' ? 'landscape' : 'portrait',
+      paidLeaveDefault: (o.paidLeaveDefault === undefined || o.paidLeaveDefault === null || o.paidLeaveDefault === '' || !isFinite(Number(o.paidLeaveDefault)) || Number(o.paidLeaveDefault) < 0 || Number(o.paidLeaveDefault) > 31) ? 1 : Math.round(Number(o.paidLeaveDefault) * 2) / 2,
+      halfDayRule: o.halfDayRule === 'forgive' ? 'forgive' : 'deduct',
+      leaveCounting: o.leaveCounting === 'absentOnly' ? 'absentOnly' : 'both',
+      carryForward: !!o.carryForward,
+      carryCap: (o.carryCap !== undefined && o.carryCap !== null && o.carryCap !== '' && n(o.carryCap) >= 0 && n(o.carryCap) <= 120) ? n(o.carryCap) : 12,
+      leaveYearStart: (n(o.leaveYearStart) >= 1 && n(o.leaveYearStart) <= 12) ? n(o.leaveYearStart) : 4,
       excludeDesignations: Array.isArray(o.excludeDesignations) ? o.excludeDesignations.map(x => String(x).trim()).filter(Boolean).slice(0, 60) : [],
       updatedBy: o.updatedBy || '', updatedAt: o.updatedAt || '',
     };
@@ -93,8 +102,49 @@
   };
   window.staffAttendanceCountInMonth = function(staffId, monthStr, statuses){
     const p = periodOf(monthStr);
+    // "Only Absent days reduce pay": days marked Leave are always paid, so they are not counted against the allowance.
+    if(S.leaveCounting === 'absentOnly' && Array.isArray(statuses) && statuses.includes('Leave')) statuses = statuses.filter(x => x !== 'Leave');
     return staffAttDaysByStatus(staffId, p.from, p.to, statuses);
   };
+  /* Paid leave allowance for one staff member in one payroll month: their own number if set, otherwise the school default,
+     plus (if switched on) the unused balance carried from earlier months of the same leave year, up to a cap. */
+  const quotaCache = new Map(); let quotaCacheAt = 0;
+  window.payrollQuotaFor = function(st, monthStr){
+    const raw = st.paidLeavesPerMonth;
+    const base = (raw !== undefined && raw !== null && raw !== '' && isFinite(Number(raw)) && Number(raw) >= 0) ? Number(raw) : S.paidLeaveDefault;
+    if(!S.carryForward) return base;
+    const now = Date.now(); if(now - quotaCacheAt > 2000){ quotaCache.clear(); quotaCacheAt = now; }
+    const ck = st.id + '|' + monthStr + '|' + base; if(quotaCache.has(ck)) return quotaCache.get(ck);
+    const [y, mo] = monthStr.split('-').map(Number);
+    let cy = mo >= S.leaveYearStart ? y : y - 1, cm = S.leaveYearStart, bal = 0, guard = 0;
+    while((cy < y || (cy === y && cm < mo)) && guard++ < 12){
+      const taken = window.staffAttendanceCountInMonth(st.id, cy + '-' + pad(cm), ['Leave', 'Absent']);
+      bal = Math.min(S.carryCap, Math.max(0, base + bal - taken));
+      cm += 1; if(cm > 12){ cm = 1; cy += 1; }
+    }
+    const q = base + bal; quotaCache.set(ck, q); return q;
+  };
+  /* Days of loss of pay for the leave taken beyond the paid allowance.
+     'deduct': exactly what is over (1.5 days taken, 1 paid = 0.5 deducted).
+     'forgive': only whole days over the allowance are deducted; a leftover half day is treated as paid
+     (1 paid leave: 1.5 days taken = nothing deducted, 2 days = 1 day deducted, 2.5 days = 1.5 -> 1 day). */
+  window.payrollLopDays = function(leave, quota){
+    const over = Math.max(0, Math.round(((Number(leave) || 0) - (Number(quota) || 0)) * 100) / 100);
+    return S.halfDayRule === 'forgive' ? Math.floor(over + 1e-9) : over;
+  };
+  /* Page orientation for payroll printouts: wraps the print window so the page size follows the setting. */
+  function withOrientation(kind, fn){
+    const orient = kind === 'slip' ? S.slipOrientation : S.pageOrientation;
+    const real = window.open;
+    window.open = function(){
+      const w = real.apply(window, arguments);
+      try{ const d = w && w.document; if(d){ const ow = d.write; d.write = function(h){ return ow.call(d, String(h).replace(/size:\s*A4(?:\s+(?:landscape|portrait))?/i, 'size:A4 ' + orient)); }; } }catch(e){}
+      return w;
+    };
+    try{ return fn(); }finally{ window.open = real; }
+  }
+  ['downloadStaffPayrollPDF', 'downloadSalaryRegisterPDF'].forEach(n => { const o = window[n]; if(typeof o === 'function') window[n] = function(){ const a = arguments, t = this; return withOrientation('page', () => o.apply(t, a)); }; });
+  { const o = window.printPayslip; if(typeof o === 'function') window.printPayslip = function(){ const a = arguments, t = this; return withOrientation('slip', () => o.apply(t, a)); }; }
   const origCompute = window.computeStaffPayroll;
   window.computeStaffPayroll = function(staffId, monthStr){
     const r = origCompute.apply(this, arguments);
@@ -340,7 +390,7 @@
     }));
   };
   window.downloadSalaryDisbursementExcel = function(){ exportRowsToExcel('salary_disbursement_' + staffPayrollMonth + '.xlsx', 'Salary Disbursement', salaryDisbursementReportRows()); };
-  window.downloadSalaryDisbursementPDF = function(){ exportRowsToPDF('Salary Disbursement — ' + monthName(staffPayrollMonth, true), 'Pay period ' + periodText(periodOf(staffPayrollMonth)), salaryDisbursementReportRows()); };
+  window.downloadSalaryDisbursementPDF = function(){ withOrientation('page', () => exportRowsToPDF('Salary Disbursement — ' + monthName(staffPayrollMonth, true), 'Pay period ' + periodText(periodOf(staffPayrollMonth)), salaryDisbursementReportRows())); };
   const safeCell = v => { v = String(v == null ? '' : v); return /^[=+\-@\t\r]/.test(v) ? "'" + v : v; };
   function download(name, text, type){
     const b = new Blob(['﻿' + text], { type: type || 'text/csv;charset=utf-8' });
@@ -360,7 +410,7 @@
   function printSheet(title, sub, head, rowsHtml, foot){
     const w = window.open('', '_blank'); if(!w){ toast('Please allow pop-ups to print.'); return; }
     let sn = ''; try{ sn = schoolInfo.name || ''; }catch(e){}
-    w.document.write(`<html><head><title>${esc(title)}</title><style>@page{size:A4;margin:12mm}body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:0}
+    w.document.write(`<html><head><title>${esc(title)}</title><style>@page{size:A4 ${S.pageOrientation};margin:12mm}body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:0}
       h2{margin:0;text-align:center;font-size:16px}h3{margin:4px 0 2px;text-align:center;font-size:13px}p{text-align:center;font-size:11px;color:#444;margin:2px 0 12px}
       table{width:100%;border-collapse:collapse;font-size:11.5px}th,td{border:1px solid #333;padding:6px 7px;text-align:left}th{background:#eee}td.r{text-align:right}
       .sg{height:34px}.ft{margin-top:26px;display:flex;justify-content:space-between;font-size:11px}</style></head><body onload="window.print()">
@@ -401,11 +451,21 @@
     (S.excludeDesignations || []).forEach(d => { if(!(d in m)) m[d] = 0; });
     return Object.keys(m).sort().map(d => ({ d, n: m[d] }));
   }
+  const leaveOwnCount = () => staffList.filter(staffIsActive).filter(st => st.paidLeavesPerMonth !== undefined && st.paidLeavesPerMonth !== '' && Number(st.paidLeavesPerMonth) !== S.paidLeaveDefault).length;
+  const leaveOwn = () => { const n = leaveOwnCount(); return n ? n + ' staff have a different number saved on their own profile.' : 'Nobody has a different number on their profile.'; };
+  window.payrollLeaveToAll = async function(){
+    if(!can('edit')) return;
+    const n = leaveOwnCount(); if(!n) return;
+    if(!(await showConfirmDialog(`Clear the paid-leave number saved on ${n} staff profiles, so they all follow the school default (${S.paidLeaveDefault} a month)? Approved months do not change.`))) return;
+    staffList.forEach(st => { if(st.paidLeavesPerMonth !== undefined && st.paidLeavesPerMonth !== '') st.paidLeavesPerMonth = ''; });
+    try{ await storageSet(STAFF_KEY, staffList); }catch(e){ toast('Could not save. Please try again.'); return; }
+    toast('All staff now follow the school default.', 'burst'); rerender();
+  };
   function settingsCard(){
     pdCss();
     const m = staffPayrollMonth, p = periodOf(m), sd = salaryDate(m), ed = can('edit');
     const exN = excludedList(m).length;
-    const sum = `Period <b>${esc(periodText(p))}</b> (${p.days} days) · Salary date <b>${sd ? esc(fmtD(sd)) : 'not set'}</b> · Loss of pay per day = basic ÷ <b>${window.daysInPayrollMonth(m)}</b> · Default pay mode <b>${esc(S.defaultMode)}</b>${exN ? ` · <b>${exN}</b> off payroll` : ''}`;
+    const sum = `Period <b>${esc(periodText(p))}</b> (${p.days} days) · Salary date <b>${sd ? esc(fmtD(sd)) : 'not set'}</b> · Loss of pay per day = basic ÷ <b>${window.daysInPayrollMonth(m)}</b> · Paid leave <b>${S.paidLeaveDefault}</b>/month${S.carryForward ? ' (unused carries forward)' : ''}${S.halfDayRule === 'forgive' ? ', part-day over the allowance is paid' : ''} · Reports <b>${S.pageOrientation}</b>, payslips <b>${S.slipOrientation}</b> · Default pay mode <b>${esc(S.defaultMode)}</b>${exN ? ` · <b>${exN}</b> off payroll` : ''}`;
     const form = !settingsOpen ? '' : `<div class="pp-grid">
         <div><label>Pay period starts on day</label><select id="ppStart">${Array.from({ length: 28 }, (_, i) => `<option value="${i + 1}" ${S.periodStartDay === i + 1 ? 'selected' : ''}>${i + 1 === 1 ? '1 (normal month: 1st to last day)' : (i + 1) + ' (' + (i + 1) + 'th to ' + i + 'th of next month)'}</option>`).join('')}</select>
           <p class="pp-hint">Example: choose 26 and "November" covers 26 Oct to 25 Nov. Attendance and loss of pay follow these dates.</p></div>
@@ -414,6 +474,17 @@
           <p class="pp-hint">Used for reminders on the Disbursement card. 31 means the last day of shorter months.</p></div>
         <div><label>Loss of pay per day</label><select id="ppBasis" onchange="document.getElementById('ppFixedWrap').style.display=this.value==='fixed'?'block':'none'"><option value="period" ${S.lopBasis === 'period' ? 'selected' : ''}>Basic ÷ actual days in the period</option><option value="fixed" ${S.lopBasis === 'fixed' ? 'selected' : ''}>Basic ÷ a fixed number of days</option></select>
           <div id="ppFixedWrap" style="display:${S.lopBasis === 'fixed' ? 'block' : 'none'};margin-top:6px"><input type="number" id="ppFixed" min="20" max="31" value="${S.lopFixed}"><p class="pp-hint">Many schools use 30 for every month.</p></div></div>
+        <div><label>Paid leaves per month (school default)</label><input type="number" id="ppLeave" min="0" max="31" step="0.5" value="${S.paidLeaveDefault}">
+          <p class="pp-hint">Used for every staff member who has no number of their own. ${leaveOwn()}</p></div>
+        <div><label>Which days use up the paid leave</label><select id="ppLeaveCount"><option value="both" ${S.leaveCounting === 'both' ? 'selected' : ''}>Leave and Absent days</option><option value="absentOnly" ${S.leaveCounting === 'absentOnly' ? 'selected' : ''}>Only Absent days (marked Leave is always paid)</option></select>
+          <p class="pp-hint">Only the days beyond the allowance are deducted. A half-day absence counts as half a day.</p></div>
+        <div><label>Part of a day beyond the allowance</label><select id="ppHalf"><option value="deduct" ${S.halfDayRule === 'deduct' ? 'selected' : ''}>Deduct it (1 paid leave: 1½ days taken = ½ day deducted)</option><option value="forgive" ${S.halfDayRule === 'forgive' ? 'selected' : ''}>Treat it as paid (1 paid leave: 1½ days taken = nothing deducted, 2 days = 1 day deducted)</option></select>
+          <p class="pp-hint">With "treat it as paid", only whole days beyond the allowance are deducted.</p></div>
+        <div><label>Unused paid leave</label><select id="ppCarry" onchange="document.getElementById('ppCarryWrap').style.display=this.value==='1'?'block':'none'"><option value="0" ${!S.carryForward ? 'selected' : ''}>Lapses at the end of each month</option><option value="1" ${S.carryForward ? 'selected' : ''}>Carries forward to the next month</option></select>
+          <div id="ppCarryWrap" style="display:${S.carryForward ? 'block' : 'none'};margin-top:6px"><label style="font-weight:500">Up to (days in total)</label><input type="number" id="ppCap" min="0" max="120" value="${S.carryCap}">
+            <label style="font-weight:500;margin-top:6px">Leave year starts in</label><select id="ppYear">${['January','February','March','April','May','June','July','August','September','October','November','December'].map((x, i) => `<option value="${i + 1}" ${S.leaveYearStart === i + 1 ? 'selected' : ''}>${x}</option>`).join('')}</select></div></div>
+        <div><label>Page for reports and sheets (PDF, register, cheque and cash sheets)</label><select id="ppOrient"><option value="landscape" ${S.pageOrientation === 'landscape' ? 'selected' : ''}>Landscape (wide)</option><option value="portrait" ${S.pageOrientation === 'portrait' ? 'selected' : ''}>Portrait (tall)</option></select></div>
+        <div><label>Page for payslips</label><select id="ppSlip"><option value="portrait" ${S.slipOrientation === 'portrait' ? 'selected' : ''}>Portrait (tall)</option><option value="landscape" ${S.slipOrientation === 'landscape' ? 'selected' : ''}>Landscape (wide)</option></select></div>
         <div><label>Default way of paying salary</label><select id="ppMode">${MODES.map(x => `<option ${S.defaultMode === x ? 'selected' : ''}>${x}</option>`).join('')}</select>
           <p class="pp-hint">Each staff member can have their own (Edit staff, Payroll Setup), and you can change it again when paying.</p></div>
       </div>
@@ -421,6 +492,7 @@
       <div class="pp-chk" id="ppEx">${designationsInUse().map(x => `<label><input type="checkbox" value="${esc(x.d)}" ${(S.excludeDesignations || []).includes(x.d) ? 'checked' : ''}> ${esc(x.d)} <span style="color:var(--ink-soft)">(${x.n})</span></label>`).join('') || '<span class="pp-hint">No designations set on staff yet.</span>'}</div>
       <p class="pp-hint">For one person only (for example one trustee), use the "Off payroll" button on their row. Already-approved months are never hidden.</p>
       <p class="pp-hint"><b>Good to know:</b> approved months keep their numbers. A changed period applies to months you have not approved yet; drafts recalculate when you press Recalculate.</p>
+      ${leaveOwnCount() ? `<p class="pp-hint"><button class="btn btn-ghost btn-sm" onclick="payrollLeaveToAll()">Use the school default for all staff</button> clears the own number saved on ${leaveOwnCount()} staff.</p>` : ''}
       <div style="display:flex;gap:8px;margin-top:10px"><button class="btn btn-primary btn-sm" onclick="payrollSaveSettings()">Save settings</button><button class="btn btn-ghost btn-sm" onclick="payrollToggleSettings()">Close</button></div>`;
     return `<div class="pp-card" id="ppCard"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><b style="color:var(--navy,#1a1a4b)">⚙ Payroll settings</b>
       ${ed ? `<button class="btn btn-ghost btn-sm" onclick="payrollToggleSettings()">${settingsOpen ? 'Hide' : 'Change'}</button>` : ''}</div>
@@ -432,11 +504,13 @@
     const next = norm({
       periodStartDay: ($('ppStart') || {}).value, payDay: ($('ppPayDay') || {}).value, payInNextMonth: !!($('ppNext') || {}).checked,
       lopBasis: ($('ppBasis') || {}).value, lopFixed: ($('ppFixed') || {}).value, defaultMode: ($('ppMode') || {}).value,
+      pageOrientation: ($('ppOrient') || {}).value, slipOrientation: ($('ppSlip') || {}).value, paidLeaveDefault: ($('ppLeave') || {}).value,
+      halfDayRule: ($('ppHalf') || {}).value, leaveCounting: ($('ppLeaveCount') || {}).value, carryForward: ($('ppCarry') || {}).value === '1', carryCap: ($('ppCap') || {}).value, leaveYearStart: ($('ppYear') || {}).value,
       excludeDesignations: Array.from(document.querySelectorAll('#ppEx input:checked')).map(i => i.value),
     });
-    const changedPeriod = next.periodStartDay !== S.periodStartDay || next.lopBasis !== S.lopBasis || next.lopFixed !== S.lopFixed;
+    const changedPeriod = next.periodStartDay !== S.periodStartDay || next.lopBasis !== S.lopBasis || next.lopFixed !== S.lopFixed || next.paidLeaveDefault !== S.paidLeaveDefault || next.leaveCounting !== S.leaveCounting || next.halfDayRule !== S.halfDayRule || next.carryForward !== S.carryForward || next.carryCap !== S.carryCap || next.leaveYearStart !== S.leaveYearStart;
     const drafts = staffPayrollRecords.filter(r => r.status === 'Draft').length;
-    if(changedPeriod && drafts && !(await showConfirmDialog(`This changes the pay period or the per-day rate. ${drafts} draft payroll(s) will recalculate the next time you press Recalculate. Approved months stay exactly as they are. Continue?`))) return;
+    if(changedPeriod && drafts && !(await showConfirmDialog(`This changes the pay period, the per-day rate or the paid-leave rules. ${drafts} draft payroll(s) will recalculate the next time you press Recalculate. Approved months stay exactly as they are. Continue?`))) return;
     next.updatedBy = (currentUser && currentUser.name) || ''; next.updatedAt = new Date().toISOString();
     try{ await storageSet(KEY, next); }catch(e){ toast('Could not save the settings. Please try again.'); return; }
     S = next; settingsOpen = false; if(!pickedMonth) staffPayrollMonth = defaultMonth();

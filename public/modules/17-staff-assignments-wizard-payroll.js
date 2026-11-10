@@ -25,10 +25,10 @@ function daysInPayrollMonth(monthStr){
     if(!st) return null;
     overrides = overrides || {};
     const basic = Number(st.salary) || 0;
-    const quota = st.paidLeavesPerMonth !== undefined && st.paidLeavesPerMonth !== '' ? Number(st.paidLeavesPerMonth) : 1;
+    const quota = (typeof payrollQuotaFor === 'function') ? payrollQuotaFor(st, monthStr) : (st.paidLeavesPerMonth !== undefined && st.paidLeavesPerMonth !== '' ? Number(st.paidLeavesPerMonth) : 1);
     const leaveDays = staffAttendanceCountInMonth(staffId, monthStr, ['Leave','Absent']);
     const dim = daysInPayrollMonth(monthStr);
-    const lopDays = Math.max(0, leaveDays - quota);
+    const lopDays = (typeof payrollLopDays === 'function') ? payrollLopDays(leaveDays, quota) : Math.max(0, leaveDays - quota);
     const perDay = dim ? basic / dim : 0;
     const lopDeduction = Math.round(perDay * lopDays * 100) / 100;
     // Auto defaults: a fixed ₹/month amount set once on the staff profile (Add/Edit Staff →
