@@ -26,8 +26,11 @@ const JSON_COLUMNS = new Set([
 
 function typeCast(field, next) {
   if (JSON_COLUMNS.has(field.name)) {
-    const raw = field.string();
-    if (raw === null) return null;
+    // Read the bytes and decode them as UTF-8 ourselves. reading a native JSON column as text decodes it as latin1 on some
+    // MySQL servers, which turned the rupee sign (and any Telugu text) into garbage each time it was read and saved back.
+    const buf = field.buffer();
+    if (buf === null) return null;
+    const raw = buf.toString('utf8');
     try { return JSON.parse(raw); } catch { return raw; }
   }
   return next();

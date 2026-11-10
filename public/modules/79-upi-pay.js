@@ -94,8 +94,8 @@
     let card = body.querySelector('#upParentCard'); if(card) card.remove();
     card = document.createElement('div'); card.id = 'upParentCard'; card.className = 'up-card';
     const chg = pset.charge && pset.charge.mode !== 'none' ? `<div class="up-note">A ${esc(pset.charge.label || 'UPI charge')} applies to UPI payments${pset.charge.freeUpTo ? ' above ' + money(pset.charge.freeUpTo) : ''}${pset.charge.reason ? ' (' + esc(pset.charge.reason) + ')' : ''}. You will see it before you pay.</div>` : '';
-    card.innerHTML = `<h3><span>📲 Pay by UPI (school QR)</span><button class="up-btn bl" id="upPayBtn">Pay by UPI</button></h3>
-      <div class="up-note">Scan the school QR with any UPI app, then send us the payment reference (UTR). The office checks the bank and issues your receipt.</div>${chg}
+    card.innerHTML = `<h3><span>📲 Pay by UPI</span><button class="up-btn bl" id="upPayBtn">Pay by UPI</button></h3>
+      <div class="up-note">${pset.qr ? 'Scan the school QR with any UPI app' : 'Pay to the school UPI ID with any UPI app'}, then send us the payment reference (UTR). The office checks the bank and issues your receipt.</div>${chg}
       ${pmine.length ? `<div style="margin-top:10px"><b style="font-size:.9rem">My UPI payments</b>${mineHtml()}</div>` : ''}`;
     body.insertBefore(card, body.firstChild);
     $('upPayBtn').onclick = () => openPay(s);
@@ -118,7 +118,7 @@
       $('upStep').innerHTML = `<div class="up-note" style="margin-bottom:8px">Choose what you are paying for. You can pay part of a fee.</div>
         ${items.map((i, n) => `<div class="up-line"><input type="checkbox" data-c="${n}" ${i.on ? 'checked' : ''}><span>${esc(i.label)}<br><small style="color:#667">Due ${money(i.due)}</small></span><input type="number" min="1" max="${i.due}" step="0.01" data-a="${n}" value="${i.amount}"></div>`).join('')}
         <div class="up-sum" id="upSum"></div>`;
-      document.querySelector('#upModal .up-foot').innerHTML = `<button class="up-btn" id="upCancel">Cancel</button><button class="up-btn bl" id="upNext">Next: show QR</button>`;
+      document.querySelector('#upModal .up-foot').innerHTML = `<button class="up-btn" id="upCancel">Cancel</button><button class="up-btn bl" id="upNext">Next: how to pay</button>`;
       $('upCancel').onclick = closeModal;
       const sum = () => {
         const f = fee(), c = chargeNow();
@@ -210,7 +210,7 @@
   async function renderStaff(){
     const v = $('view-upiclaims'); if(!v) return;
     await loadStaff();
-    const c = (data && data.counts) || {}, n = k => (c[k] ? c[k].n : 0);
+    const c = (data && data.counts) || {}, n = k => (c[k] ? c[k].n : 0); try{ badge(n('submitted')); lastWaiting = n('submitted'); titleCount(n('submitted')); }catch(e){}
     v.innerHTML = `<div class="topbar"><div><h1>UPI Payments</h1><p style="margin:0;color:#667">Parents pay with the school QR and send the UTR. Check each one against the bank, then approve to issue the receipt.</p></div></div>
       ${set && !set.enabled ? `<div class="up-warn">UPI payment is <b>OFF</b>. Parents cannot see it yet.${isMgr() ? ' Open the Settings tab to add the QR and UPI ID and switch it on.' : ''}</div>` : ''}
       <div class="up-tiles"><div class="up-tile"><b>${n('submitted')}</b><span>Waiting to verify (${money(c.submitted ? c.submitted.amt : 0)})</span></div>
@@ -311,7 +311,7 @@
   function renderSettings(){
     const p = $('upPage'); if(!set){ p.innerHTML = '<div class="up-card">Could not load.</div>'; return; }
     const mg = isMgr(), c = set.charge || {}, dis = mg ? '' : 'disabled';
-    p.innerHTML = `<div class="up-card"><h3>School UPI account</h3>${mg ? '' : '<div class="up-note">Only the Admin or Principal can change these.</div>'}
+    p.innerHTML = `<div class="up-card"><h3>School UPI account</h3>${checkHtml(set)}${mg ? '' : '<div class="up-note">Only the Admin or Principal can change these.</div>'}
       <label style="display:flex;gap:8px;align-items:center;margin-bottom:10px"><input type="checkbox" id="stOn" ${set.enabled ? 'checked' : ''} ${dis}> <b>Let parents pay by UPI (ON/OFF)</b></label>
       <div class="up-f"><div><label>UPI ID (e.g. school@sbi)</label><input id="stId" value="${esc(set.upiId)}" ${dis}></div><div><label>Name shown to parents</label><input id="stNm" value="${esc(set.payeeName)}" ${dis}></div>
         <div><label>Accept payments up to (days old)</label><input id="stAge" type="number" min="1" max="60" value="${set.maxAgeDays || 10}" ${dis}></div></div>
@@ -334,6 +334,7 @@
       p.querySelectorAll('[data-pre]').forEach(b => b.onclick = () => { const x = PRE[b.dataset.pre]; $('chMode').value = x.m; $('chPct').value = x.p; $('chFlat').value = x.f; $('chMin').value = x.mn; $('chMax').value = x.mx; $('chFree').value = x.fr; toast('Filled in. Press Save settings to apply.'); });
       $('stQr').onchange = async ev => { const f = ev.target.files[0]; if(!f) return; try{ newQr = await compress(f); $('stQrPrev').innerHTML = `<img src="${newQr}" style="max-width:180px;margin-top:6px;border:1px solid #e3e8f3;border-radius:10px">`; }catch(e){ toast('Could not read that picture.'); } };
       $('stSave').onclick = async () => {
+        if($('chMode').value === 'none' && (Number($('chPct').value) > 0 || Number($('chFlat').value) > 0 || Number($('chMax').value) > 0 || Number($('chFree').value) > 0) && !confirm('Charge type is "No charge", so parents will NOT be charged anything, even though amounts are filled in. Save like this?')) return;
         const body = { enabled: $('stOn').checked, upiId: $('stId').value, payeeName: $('stNm').value, maxAgeDays: Number($('stAge').value), instructions: $('stIns').value, requireScreenshot: $('stShot').checked,
           charge: { mode: $('chMode').value, percent: Number($('chPct').value), flat: Number($('chFlat').value), freeUpTo: Number($('chFree').value), min: Number($('chMin').value), max: Number($('chMax').value), label: $('chLbl').value, effectiveFrom: $('chFrom').value, reason: $('chWhy').value } };
         if(newQr) body.qr = newQr;
@@ -342,6 +343,44 @@
     }
   }
 
+  function checkHtml(set){
+    const c = set.charge || {}, items = [];
+    const handle = String(set.upiId || '').split('@')[1] || '';
+    if(!set.upiId && !set.qr) items.push(['#fde4e1', '#b3261e', 'Add the UPI ID or the QR image. Parents have nothing to pay to.']);
+    if(set.upiId && !/^[a-z]+$/.test(handle)) items.push(['#fff3d6', '#8a5a00', `Please double-check the UPI ID <b>${esc(set.upiId)}</b>. The part after @ (the bank handle) is normally lowercase letters only, for example <b>name@sbi</b>. A wrong ID makes every parent payment fail. Check it in your SBI / YONO app.`]);
+    if(!set.qr) items.push(['#fff3d6', '#8a5a00', 'No QR image uploaded. Parents will see only the UPI ID and the "Open my UPI app" button. Uploading the QR from your SBI merchant / YONO app makes paying easier.']);
+    if(c.mode === 'none' && (Number(c.freeUpTo) > 0 || Number(c.max) > 0 || Number(c.percent) > 0 || Number(c.flat) > 0 || c.reason)) items.push(['#fff3d6', '#8a5a00', 'The charge type is <b>No charge</b>, so parents are <b>not</b> being charged anything even though charge amounts or a reason are filled in. Pick a preset or choose "Percent" / "Flat" under Charge type, then Save.']);
+    if(!items.length) return '';
+    return items.map(i => `<div style="background:${i[0]};color:${i[1]};border-radius:10px;padding:8px 11px;font-size:.84rem;margin:6px 0;line-height:1.45">⚠ ${i[2]}</div>`).join('');
+  }
+  /* In-app alert for the office: a red count on the "UPI Payments" menu item, the browser tab title, a message when a new
+     payment arrives, and the dashboard card. Checked every 45 seconds while the page is visible; it is a background check, so it
+     never keeps a forgotten screen signed in. */
+  let lastWaiting = null, pollTimer = null;
+  function badge(n){
+    const b = $('navUpiClaims'); if(!b) return; let sp = b.querySelector('.up-bdg');
+    if(!n){ if(sp) sp.remove(); return; }
+    if(!sp){ sp = document.createElement('span'); sp.className = 'up-bdg'; sp.style.cssText = 'margin-left:auto;background:#d32f2f;color:#fff;border-radius:999px;padding:1px 8px;font-size:.7rem;font-weight:700'; b.appendChild(sp); }
+    sp.textContent = n;
+  }
+  function titleCount(n){ const base = document.title.replace(/^\(\d+\)\s*/, ''); document.title = n ? '(' + n + ') ' + base : base; }
+  async function poll(){
+    if(!isStaff() || document.hidden) return;
+    try{
+      const r = await fetch('/api/upi/count', { credentials: 'include', headers: { 'x-background': '1' } }); if(!r.ok) return;
+      const j = await r.json(); const n = j.waiting || 0;
+      badge(n); titleCount(n);
+      if(n && (lastWaiting === null || n > lastWaiting)) toast(lastWaiting === null ? n + ' UPI payment(s) waiting for you to verify.' : 'A parent has sent a new UPI payment to verify.');
+      lastWaiting = n;
+      const dv = $('view-dashboard'); if(dv && dv.style.display !== 'none') dashCard();
+    }catch(e){}
+  }
+  window.__upiPoll = poll;
+  function startPoll(){
+    if(pollTimer || !isStaff()) return;
+    pollTimer = setInterval(poll, 45000); setTimeout(poll, 2500);
+    document.addEventListener('visibilitychange', () => { if(!document.hidden) poll(); });
+  }
   /* ===================================================================== DASHBOARD COUNT + WIRING ===== */
   async function dashCard(){
     if(!isStaff()) return; const v = $('view-dashboard'); if(!v) return;
@@ -380,7 +419,7 @@
     window.applyRolePermissions = function(){
       const r = o.apply(this, arguments);
       try{
-        if(isStaff()){ ensureShell(); const n = $('navUpiClaims'); if(n){ const m = $('navManageFee'); n.style.display = m && m.style.display === 'none' && role() !== 'Accountant' ? 'none' : 'flex'; } }
+        if(isStaff()){ ensureShell(); startPoll(); const n = $('navUpiClaims'); if(n){ const m = $('navManageFee'); n.style.display = m && m.style.display === 'none' && role() !== 'Accountant' ? 'none' : 'flex'; } }
         else { const n = $('navUpiClaims'); if(n) n.remove(); const v = $('view-upiclaims'); if(v) v.style.display = 'none'; }
         if(typeof updateSbSectionVisibility === 'function') updateSbSectionVisibility();
       }catch(e){}
