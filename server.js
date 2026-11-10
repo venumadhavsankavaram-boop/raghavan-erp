@@ -746,6 +746,7 @@ async function ensureSchema() {
   )`;
   await addColumnIfMissing('sessions', 'must_change TINYINT DEFAULT 0');
   await addColumnIfMissing('sessions', 'impersonated_by VARCHAR(191)');
+  await addColumnIfMissing('sessions', 'pair_key VARCHAR(64)');
   await sql`CREATE TABLE IF NOT EXISTS password_reset_requests (
     id VARCHAR(64) PRIMARY KEY, user_id VARCHAR(191), username VARCHAR(191), status VARCHAR(16) DEFAULT 'pending',
     ip VARCHAR(64), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, resolved_at DATETIME NULL
@@ -1279,6 +1280,7 @@ app.use(async (req, res, next) => {
     // Calls the app makes by itself (page hidden or untouched for a while) check the login but do not renew it,
     // so an app left running in the background still signs out after the idle time.
     if (req.headers['x-background'] !== '1') sql`UPDATE sessions SET expires_at = ${newExpires.toISOString()}, last_seen_at = now() WHERE id = ${idHash}`.catch(() => {});
+    if (req.headers['x-background'] !== '1') { const altTok = parseCookies(req).sid_alt; if (altTok) sql`UPDATE sessions SET expires_at = ${newExpires.toISOString()} WHERE id = ${hashSessionToken(altTok)} AND expires_at > now()`.catch(() => {}); }
     req.authUser = { id: session.user_id, role: session.role, name: session.name, impersonatedBy: session.impersonated_by || null };
     // Parents/students: note "last seen" at most once every 10 minutes (feeds the Parent adoption board).
     if ((session.role === 'Parent' || session.role === 'Student') && !session.impersonated_by && req.headers['x-background'] !== '1') {
@@ -5296,6 +5298,90 @@ app.post('/api/upi/claims/:id/approve', async (req, res) => {
   } catch (err) { console.error('upi approve error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
 });
 
+// ---------- Second login on the same phone (a teacher who is also a parent) ----------
+// The person signs in normally, then adds their other login ONCE (username and password are checked exactly like a sign-in).
+// Both sessions stay alive and separate; "Switch login" just swaps which one the browser uses. Nothing is merged: each login
+// keeps its own role, permissions and password. Only Teacher <-> Parent/Student pairs are allowed, and never an account with
+// two-step sign-in, so this cannot be used to get round that protection.
+const SW_STAFF = ['Teacher'];
+const swPairOk = (a, b) => (SW_STAFF.includes(a) && PARENT_LOGIN_ROLES.includes(b)) || (PARENT_LOGIN_ROLES.includes(a) && SW_STAFF.includes(b));
+async function swAltSession(req, curRole) {
+  const alt = parseCookies(req).sid_alt; if (!alt) return null;
+  const rows = await sql`SELECT * FROM sessions WHERE id = ${hashSessionToken(alt)}`; if (!rows.length) return null;
+  const s = rows[0], now = Date.now();
+  // Only the person who paired the two logins can use the parked one: both sessions carry the same pair key.
+  const mine = parseCookies(req).sid ? await sql`SELECT pair_key FROM sessions WHERE id = ${hashSessionToken(parseCookies(req).sid)}` : [];
+  if (!s.pair_key || !mine.length || mine[0].pair_key !== s.pair_key) return null;
+  if (s.impersonated_by || new Date(s.expires_at).getTime() < now || now - new Date(s.created_at).getTime() > SESSION_ABSOLUTE_MAX_MS) return null;
+  if (!swPairOk(curRole, s.role)) return null;
+  return { row: s, token: alt };
+}
+function swCookies(req, sid, alt) {
+  const secure = isHttpsRequest(req) ? '; Secure' : '', max = Math.floor(SESSION_ABSOLUTE_MAX_MS / 1000);
+  return [`sid=${sid}; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=${max}`, alt ? `sid_alt=${alt}; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=${max}` : `sid_alt=; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=0`];
+}
+async function swDestroyAlt(req) {
+  const alt = parseCookies(req).sid_alt; if (alt) await sql`DELETE FROM sessions WHERE id = ${hashSessionToken(alt)}`.catch(() => {});
+}
+app.get('/api/account/switch', async (req, res) => {
+  try {
+    if (!req.authUser || req.authUser.impersonatedBy || !(SW_STAFF.includes(req.authUser.role) || PARENT_LOGIN_ROLES.includes(req.authUser.role))) return res.status(200).json({ available: false });
+    const a = await swAltSession(req, req.authUser.role);
+    return res.status(200).json({ available: true, other: a ? { name: String(a.row.name || ''), role: a.row.role } : null, wants: SW_STAFF.includes(req.authUser.role) ? 'child' : 'teacher' });
+  } catch (err) { console.error('switch state error:', err); return res.status(200).json({ available: false }); }
+});
+app.post('/api/account/switch/add', async (req, res) => {
+  try {
+    if (!req.authUser || req.authUser.impersonatedBy) return res.status(403).json({ error: 'Not available.' });
+    const cur = req.authUser, { username, password } = req.body || {};
+    if (!username || !password) return res.status(400).json({ error: 'Username and password are required.' });
+    const rateKey = loginRateKey(req, username), blocked = checkLoginRateLimit(rateKey) || userBlockSeconds(username);
+    if (blocked) return res.status(429).json({ error: `Too many failed attempts. Try again in ${Math.ceil(blocked / 60)} minute(s).` });
+    const rows = await sql`SELECT * FROM users WHERE LOWER(username) = LOWER(${String(username)}) AND deleted_at IS NULL`;
+    const bad = () => { recordLoginFailure(rateKey); userFailure(username); auditFailedLogin(req, username); return res.status(401).json({ error: 'Invalid username or password.' }); };
+    if (!rows.length) return bad();
+    const other = rows[0]; if (!(await bcrypt.compare(String(password), other.password || ''))) return bad();
+    recordLoginSuccess(rateKey);
+    if (other.id === cur.id) return res.status(400).json({ error: 'That is the login you are already using.' });
+    if (!swPairOk(cur.role, other.role)) return res.status(403).json({ error: cur.role === 'Teacher' ? 'Please enter the parent or student login of your child.' : 'Please enter your teacher login.' });
+    if (other.twofa_method) return res.status(403).json({ error: 'This login uses two-step sign-in and cannot be added here.' });
+    if (Number(other.must_change_password || 0)) return res.status(403).json({ error: 'Sign in with that login once on its own to set a new password, then add it here.' });
+    const curToken = parseCookies(req).sid; if (!curToken) return res.status(401).json({ error: 'Not logged in.' });
+    await swDestroyAlt(req);
+    await sql`DELETE FROM sessions WHERE user_id = ${other.id}`;
+    const token = crypto.randomBytes(32).toString('hex'), exp = new Date(Date.now() + SESSION_IDLE_MS);
+    const pairKey = crypto.randomBytes(12).toString('hex');
+    await sql`INSERT INTO sessions (id, user_id, role, name, expires_at, must_change, pair_key) VALUES (${hashSessionToken(token)}, ${other.id}, ${other.role}, ${other.name}, ${exp.toISOString()}, 0, ${pairKey})`;
+    await sql`UPDATE sessions SET pair_key = ${pairKey} WHERE id = ${hashSessionToken(curToken)}`;
+    if (PARENT_LOGIN_ROLES.includes(other.role)) sql`UPDATE users SET first_login_at = COALESCE(first_login_at, now()), last_login_at = now(), last_seen_at = now() WHERE id = ${other.id}`.catch(() => {});
+    else sql`UPDATE users SET last_login_at = now() WHERE id = ${other.id}`.catch(() => {});
+    // The new login becomes the active one; the one the person came from is parked in sid_alt.
+    res.setHeader('Set-Cookie', swCookies(req, token, curToken));
+    auditNote(cur.name, cur.role, 'LOGIN', 'switch-login', other.id, `added a second login (${other.role}) on this device`, clientIp(req));
+    return res.status(200).json({ ok: true });
+  } catch (err) { console.error('switch add error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/account/switch', async (req, res) => {
+  try {
+    if (!req.authUser || req.authUser.impersonatedBy) return res.status(403).json({ error: 'Not available.' });
+    const a = await swAltSession(req, req.authUser.role);
+    const curToken = parseCookies(req).sid;
+    if (!a || !curToken) { res.setHeader('Set-Cookie', swCookies(req, curToken || '', null).slice(1)); return res.status(409).json({ needLogin: true, error: 'Please add the other login again.' }); }
+    const exp = new Date(Math.min(Date.now() + SESSION_IDLE_MS, new Date(a.row.created_at).getTime() + SESSION_ABSOLUTE_MAX_MS));
+    await sql`UPDATE sessions SET expires_at = ${exp.toISOString()}, last_seen_at = now() WHERE id = ${hashSessionToken(a.token)}`;
+    res.setHeader('Set-Cookie', swCookies(req, a.token, curToken));
+    auditNote(req.authUser.name, req.authUser.role, 'LOGIN', 'switch-login', a.row.user_id, `switched to the ${a.row.role} login`, clientIp(req));
+    return res.status(200).json({ ok: true });
+  } catch (err) { console.error('switch error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+app.post('/api/account/switch/remove', async (req, res) => {
+  try {
+    if (!req.authUser) return res.status(401).json({ error: 'Not logged in.' });
+    await swDestroyAlt(req); res.setHeader('Set-Cookie', swCookies(req, parseCookies(req).sid || '', null).slice(1));
+    return res.status(200).json({ ok: true });
+  } catch (err) { console.error('switch remove error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
+});
+
 // ---------- Exam plans: a teacher plans an exam for their own subject, the Principal/Admin approves ----------
 // Teacher -> Submitted -> (Approved | Returned with a note -> teacher edits and resubmits). Approved plans are
 // shown to the class (syllabus, date, marks, instructions); the Admin screen also writes the date/marks into the
@@ -6670,7 +6756,9 @@ app.get('/api/approvers', async (req, res) => {
 app.post('/api/logout', async (req, res) => {
   try {
     if (req.authUser) auditNote(req.authUser.name, req.authUser.role, 'LOGOUT', 'sign-in', req.authUser.id, null, clientIp(req));
+    await swDestroyAlt(req);
     await destroySession(req, res);
+    res.setHeader('Set-Cookie', ['sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0', 'sid_alt=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0']);
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('logout error:', err);
