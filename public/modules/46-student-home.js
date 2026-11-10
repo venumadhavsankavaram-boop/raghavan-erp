@@ -295,18 +295,29 @@
     window.switchView = function(view){
       const r = o.apply(this, arguments);
       if(view === 'myprofile' && isParent() && !landed){ landed = true; try{ window.switchMyProfileTab('home'); }catch(e){} }
-      if(view === 'admintools2' && isAdmin()) setTimeout(adminCard, 400);
+      if(view === 'admintools2' && isAdmin()){ setTimeout(adminCard, 30); keepAdminCard('portalSettingsCard', adminCard); }
       return r;
     };
   }
 
   /* ---------- Admin: Parent portal card (in Admin Tools) ---------- */
+  /* The Admin Tools page can finish drawing itself after the first 400ms (slow phone or network) and wipe this card. Watch the
+     page and put the card back whenever it is missing while the page is open, so no refresh is needed. */
+  function keepAdminCard(id, make){
+    window.__atKeep = window.__atKeep || {};
+    if(window.__atKeep[id]) { return; } window.__atKeep[id] = true;
+    let t = null;
+    const check = () => { const v = $('view-admintools2'); if(v && v.style.display !== 'none' && $('adminTools2Body') && !$(id)) make(); };
+    const start = () => { const v = $('view-admintools2'); if(!v) return setTimeout(start, 1000); new MutationObserver(() => { clearTimeout(t); t = setTimeout(check, 250); }).observe(v, { childList: true, subtree: true }); };
+    start();
+  }
   async function adminCard(){
     const host = $('adminTools2Body'); if(!host) return;
     let card = $('portalSettingsCard');
     if(!card){
       card = document.createElement('div'); card.id = 'portalSettingsCard'; card.className = 'profile-card';
       card.style.cssText = 'margin:0 0 18px;padding:16px 18px;';
+      if(!card.innerHTML.trim()) card.innerHTML = '<p style="margin:0;color:#667">Loading…</p>';
       host.insertBefore(card, host.firstChild);
     }
     loaded = false; await loadSettings();

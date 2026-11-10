@@ -206,13 +206,23 @@
       if(isTeacher()){
         try{ dock(); watch(); dockActive(view); loadCfg(false).then(applyNav); if(view === 'myday') setTimeout(() => paint(false), 60); }catch(e){}
       }
-      if(view === 'admintools2' && isMgr()) setTimeout(adminCard, 450);
+      if(view === 'admintools2' && isMgr()){ setTimeout(adminCard, 60); keepAdminCard('teacherPortalCard', adminCard); }
       return r;
     };
   }
   setInterval(() => { if(isTeacher()){ dock(); watch(); } else if($('tpDock')) dock(); }, 2500);
 
   /* ---------- Admin / Principal: Teacher portal controls (in Admin Tools) ---------- */
+  /* The Admin Tools page can finish drawing itself after the first 400ms (slow phone or network) and wipe this card. Watch the
+     page and put the card back whenever it is missing while the page is open, so no refresh is needed. */
+  function keepAdminCard(id, make){
+    window.__atKeep = window.__atKeep || {};
+    if(window.__atKeep[id]) { return; } window.__atKeep[id] = true;
+    let t = null;
+    const check = () => { const v = $('view-admintools2'); if(v && v.style.display !== 'none' && $('adminTools2Body') && !$(id)) make(); };
+    const start = () => { const v = $('view-admintools2'); if(!v) return setTimeout(start, 1000); new MutationObserver(() => { clearTimeout(t); t = setTimeout(check, 250); }).observe(v, { childList: true, subtree: true }); };
+    start();
+  }
   const BACK_OPTS = [[null, 'No limit (today’s behaviour)'], [0, 'Today only'], [1, 'Up to 1 day back'], [2, 'Up to 2 days back'], [3, 'Up to 3 days back'], [7, 'Up to 7 days back'], [15, 'Up to 15 days back'], [30, 'Up to 30 days back']];
   async function adminCard(){
     const host = $('adminTools2Body'); if(!host) return;
@@ -220,6 +230,7 @@
     if(!card){
       card = document.createElement('div'); card.id = 'teacherPortalCard'; card.className = 'profile-card';
       card.style.cssText = 'margin:0 0 18px;padding:16px 18px;';
+      if(!card.innerHTML.trim()) card.innerHTML = '<p style="margin:0;color:#667">Loading…</p>';
       const parentCard = $('portalSettingsCard');
       if(parentCard && parentCard.parentNode === host) parentCard.insertAdjacentElement('afterend', card); else host.insertBefore(card, host.firstChild);
     }
