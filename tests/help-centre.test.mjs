@@ -93,6 +93,11 @@ test('copying a built-in topic gives an editable copy', () => {
   assert.equal(f.aud, 'parent'); assert.ok(f.stepsEn.length >= 5 && f.stepsEn.length === f.stepsTe.length); assert.ok(/[\u0C00-\u0C7F]/.test(f.te));
   hc.setLang('te'); assert.equal(hc.lang(), 'te');
 });
+test('Help button can be shown, small or hidden, per person or for the whole school', () => {
+  const hc = boot({ role: 'Admin', id: 'a1' }).__hc;
+  assert.equal(hc.clean({}).fab, 'full'); assert.equal(hc.clean({ fab: 'off' }).fab, 'off'); assert.equal(hc.clean({ fab: 'small' }).fab, 'small'); assert.equal(hc.clean({ fab: 'junk' }).fab, 'full');
+  assert.ok(/data-fm=/.test(m83) && /hcFabDef/.test(m83) && /hcFab:' \+ uid\(\)/.test(m83));
+});
 test('wiring: both modules are loaded, content first', () => {
   const a = idx.indexOf('modules/82-help-content.js'), b = idx.indexOf('modules/83-help-centre.js');
   assert.ok(a > 0 && b > a);

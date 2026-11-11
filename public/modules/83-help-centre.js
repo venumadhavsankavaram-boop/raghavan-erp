@@ -22,10 +22,10 @@
   const AUD_NAME = { parent: ['Parents', 'తల్లిదండ్రులు'], teacher: ['Teachers', 'టీచర్లు'], admin: ['Admin & Office', 'అడ్మిన్ & ఆఫీసు'], demo: ['Start here', 'ఇక్కడ మొదలు'] };
 
   /* ---------- settings (school-editable) ---------- */
-  const blank = () => ({ phone: '', hours: '', lang: '', whatsNew: [], hidden: [], custom: [], tourOff: false });
+  const blank = () => ({ phone: '', hours: '', lang: '', whatsNew: [], hidden: [], custom: [], tourOff: false, fab: 'full' });
   const clean = v => {
     const d = blank(); v = (v && typeof v === 'object') ? v : {};
-    d.phone = String(v.phone || '').slice(0, 40); d.hours = String(v.hours || '').slice(0, 80); d.tourOff = v.tourOff === true; d.lang = v.lang === 'te' ? 'te' : v.lang === 'en' ? 'en' : '';
+    d.phone = String(v.phone || '').slice(0, 40); d.hours = String(v.hours || '').slice(0, 80); d.tourOff = v.tourOff === true; d.fab = (v.fab === 'small' || v.fab === 'off') ? v.fab : 'full'; d.lang = v.lang === 'te' ? 'te' : v.lang === 'en' ? 'en' : '';
     d.whatsNew = (Array.isArray(v.whatsNew) ? v.whatsNew : []).filter(x => x && (x.en || x.te)).slice(0, 30).map(x => ({ id: String(x.id || ''), at: String(x.at || ''), en: String(x.en || '').slice(0, 400), te: String(x.te || '').slice(0, 400) }));
     d.hidden = (Array.isArray(v.hidden) ? v.hidden : []).map(String).slice(0, 200);
     d.custom = (Array.isArray(v.custom) ? v.custom : []).filter(x => x && x.id && x.aud && (x.en || x.te)).slice(0, 80).map(x => ({
@@ -96,7 +96,8 @@
     s.textContent = `
       #hcFab,#hcFab *,.hc-sheet,.hc-sheet *,.hc-card,.hc-card *{font-family:'Poppins','Noto Sans Telugu','Nirmala UI','Gautami',system-ui,'Segoe UI',sans-serif;letter-spacing:normal;}
       #hcFab{position:fixed;right:14px;bottom:calc(16px + var(--demo-h,0px));z-index:950;display:none;align-items:center;gap:6px;background:#2f4fd8;color:#fff;border:0;border-radius:999px;padding:10px 16px;font-weight:700;font-size:.86rem;line-height:1;box-shadow:0 8px 22px rgba(30,50,140,.35);cursor:pointer;}
-      #hcFab.on{display:inline-flex;} #hcFab:hover{background:#243fb5;} #hcFab .dot{width:9px;height:9px;border-radius:50%;background:#ffb300;display:none;} #hcFab.new .dot{display:inline-block;}
+      #hcFab.on{display:inline-flex;} #hcFab.small{padding:11px;} #hcFab.small .t{display:none;} #hcFab.edge{right:0;padding:0;width:10px;height:58px;border-radius:10px 0 0 10px;opacity:.4;bottom:calc(40% + var(--demo-h,0px));} #hcFab.edge span{display:none !important;} body.pp-on #hcFab.edge,body.tp-on #hcFab.edge{bottom:calc(40% + var(--demo-h,0px));}
+      .hc-fm{display:flex;gap:4px;align-items:center;font-size:.78rem;color:#556;} .hc-fm button.on{background:#2f4fd8;color:#fff;border-color:#2f4fd8;} #hcFab:hover{background:#243fb5;} #hcFab .dot{width:9px;height:9px;border-radius:50%;background:#ffb300;display:none;} #hcFab.new .dot{display:inline-block;}
       body.pp-on #hcFab,body.tp-on #hcFab{bottom:calc(86px + env(safe-area-inset-bottom) + var(--demo-h,0px));}
       @media (max-width:760px){#hcFab{padding:11px 14px;}}
       @media print{#hcFab,#hcOv,#hcTour{display:none !important;}}
@@ -169,7 +170,7 @@
       <div class="hc-head"><div class="hc-top"><h2>❓ ${esc(L('Help', 'సహాయం'))}</h2><button type="button" class="hc-btn" id="hcLang">🌐 ${lang() === 'te' ? 'English' : 'తెలుగు'}</button><button type="button" class="hc-btn" id="hcClose" aria-label="Close">✕</button></div>
       <input class="hc-search" id="hcQ" type="search" placeholder="${esc(L('Search: for example "pay fees"', 'వెతకండి, ఉదా. "ఫీజు"'))}" value="${esc(st.q)}" autocomplete="off">${tabs}</div>
       <div class="hc-body" id="hcBody">${bodyHtml()}</div>
-      <div class="hc-foot">${phone}<span class="sp"></span><button type="button" id="hcTourBtn">▶ ${esc(L('Take the tour', 'ఎలా వాడాలో చూడండి'))}</button><button type="button" id="hcPrint">🖨 ${esc(L('Print guide', 'ప్రింట్ తీసుకోండి'))}</button>${isMgr() ? `<button type="button" id="hcEdit">✏️ ${esc(L('Edit help', 'సహాయం మార్చండి'))}</button>` : ''}</div></div>`;
+      <div class="hc-foot">${phone}<span class="sp"></span><span class="hc-fm">${esc(L('Help button', 'సహాయం బటన్'))}: ${[['full', L('Show', 'చూపు')], ['small', L('Small', 'చిన్నది')], ['off', L('Hide', 'దాచు')]].map(x => `<button type="button" data-fm="${x[0]}" class="${fabMode() === x[0] ? 'on' : ''}">${esc(x[1])}</button>`).join('')}</span><button type="button" id="hcTourBtn">▶ ${esc(L('Take the tour', 'ఎలా వాడాలో చూడండి'))}</button><button type="button" id="hcPrint">🖨 ${esc(L('Print guide', 'ప్రింట్ తీసుకోండి'))}</button>${isMgr() ? `<button type="button" id="hcEdit">✏️ ${esc(L('Edit help', 'సహాయం మార్చండి'))}</button>` : ''}</div></div>`;
   }
 
   /* ---------- editor (Admin / Principal) ---------- */
@@ -193,6 +194,7 @@
         <div class="row"><div><label>Note (English)</label><input id="hcWEn" maxlength="400"></div><div><label>Note (Telugu)</label><input id="hcWTe" maxlength="400"></div></div><div style="margin-top:8px"><button type="button" class="b g" id="hcWAdd">+ Add note</button></div>
         <h3>My own topics</h3>${mine}${form}
         <h3>Hide built-in topics</h3><div class="row"><select id="hcEdAud">${['parent', 'teacher', 'admin'].map(x => `<option value="${x}" ${a === x ? 'selected' : ''}>${esc(AUD_NAME[x][0])}</option>`).join('')}</select><div></div></div>${hideList}
+        <h3>Help button</h3><div class="row"><div><label>Floating Help button for everyone (each person can still change it for themselves)</label><select id="hcFabDef"><option value="full" ${D.fab === 'full' ? 'selected' : ''}>Show with the word Help</option><option value="small" ${D.fab === 'small' ? 'selected' : ''}>Small round button only</option><option value="off" ${D.fab === 'off' ? 'selected' : ''}>Hidden (a thin tab on the screen edge)</option></select></div><div></div></div>
         <h3>First-login tour</h3><label class="chk"><input type="checkbox" id="hcTourOff" ${D.tourOff ? 'checked' : ''}> Do not show the welcome tour to new users</label>
         <div class="hc-msg" id="hcSaveMsg">${esc(st.msg)}</div><button type="button" class="b" id="hcSave">Save changes</button>
       </div></div>`;
@@ -205,7 +207,7 @@
     const D = st.draft; if (!D) return;
     const v = id => { const e = $(id); return e ? e.value : null; };
     if (v('hcPhone') !== null) D.phone = v('hcPhone'); if (v('hcHours') !== null) D.hours = v('hcHours');
-    const t = $('hcTourOff'); if (t) D.tourOff = t.checked; const ld = $('hcLangDef'); if (ld) D.lang = ld.value;
+    const t = $('hcTourOff'); if (t) D.tourOff = t.checked; const ld = $('hcLangDef'); if (ld) D.lang = ld.value; const fd = $('hcFabDef'); if (fd) D.fab = fd.value;
     document.querySelectorAll('[data-hide]').forEach(cb => { const k = cb.dataset.hide; const i = D.hidden.indexOf(k); if (cb.checked && i < 0) D.hidden.push(k); if (!cb.checked && i >= 0) D.hidden.splice(i, 1); });
     if (st.form) { const f = st.form; if (v('hcfAud')) f.aud = v('hcfAud'); f.ic = v('hcfIc') || f.ic; f.en = v('hcfEn') || ''; f.te = v('hcfTe') || ''; f.stepsEn = (v('hcfSEn') || '').split('\n').map(s => s.trim()).filter(Boolean); f.stepsTe = (v('hcfSTe') || '').split('\n').map(s => s.trim()).filter(Boolean); f.tipEn = v('hcfTEn') || ''; f.tipTe = v('hcfTTe') || ''; }
   }
@@ -248,6 +250,7 @@
     if (id === 'hcClose') closeHelp();
     else if (id === 'hcLang') { LS.set('hcLang', lang() === 'te' ? 'en' : 'te'); render(); }
     else if (id === 'hcTourBtn') { closeHelp(); startTour(true); }
+    else if (b.dataset.fm) { LS.set('hcFab:' + uid(), b.dataset.fm); updateFab(); render(); }
     else if (id === 'hcPrint') printGuide();
     else if (id === 'hcEdit') { st.draft = JSON.parse(JSON.stringify(S)); st.mode = 'edit'; st.msg = ''; st.form = null; st.edAud = 'parent'; render(); }
     else if (id === 'hcBack') { readDraftFields(); st.mode = 'help'; render(); }
@@ -316,6 +319,7 @@
   /* ---------- the Help button ---------- */
   const appVisible = () => { const a = $('appShell'); return !!(a && a.style.display !== 'none' && a.offsetParent !== null); };
   function blocked() { return !!($('cnOverlay') || document.querySelector('.cn-ov,.sw-ov')); }
+  const fabMode = () => { const m = LS.get('hcFab:' + uid()); return (m === 'full' || m === 'small' || m === 'off') ? m : (S.fab || 'full'); };
   function updateFab() {
     const show = !!me() && appVisible();
     let b = $('hcFab');
@@ -324,7 +328,9 @@
     if (!b) { b = document.createElement('button'); b.id = 'hcFab'; b.type = 'button'; b.setAttribute('aria-label', 'Help'); b.addEventListener('click', () => openHelp(true)); document.body.appendChild(b); }
     const seen = LS.get('hcSeenNew:' + uid()) || ''; const now = S.whatsNew.map(w => w.id).join(',');
     b.classList.toggle('new', !!now && now !== seen);
-    b.innerHTML = '<span>❓</span><span>' + esc(L('Help', 'సహాయం')) + '</span><span class="dot"></span>';
+    const fm = fabMode(); b.classList.toggle('small', fm === 'small'); b.classList.toggle('edge', fm === 'off');
+    b.setAttribute('aria-label', L('Help', 'సహాయం'));
+    b.innerHTML = '<span>❓</span><span class="t">' + esc(L('Help', 'సహాయం')) + '</span><span class="dot"></span>';
     b.classList.add('on');
   }
   let lastUser = null, tourTried = false;
