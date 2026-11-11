@@ -2287,6 +2287,8 @@ const KV_KEY_TO_MODULE = {
   'website-extras': ['websitegallery'],
   'finance-settings': ['managefee'],
   'payroll-settings': ['staff'],
+  // Salary posting to Accounting: its settings and the record of which vouchers were created.
+  'payroll-accounting': ['staff'],
   // Fees prepared for the coming academic year (applied when that year is made current).
   'fee-plan-next': ['managefee'],
   // Log of mid-year class / section changes (Promotion & Transfer).

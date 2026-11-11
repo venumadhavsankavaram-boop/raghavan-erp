@@ -33,7 +33,7 @@
       { ok: s.n > 0 && s.marked === s.n, t: 'Attendance', d: s.marked + ' of ' + s.n + ' staff have attendance marked this month.', a: ['Open Staff Attendance', "switchView('staffattendance')"] },
       { ok: true, t: 'Advances', d: s.advN ? s.advN + (s.advN === 1 ? ' staff member has' : ' staff have') + ' an advance recovered this month — ' + fmt(s.adv) + ' is deducted automatically.' : 'No advance to recover this month.', a: null },
       { ok: s.n > 0 && s.drafts + s.approved === s.n, t: 'Review', d: 'Check each row — add bonus or other deductions, then press Save Draft. ' + (s.drafts + s.approved) + ' of ' + s.n + ' reviewed.', a: null },
-      { ok: s.n > 0 && s.approved === s.n, t: 'Approve & pay', d: s.approved + ' of ' + s.n + ' approved' + (left > 0 ? ' — ' + left + ' left. Approved rows lock and the salary is booked in Accounting.' : ' — payroll for this month is complete. Print payslips from each row.'), a: null },
+      { ok: s.n > 0 && s.approved === s.n, t: 'Approve & pay', d: s.approved + ' of ' + s.n + ' approved' + (left > 0 ? ' — ' + left + ' left. Approved rows lock the amount. To post salaries to Accounting, use the Salary accounting box below.' : ' — payroll for this month is complete. Print payslips from each row.'), a: null },
     ];
     const firstOpen = steps.findIndex(x => !x.ok);
     const bar = steps.map((x, i) => `<div style="flex:1;min-width:0;text-align:center;border-top:4px solid ${x.ok ? '#1b7f4b' : i === firstOpen ? 'var(--magenta,#c2185b)' : '#e3e0f0'};padding-top:6px;font-size:.78rem;font-weight:700;color:${x.ok ? '#1b7f4b' : i === firstOpen ? 'var(--magenta,#c2185b)' : 'var(--ink-soft,#5b5a73)'}">${x.ok ? '✓ ' : (i + 1) + '. '}${x.t}</div>`).join('');
