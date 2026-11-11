@@ -20,7 +20,7 @@ test('set-up warnings: odd UPI handle, missing QR, charge type left on No charge
   assert.ok(m.includes('Charge type is "No charge", so parents will NOT be charged'));
 });
 test('the parent card does not mention a QR when none is uploaded', () => {
-  assert.ok(m.includes("pset.qr ? 'Scan the school QR with any UPI app' : 'Pay to the school UPI ID with any UPI app'"));
+  assert.ok(m.includes("pset.qr ? tx('Scan the school QR with any UPI app'") && m.includes(": tx('Pay to the school UPI ID with any UPI app'"));
 });
 test('JSON columns are decoded as UTF-8 bytes, so the rupee sign and Telugu text are not garbled', () => {
   const i = db.indexOf('function typeCast'); const f = db.slice(i, i + 600);

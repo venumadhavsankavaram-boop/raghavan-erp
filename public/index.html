@@ -20,7 +20,7 @@
 <meta name="apple-mobile-web-app-title" content="School ERP">
 <link rel="icon" type="image/png" href="/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Poppins:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Poppins:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&family=Noto+Sans+Telugu:wght@400;500;600;700&display=swap" rel="stylesheet">
 <!-- Razorpay Checkout — powers the "Pay Online" button on the Student/Parent
      Fees tab. Loading it here (rather than only when needed) keeps that button
      instantly responsive; it's a small script and does nothing until opened. -->
@@ -129,9 +129,9 @@
      Locking text-size-adjust to 100% stops that automatic inflation so the
      sizes actually written in this file are the sizes that render. */
   html{-webkit-text-size-adjust:100%; text-size-adjust:100%;}
-  body{font-family:'Poppins',sans-serif; background:var(--cream); color:var(--ink); min-height:100vh;}
-  h1,h2,h3{font-family:'Baloo 2',cursive; color:var(--navy); letter-spacing:-0.01em;}
-  button{font-family:'Poppins',sans-serif; cursor:pointer;}
+  body{font-family:'Poppins','Noto Sans Telugu','Nirmala UI','Gautami',sans-serif; background:var(--cream); color:var(--ink); min-height:100vh;}
+  h1,h2,h3{font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; color:var(--navy); letter-spacing:-0.01em;}
+  button{font-family:'Poppins','Noto Sans Telugu','Nirmala UI','Gautami',sans-serif; cursor:pointer;}
 
   /* ===== APP SHELL ===== */
   .app{display:flex; height:100vh; overflow:hidden;}
@@ -164,7 +164,7 @@
   .sb-nav-scroll::-webkit-scrollbar-thumb:hover{ background:rgba(255,255,255,0.32); }
   .sb-brand{display:flex; align-items:center; gap:11px; margin-bottom:26px; padding:0 4px;}
   .sb-brand img{width:42px; height:42px; border-radius:50%; box-shadow:0 0 0 2px rgba(255,255,255,0.16);}
-  .sb-brand div{font-family:'Baloo 2',cursive; font-weight:700; font-size:.96rem; line-height:1.2; color:#fff; min-width:0; overflow-wrap:anywhere;}
+  .sb-brand div{font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-weight:700; font-size:.96rem; line-height:1.2; color:#fff; min-width:0; overflow-wrap:anywhere;}
   .sb-brand span{display:block; font-family:'IBM Plex Mono',monospace; font-size:0.66rem; color:var(--gold-soft); text-transform:uppercase; letter-spacing:0.06em; margin-top:3px;}
   .sb-section{font-family:'IBM Plex Mono',monospace; font-size:0.68rem; text-transform:uppercase; letter-spacing:0.08em; color:rgba(255,255,255,0.4); margin:14px 8px 8px;}
   .sb-section-toggle{
@@ -181,7 +181,7 @@
   .sb-section-toggle:hover .sb-section-icon{ opacity:1; }
   .sb-section-icon .sb-icon{ width:15px; height:15px; }
   .sb-section-count{
-    font-family:'Poppins',sans-serif; font-size:0.66rem; font-weight:600; text-transform:none; letter-spacing:0;
+    font-family:'Poppins','Noto Sans Telugu','Nirmala UI','Gautami',sans-serif; font-size:0.66rem; font-weight:600; text-transform:none; letter-spacing:0;
     background:rgba(var(--accent-rgb,255,255,255),0.16); color:rgba(255,255,255,0.75);
     padding:2px 7px; border-radius:20px; line-height:1.5;
   }
@@ -229,7 +229,7 @@
   .sb-search-icon{ position:absolute; left:10px; top:50%; transform:translateY(-50%); width:14px; height:14px; opacity:0.45; pointer-events:none; }
   .sb-search-input{
     width:100%; background:rgba(255,255,255,0.07); border:1.5px solid rgba(255,255,255,0.1); border-radius:10px;
-    padding:10px 30px 10px 32px; font-size:0.86rem; color:#fff; font-family:'Poppins',sans-serif; outline:none;
+    padding:10px 30px 10px 32px; font-size:0.86rem; color:#fff; font-family:'Poppins','Noto Sans Telugu','Nirmala UI','Gautami',sans-serif; outline:none;
     transition:background 0.16s ease, border-color 0.16s ease;
   }
   .sb-search-input::placeholder{ color:rgba(255,255,255,0.4); }
@@ -297,7 +297,7 @@
   .stat-card:nth-child(2){border-left-color:var(--magenta);}
   .stat-card:nth-child(3){border-left-color:var(--teal);}
   .stat-card:nth-child(4){border-left-color:var(--navy);}
-  .stat-card b{display:block; font-family:'Baloo 2',cursive; font-size:1.85rem; color:var(--navy);}
+  .stat-card b{display:block; font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.85rem; color:var(--navy);}
   .stat-card span{font-size:0.84rem; color:var(--ink-soft); font-weight:500;}
 
   /* ===== TOOLBAR ===== */
@@ -307,7 +307,7 @@
   }
   .toolbar-left{display:flex; gap:10px; flex-wrap:wrap; flex:1;}
   .input, select{
-    font-family:'Poppins',sans-serif; font-size:0.91rem; padding:10px 14px; border-radius:10px;
+    font-family:'Poppins','Noto Sans Telugu','Nirmala UI','Gautami',sans-serif; font-size:0.91rem; padding:10px 14px; border-radius:10px;
     border:1.5px solid var(--border); background:var(--white); color:var(--ink); outline:none;
     transition:border-color 0.16s ease, box-shadow 0.16s ease;
   }
@@ -369,7 +369,7 @@
   .name-cell{font-weight:600; color:var(--navy);}
   .id-cell{font-family:'IBM Plex Mono',monospace; font-size:0.78rem; color:var(--ink-soft);}
   .empty-state{padding:60px 20px; text-align:center; color:var(--ink-soft);}
-  .empty-state b{display:block; color:var(--navy); font-family:'Baloo 2',cursive; font-size:1.1rem; margin-bottom:6px;}
+  .empty-state b{display:block; color:var(--navy); font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.1rem; margin-bottom:6px;}
 
   /* ===== LOGIN SCREEN ===== */
   .login-overlay{
@@ -603,7 +603,7 @@
   .disc-panel-chevron.open{transform:rotate(180deg); color:var(--magenta);}
   .disc-panel-avatar{
     width:30px; height:30px; border-radius:50%; background:var(--white); display:flex; align-items:center; justify-content:center;
-    font-family:'Baloo 2',cursive; font-size:0.72rem; color:var(--navy); flex-shrink:0;
+    font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:0.72rem; color:var(--navy); flex-shrink:0;
   }
   .disc-panel-meta{font-size:0.76rem; color:var(--ink-soft); font-weight:400; margin-left:8px;}
   .disc-student-panel-body{padding:14px 16px;}
@@ -687,12 +687,12 @@
   .pay-summary-title{font-size:0.72rem; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; color:var(--ink-soft); margin-bottom:10px;}
   .pay-summary-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:12px;}
   .pay-summary-item span{display:block; font-size:0.72rem; color:var(--ink-soft);}
-  .pay-summary-item b{font-family:'Baloo 2',cursive; font-size:1.15rem; color:var(--navy);}
+  .pay-summary-item b{font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.15rem; color:var(--navy);}
   .pay-summary-item.highlight b{color:var(--magenta);}
   .pay-summary-item.after b{color:var(--teal);}
   .pay-summary-warn{margin-top:10px; font-size:0.76rem; color:var(--magenta); font-weight:600;}
   .fee-sum-card{background:var(--white); border-radius:16px; padding:20px 22px; box-shadow:var(--shadow); border-top:4px solid var(--magenta);}
-  .fee-sum-card b{display:block; font-family:'Baloo 2',cursive; font-size:1.6rem; color:var(--navy);}
+  .fee-sum-card b{display:block; font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.6rem; color:var(--navy);}
   .fee-sum-card span{font-size:0.8rem; color:var(--ink-soft);}
   .list-manage-row{
     display:flex; justify-content:space-between; align-items:center; background:var(--white);
@@ -732,7 +732,7 @@
   .sg-item:hover{background:var(--cream);}
   .sg-avatar{
     width:32px; height:32px; border-radius:50%; background:var(--cream); flex-shrink:0;
-    display:flex; align-items:center; justify-content:center; font-family:'Baloo 2',cursive;
+    display:flex; align-items:center; justify-content:center; font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive;
     font-size:0.72rem; color:var(--navy); overflow:hidden;
   }
   .sg-avatar img{width:100%; height:100%; object-fit:cover;}
@@ -811,10 +811,10 @@
 
   .class-tile{padding:22px 18px 18px;}
   .class-tile h4{font-size:1rem; font-weight:700; color:var(--navy); margin-bottom:8px;}
-  .class-tile .ct-count{font-family:'Baloo 2',cursive; font-size:1.7rem; color:var(--ink); line-height:1;}
+  .class-tile .ct-count{font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.7rem; color:var(--ink); line-height:1;}
   .class-tile .ct-label{font-size:0.74rem; color:var(--ink-soft); margin-top:3px;}
   .class-group{margin-bottom:22px;}
-  .class-group-title{font-size:0.85rem; font-weight:700; color:var(--navy); margin-bottom:10px; font-family:'Baloo 2',cursive;}
+  .class-group-title{font-size:0.85rem; font-weight:700; color:var(--navy); margin-bottom:10px; font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive;}
   .class-sections-row{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px;}
 
   /* Expandable variant — Manage Students expands inline to show section pills;
@@ -828,8 +828,8 @@
     padding:20px 18px 18px; cursor:pointer;
   }
   .class-compact-name{font-size:1rem; font-weight:700; color:var(--navy); white-space:nowrap;}
-  .class-compact-count{font-family:'Baloo 2',cursive; font-size:1.55rem; color:var(--ink); margin-top:4px; line-height:1;}
-  .class-compact-count-label{font-family:'Poppins',sans-serif; font-size:0.72rem; font-weight:500; color:var(--ink-soft);}
+  .class-compact-count{font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.55rem; color:var(--ink); margin-top:4px; line-height:1;}
+  .class-compact-count-label{font-family:'Poppins','Noto Sans Telugu','Nirmala UI','Gautami',sans-serif; font-size:0.72rem; font-weight:500; color:var(--ink-soft);}
   .class-compact-chevron{
     color:var(--ink-soft); flex-shrink:0; box-sizing:border-box; width:30px; height:30px; padding:6px;
     border-radius:50%; background:var(--cream); transition:transform .2s ease, background .15s ease, color .15s ease;
@@ -847,7 +847,7 @@
     transition:border-color .15s ease, background .15s ease, transform .15s ease;
   }
   .sec-pill:hover{border-color:var(--teal); background:var(--white); transform:translateY(-1px);}
-  .sec-pill b{font-family:'Baloo 2',cursive; color:var(--magenta); font-size:0.92rem;}
+  .sec-pill b{font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; color:var(--magenta); font-size:0.92rem;}
 
   .fee-chip-clear .fee-chip-count{color:var(--success-ink,#188f86);}
 
@@ -897,13 +897,13 @@
     cursor:pointer; transition:border-color .15s ease, background .15s ease, transform .15s ease; font-family:inherit;
   }
   .modern-sec-chip:hover{border-color:var(--teal); background:var(--white); transform:translateY(-1px);}
-  .modern-chip-count{font-family:'Baloo 2',cursive; color:var(--magenta); font-size:0.9rem;}
+  .modern-chip-count{font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; color:var(--magenta); font-size:0.9rem;}
 
   /* ===== STUDENT PROFILE ===== */
   .profile-head{display:flex; gap:20px; align-items:center; background:var(--white); border-radius:18px; padding:24px; box-shadow:var(--shadow); margin-bottom:22px; flex-wrap:wrap;}
   .profile-photo{
     width:88px; height:88px; border-radius:50%; object-fit:cover; background:var(--cream);
-    display:flex; align-items:center; justify-content:center; font-family:'Baloo 2',cursive; font-size:1.6rem; color:var(--navy); flex-shrink:0;
+    display:flex; align-items:center; justify-content:center; font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.6rem; color:var(--navy); flex-shrink:0;
   }
   .profile-head h2{font-size:1.3rem; margin-bottom:4px;}
   .profile-head .p-meta{font-size:0.85rem; color:var(--ink-soft);}
@@ -990,7 +990,7 @@
   .f-field label{font-size:0.8rem; font-weight:600; color:var(--navy);}
   .required-star{color:#dc2626; font-weight:800; margin-left:2px;}
   .f-field input, .f-field select, .f-field textarea{
-    font-family:'Poppins',sans-serif; font-size:0.88rem; padding:10px 12px; border-radius:9px;
+    font-family:'Poppins','Noto Sans Telugu','Nirmala UI','Gautami',sans-serif; font-size:0.88rem; padding:10px 12px; border-radius:9px;
     border:1.5px solid var(--border); outline:none; transition:border-color 0.16s ease, box-shadow 0.16s ease;
   }
   .f-field input:focus, .f-field select:focus, .f-field textarea:focus{border-color:var(--teal); box-shadow:0 0 0 3px rgba(24,143,134,0.15);}
@@ -1078,7 +1078,7 @@
       linear-gradient(rgba(6,5,16,0.55), rgba(6,5,16,0.55)),
       linear-gradient(135deg, var(--brand-navy), var(--brand-navy-deep));
     padding:26px 32px; display:flex; align-items:center; gap:28px; flex-wrap:wrap;
-    overflow:hidden; text-align:left; font-family:'Poppins',sans-serif;
+    overflow:hidden; text-align:left; font-family:'Poppins','Noto Sans Telugu','Nirmala UI','Gautami',sans-serif;
     box-shadow:0 22px 48px -20px rgba(33,26,78,0.5), 0 0 0 1px rgba(255,255,255,0.06) inset;
     transition:transform 0.25s cubic-bezier(.4,0,.2,1), box-shadow 0.25s ease;
   }
@@ -1099,11 +1099,11 @@
   .sh-watermark{ position:absolute; right:26px; bottom:-10px; opacity:0.07; z-index:0; pointer-events:none; }
   .sh-ring-wrap{ position:relative; flex-shrink:0; z-index:1; filter:drop-shadow(0 6px 16px rgba(0,0,0,0.2)); }
   .sh-ring-center{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; }
-  .sh-num{ font-family:'Baloo 2',cursive; font-size:2rem; font-weight:800; color:#fff; line-height:1; font-variant-numeric:tabular-nums; }
+  .sh-num{ font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:2rem; font-weight:800; color:#fff; line-height:1; font-variant-numeric:tabular-nums; }
   .sh-ring-tag{ font-family:'IBM Plex Mono',monospace; font-size:0.56rem; letter-spacing:0.05em; text-transform:uppercase; color:rgba(255,255,255,0.78); margin-top:4px; }
   .sh-info{ position:relative; z-index:1; flex:1; min-width:210px; }
   .sh-eyebrow{ display:block; font-family:'IBM Plex Mono',monospace; font-size:0.62rem; letter-spacing:0.09em; text-transform:uppercase; color:rgba(255,255,255,0.55); margin-bottom:4px; }
-  .sh-label{ display:block; font-family:'Baloo 2',cursive; font-size:1.5rem; font-weight:700; color:#fff; margin-bottom:14px; }
+  .sh-label{ display:block; font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.5rem; font-weight:700; color:#fff; margin-bottom:14px; }
   .sh-chips{ display:flex; flex-wrap:wrap; gap:10px; }
   .sh-chip{
     display:inline-flex; align-items:center; gap:7px; font-size:0.76rem; color:rgba(255,255,255,0.88);
@@ -1150,7 +1150,7 @@
   .overview-ring-label{
     position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
   }
-  .overview-ring-label b{font-family:'Baloo 2',cursive; font-size:1.5rem; color:var(--navy); line-height:1;}
+  .overview-ring-label b{font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.5rem; color:var(--navy); line-height:1;}
   .overview-ring-label span{font-size:0.72rem; color:var(--ink-soft); margin-top:4px;}
   .overview-legend{flex:1; min-width:220px; display:flex; flex-direction:column; gap:12px;}
   .ov-row{
@@ -1158,7 +1158,7 @@
     padding-bottom:10px; border-bottom:1px dashed var(--border);
   }
   .ov-row:last-child{border-bottom:none; padding-bottom:0;}
-  .ov-row b{margin-left:auto; color:var(--navy); font-family:'Baloo 2',cursive; font-size:1.05rem;}
+  .ov-row b{margin-left:auto; color:var(--navy); font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.05rem;}
   .ov-row.total{padding-top:2px; border-top:1.5px solid var(--border); margin-top:2px;}
   .ov-swatch{width:11px; height:11px; border-radius:3px; flex-shrink:0;}
   .cat-pct{font-size:0.72rem; color:var(--ink-soft); margin-top:6px; text-align:right;}
@@ -1171,7 +1171,7 @@
   }
   .dh-card:hover{ transform:translateY(-3px); box-shadow:0 20px 40px -18px rgba(33,26,78,0.3), var(--shadow); }
   .dh-card .dh-label{font-size:0.78rem; color:var(--ink-soft); font-weight:600; margin-bottom:10px;}
-  .dh-card .dh-amount{font-family:'Baloo 2',cursive; font-size:1.72rem; color:var(--navy);}
+  .dh-card .dh-amount{font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.72rem; color:var(--navy);}
   .dh-card .dh-sub{font-size:0.78rem; color:var(--ink-soft); margin-top:6px; position:relative; z-index:1;}
   .dh-card.expected::before, .dh-card.collected::before, .dh-card.receivable::before, .dh-card.discount::before, .dh-card.extra::before, .dh-card.oldbalance::before{
     content:''; position:absolute; top:0; left:0; right:0; height:4px; border-radius:20px 20px 0 0;
@@ -1228,7 +1228,7 @@
   .split-row{display:flex; gap:12px; margin-bottom:14px;}
   .split-box{flex:1; background:var(--cream); border-radius:14px; padding:16px 14px; text-align:center; transition:transform 0.18s ease;}
   .split-box:hover{ transform:translateY(-2px); }
-  .split-box b{display:block; font-family:'Baloo 2',cursive; font-size:1.3rem; color:var(--navy);}
+  .split-box b{display:block; font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.3rem; color:var(--navy);}
   .split-box span{font-size:0.74rem; color:var(--ink-soft);}
 
   .pay-toolbar{display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;}
@@ -1240,7 +1240,7 @@
   .qa-tile{
     background:var(--white); border-radius:16px; padding:18px 16px; box-shadow:0 10px 24px -16px rgba(33,26,78,0.2), var(--shadow-sm,var(--shadow));
     border:1px solid rgba(33,26,78,0.05); cursor:pointer; text-align:left; display:flex; flex-direction:column; gap:10px;
-    transition:transform 0.18s cubic-bezier(.4,0,.2,1), box-shadow 0.18s ease, border-color 0.18s ease; font-family:'Poppins',sans-serif;
+    transition:transform 0.18s cubic-bezier(.4,0,.2,1), box-shadow 0.18s ease, border-color 0.18s ease; font-family:'Poppins','Noto Sans Telugu','Nirmala UI','Gautami',sans-serif;
   }
   .qa-tile:hover{ transform:translateY(-3px); box-shadow:0 16px 30px -14px rgba(33,26,78,0.28); border-color:rgba(var(--qa-rgb,209,16,115),0.3); }
   .qa-tile:active{ transform:translateY(-1px) scale(0.98); }
@@ -1263,15 +1263,15 @@
   .trend-panel-head h4{font-size:0.98rem; color:var(--navy); margin:0;}
   .trend-panel-sub{font-size:0.76rem; color:var(--ink-soft);}
   .trend-total-wrap{text-align:right;}
-  .trend-total{font-family:'Baloo 2',cursive; font-size:1.2rem; color:var(--teal); display:block;}
+  .trend-total{font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.2rem; color:var(--teal); display:block;}
   .trend-total-label{font-size:0.7rem; color:var(--ink-soft);}
   .trend-delta{font-size:0.74rem; font-weight:700; margin-left:6px;}
   .trend-delta.up{color:var(--teal);}
   .trend-delta.down{color:var(--magenta);}
   .trend-svg-wrap{width:100%; overflow-x:auto;}
   .trend-svg-wrap svg{display:block; min-width:480px;}
-  .trend-month-label{font-size:10px; fill:var(--ink-soft); font-family:'Poppins',sans-serif;}
-  .trend-value-label{font-size:10px; fill:var(--navy); font-weight:600; font-family:'Poppins',sans-serif;}
+  .trend-month-label{font-size:10px; fill:var(--ink-soft); font-family:'Poppins','Noto Sans Telugu','Nirmala UI','Gautami',sans-serif;}
+  .trend-value-label{font-size:10px; fill:var(--navy); font-weight:600; font-family:'Poppins','Noto Sans Telugu','Nirmala UI','Gautami',sans-serif;}
   .trend-dot{transition:r .15s ease;}
   .trend-empty{font-size:0.82rem; color:var(--ink-soft); text-align:center; padding:30px 0;}
   /* ===== Dashboard chart refresh (Oct 2026) ===== */
@@ -1286,20 +1286,20 @@
   .cat-donut-panel.has-focus .donut-arc{opacity:.28;}
   .cat-donut-panel.has-focus .donut-arc.on{opacity:1; stroke-width:32;}
   .donut-centre{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:0 38px; pointer-events:none;}
-  .donut-centre b{font-family:'Baloo 2',cursive; font-size:1.45rem; color:var(--navy); line-height:1.05;}
+  .donut-centre b{font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.45rem; color:var(--navy); line-height:1.05;}
   .donut-centre span{font-size:0.7rem; color:var(--ink-soft); margin-top:4px; line-height:1.2;}
   .cd-item{display:grid; grid-template-columns:auto 1fr auto 44px; align-items:center; column-gap:10px; row-gap:6px; padding:9px 12px; border-radius:12px; font-size:0.86rem; transition:background .15s ease, opacity .15s ease;}
   .cd-item:hover, .cd-item.on{background:var(--soft-fill);}
   .cat-donut-panel.has-focus .cd-item:not(.on){opacity:.55;}
   .cd-name{color:var(--ink); font-weight:500;}
-  .cd-item b{font-family:'Baloo 2',cursive; font-size:1.02rem; color:var(--navy);}
+  .cd-item b{font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.02rem; color:var(--navy);}
   .cd-pct{text-align:right; font-size:0.78rem; font-weight:700; color:var(--ink-soft); font-variant-numeric:tabular-nums;}
   .cd-bar{grid-column:2 / -1; height:6px; border-radius:6px; background:var(--soft-fill-2); overflow:hidden;}
   .cd-bar i{display:block; height:100%; border-radius:6px; transform-origin:left;}
   /* collection overview: stacked share bar */
   .stack-bar{display:flex; gap:3px; height:12px; border-radius:8px; overflow:hidden; margin-bottom:6px; background:var(--soft-fill-2);}
   .stack-bar i{display:block; height:100%; border-radius:4px; min-width:0; transform-origin:left;}
-  .ov-share{display:inline-block; min-width:40px; margin-left:8px; text-align:right; font-family:'Poppins',sans-serif; font-size:0.78rem; font-weight:600; color:var(--ink-soft);}
+  .ov-share{display:inline-block; min-width:40px; margin-left:8px; text-align:right; font-family:'Poppins','Noto Sans Telugu','Nirmala UI','Gautami',sans-serif; font-size:0.78rem; font-weight:600; color:var(--ink-soft);}
   .ring-arc{transition:stroke-dasharray .4s ease;}
   /* bars: thicker, rounded, a little softer */
   .class-bar-track{height:12px; background:var(--soft-fill-2);}
@@ -1492,7 +1492,7 @@
   .sf-kpi::before{content:''; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--border);}
   .sf-kpi--good::before{background:var(--teal);} .sf-kpi--danger::before{background:var(--magenta);} .sf-kpi--warn::before{background:var(--gold);}
   .sf-kpi span{display:block; font-size:0.72rem; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; color:var(--ink-soft);}
-  .sf-kpi b{display:block; font-family:'Baloo 2',cursive; font-size:1.55rem; line-height:1.25; color:var(--ink);}
+  .sf-kpi b{display:block; font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.55rem; line-height:1.25; color:var(--ink);}
   .sf-kpi--danger b{color:var(--magenta);}
   .sf-kpi small{font-size:0.74rem; color:var(--ink-soft);}
 
@@ -1515,7 +1515,7 @@
   .sf-class header{display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:12px;}
   .sf-class h3{margin:0; font-size:1.05rem; color:var(--navy);}
   .sf-class header small{font-size:0.74rem; color:var(--ink-soft);}
-  .sf-class-pct{font-family:'Baloo 2',cursive; font-size:1.5rem; line-height:1; color:var(--teal); text-align:right;}
+  .sf-class-pct{font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.5rem; line-height:1; color:var(--teal); text-align:right;}
   .sf-class-pct small{display:block; font-family:inherit; font-size:0.66rem; color:var(--ink-soft); font-weight:600;}
   .sf-class-money{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:14px 0;}
   .sf-class-money dt{font-size:0.68rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--ink-soft); font-weight:700;}
@@ -1552,7 +1552,7 @@
   .sf-hero-id h2{margin:0; font-size:1.3rem; color:var(--navy);}
   .sf-hero-id p{margin:4px 0 0; font-size:0.84rem; color:var(--ink-soft);}
   .sf-hero-state{display:flex; flex-direction:column; align-items:flex-end; gap:2px;}
-  .sf-hero-state b{font-family:'Baloo 2',cursive; font-size:1.7rem; line-height:1.1; color:var(--ink);}
+  .sf-hero-state b{font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.7rem; line-height:1.1; color:var(--ink);}
   .sf-hero-state small{font-size:0.7rem; color:var(--ink-soft);}
   .sf-hero .profile-actions{display:flex; flex-wrap:wrap; gap:10px;}
   .sf-heads{display:grid; grid-template-columns:minmax(0,1fr); gap:16px; margin-bottom:18px;}
@@ -1575,7 +1575,7 @@
     border:1px solid var(--border); border-radius:18px; padding:14px 18px; box-shadow:var(--shadow-hover); margin:0 0 28px;}
   .sf-field input, .sf-field select{display:block; margin-top:4px; padding:8px 10px; border-radius:9px; border:1.5px solid var(--border); font:inherit; max-width:160px;}
   .sf-paybar-total{margin-left:auto; text-align:right;}
-  .sf-paybar-total b{display:block; font-family:'Baloo 2',cursive; font-size:1.5rem; line-height:1.1; color:var(--teal);}
+  .sf-paybar-total b{display:block; font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.5rem; line-height:1.1; color:var(--teal);}
   .sf-paybar-total small{font-size:0.7rem; color:var(--ink-soft);}
   @media (max-width:720px){
     .sf-head-grid{grid-template-columns:1fr;}
@@ -1884,7 +1884,7 @@
   /* ---- Manage Fee tabs: Fee Types, Discounts, Extra Fees, Late Fees, Defaulters (module 08b) ---- */
   .ft-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:18px; align-items:start;}
   .ft-card{padding:20px 22px;}
-  .ft-head h4{margin:0 0 4px; font-family:'Baloo 2',cursive; font-size:1.05rem; color:var(--navy);}
+  .ft-head h4{margin:0 0 4px; font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.05rem; color:var(--navy);}
   .ft-head p{margin:0 0 16px; font-size:0.82rem; line-height:1.5; color:var(--ink-soft); max-width:56ch;}
   .ft-add{display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px;}
   .ft-add .input{flex:1 1 170px; max-width:260px;}
@@ -1899,7 +1899,7 @@
   .ft-cards{display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:14px; margin-top:18px;}
   .ft-fee{padding:16px 18px; display:flex; flex-direction:column; gap:6px;}
   .ft-fee-name{font-size:0.85rem; color:var(--ink-soft);}
-  .ft-fee-amt{font-size:1.5rem; color:var(--navy); font-family:'Baloo 2',cursive;}
+  .ft-fee-amt{font-size:1.5rem; color:var(--navy); font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive;}
   .ft-form{display:grid; gap:14px; margin-bottom:16px;}
   .ft-field{display:flex; flex-direction:column; gap:6px; font-size:0.78rem; font-weight:600; color:var(--ink-soft);}
   .ft-field .input{width:100%; font-weight:400;}
@@ -1932,7 +1932,7 @@
   .ivp-top{display:flex; align-items:center; gap:12px; min-width:0;}
   .ivp-title{min-width:0; display:block;} .ivp-title b{color:var(--navy); font-size:0.95rem; overflow-wrap:anywhere;}
   .ivp-title small{display:block; font-size:0.72rem; color:var(--ink-soft); margin-top:2px;}
-  .ivp-price{font-family:'Baloo 2',cursive; font-size:1.45rem; color:var(--navy); line-height:1;}
+  .ivp-price{font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; font-size:1.45rem; color:var(--navy); line-height:1;}
   .ivp-stats{display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; font-size:0.78rem; color:var(--ink-soft);}
   .ivp-stats b{color:var(--navy); font-size:0.9rem;} .ivp-stats b.iv-qty--low{color:var(--warning-ink);} .ivp-stats b.iv-qty--out{color:var(--danger-ink);}
   .ivp .sf-actions{margin-top:auto; padding-top:10px; border-top:1px dashed var(--border);}
@@ -2345,7 +2345,7 @@
   .trx-chosen button{border:0;background:rgba(120,120,140,.2);color:var(--ink);width:22px;height:22px;border-radius:50%;cursor:pointer;font-size:1rem;line-height:1;padding:0}
   .trx-chosen button:hover{background:var(--danger,#c0392b);color:#fff}
   .trx-sum-count{display:flex;align-items:baseline;gap:8px;margin-bottom:12px}
-  .trx-sum-count b{font-family:'Baloo 2',cursive;font-size:2rem;line-height:1;color:var(--navy)}
+  .trx-sum-count b{font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive;font-size:2rem;line-height:1;color:var(--navy)}
   .trx-sum-count span{font-size:.86rem;color:var(--ink-soft)}
   .trx-sum-list{margin:0;border:1px solid var(--border);border-radius:12px;overflow:hidden}
   .trx-sum-list div{display:flex;justify-content:space-between;gap:12px;padding:9px 12px;font-size:.84rem;border-top:1px solid var(--border)}
@@ -2367,7 +2367,7 @@
   .trx-routehead-main p{margin:0;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:.84rem}
   .trx-routehead-stats{display:flex;gap:10px;flex-wrap:wrap}
   .trx-routehead-stats div{background:var(--cream);border:1px solid var(--border);border-radius:12px;padding:8px 14px;min-width:96px}
-  .trx-routehead-stats b{display:block;font-family:'Baloo 2',cursive;font-size:1.2rem;line-height:1.3;color:var(--ink)}
+  .trx-routehead-stats b{display:block;font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive;font-size:1.2rem;line-height:1.3;color:var(--ink)}
   .trx-routehead-stats span{font-size:.7rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-soft)}
   .trx-stopcard{margin-bottom:14px}
   .trx-stopcard-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap}
@@ -3002,7 +3002,7 @@
   .ivq-head .iv-mono{width:34px;height:34px;border-radius:10px;font-size:.72rem}
   .ivq-title{flex:1;min-width:0}.ivq-title b{color:var(--navy);font-size:.9rem;overflow-wrap:anywhere}
   .ivq-title small{display:block;font-size:.7rem;color:var(--ink-soft);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ivq-price{font-family:'Baloo 2',cursive;font-size:1.2rem;color:var(--navy);line-height:1;white-space:nowrap}
+  .ivq-price{font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive;font-size:1.2rem;color:var(--navy);line-height:1;white-space:nowrap}
   .ivq-stock{display:flex;flex-direction:column;gap:6px}
   .ivq-stock-row{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:.74rem;color:var(--ink-soft)}.ivq-stock-row>span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
   .ivq-stock-row b{color:var(--navy)}.ivq-stock-row b.iv-qty--low{color:var(--warning-ink)}.ivq-stock-row b.iv-qty--out{color:var(--danger-ink)}
@@ -4049,7 +4049,7 @@
             <div class="f-field full"><label>Mother Address</label><input type="text" id="fMotherAddress"></div>
           </div>
           <h4 class="wpanel-h">
-            <label style="display:flex; align-items:center; gap:8px; font-family:'Baloo 2',cursive; color:var(--navy); font-size:1rem;">
+            <label style="display:flex; align-items:center; gap:8px; font-family:'Baloo 2','Noto Sans Telugu','Nirmala UI','Gautami',cursive; color:var(--navy); font-size:1rem;">
               <input type="checkbox" id="fGuardianApplicable" onchange="document.getElementById('guardianFields').style.display = this.checked ? 'grid' : 'none';" style="width:16px; height:16px;">
               Guardian details applicable
             </label>
@@ -5078,6 +5078,8 @@
 <script src="modules/77-access-polish.js"></script>
 <script src="modules/79-upi-pay.js"></script>
 <script src="modules/80-switch-login.js"></script>
+<script src="modules/82-help-content.js"></script>
+<script src="modules/83-help-centre.js"></script>
 <script src="modules/81-payroll-pro.js"></script>
 
 <!-- PWA installability — registered standalone, after everything else, so a

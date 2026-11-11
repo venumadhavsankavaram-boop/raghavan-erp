@@ -1496,6 +1496,7 @@ async function handleKv(req, res, key) {
   if ((key === 'admit-card-policy' || key === 'admit-card-exceptions') && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change the admit card fee rules.' });
   if (key === 'exam-releases' && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can release marks to students.' });
   if (key === 'portal-settings' && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change the parent portal settings.' });
+  if (key === 'help-settings' && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change the help content.' });
   if (key === 'teacher-portal-settings' && req.method === 'PUT') {
     if (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal')) return res.status(403).json({ error: 'Only the Admin or Principal can change the teacher portal settings.' });
     req.body = tpNormalize(req.body); _tpCache = { at: 0, v: null };

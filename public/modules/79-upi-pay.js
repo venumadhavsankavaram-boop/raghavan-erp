@@ -13,6 +13,8 @@
   const isParent = () => ['Student', 'Parent'].includes(role());
   const isStaff = () => ['Admin', 'Principal', 'Accountant'].includes(role());
   const isMgr = () => ['Admin', 'Principal'].includes(role());
+  // Telugu for the parent-facing screens: follows the portal's language switch. Staff screens stay in English.
+  const tx = (en, te) => { try { return (typeof window.portalLang === 'function' && window.portalLang() === 'te') ? te : en; } catch(e){ return en; } };
   const toast = m => { try{ showToast(m); }catch(e){ console.log(m); } };
   const money = n => '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
   const today = () => { const d = new Date(); const p = n => String(n).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); };
@@ -37,7 +39,11 @@
   const FLAGS = { no_screenshot: 'No screenshot', older_payment: 'Payment is a few days old', amount_differs: 'Amount differs from fee + charge', similar_claim: 'Similar claim already exists',
     same_amount_recorded: 'Same amount already recorded that day', many_claims: 'Many claims in 7 days' };
   const STATUS = { submitted: ['Waiting for the office', '#8a5a00', '#fff3d6'], approved: ['Paid and receipted', '#17703a', '#e1f5e8'], rejected: ['Could not be matched', '#b3261e', '#fde4e1'], cancelled: ['Withdrawn', '#556', '#eceff5'] };
-  const chip = s => { const x = STATUS[s] || [s, '#556', '#eceff5']; return `<span class="up-chip" style="color:${x[1]};background:${x[2]}">${esc(x[0])}</span>`; };
+  const STATUS_TE = { submitted: 'ఆఫీసు చూడాలి', approved: 'చెల్లింపు పూర్తి', rejected: 'సరిపోలలేదు', cancelled: 'వెనక్కి తీసుకున్నారు' };
+  // The office picks a rejection reason from a short list; a Telugu parent sees it in Telugu (any extra detail the office typed stays as written).
+  const REASON_TE = { 'UTR not found in the bank account': 'మీ UTR మా బ్యాంక్ ఖాతాలో కనిపించలేదు', 'Amount in bank is different': 'బ్యాంక్‌లో ఉన్న మొత్తం వేరుగా ఉంది', 'Payment was made to a different account': 'చెల్లింపు వేరే ఖాతాకు వెళ్లింది', 'Wrong or unreadable reference': 'రిఫరెన్స్ నంబర్ తప్పు, లేదా స్పష్టంగా లేదు', 'Other': 'ఇతర కారణం' };
+  const reasonText = r => { r = String(r || ''); const i = r.indexOf(' — '); const head = i < 0 ? r : r.slice(0, i), rest = i < 0 ? '' : r.slice(i); return tx(r, (REASON_TE[head] || head) + rest); };
+  const chip = s => { const x = STATUS[s] || [s, '#556', '#eceff5']; const label = isParent() ? tx(x[0], STATUS_TE[s] || x[0]) : x[0]; return `<span class="up-chip" style="color:${x[1]};background:${x[2]}">${esc(label)}</span>`; };
 
   function css(){
     if($('upCss')) return;
@@ -59,7 +65,7 @@
       .up-warn{background:#fff6e0;border:1px solid #f0d28a;color:#6b4a00;border-radius:11px;padding:9px 11px;font-size:.84rem;line-height:1.45;margin:8px 0;}
       .up-ok{background:#e8f6ee;border:1px solid #b7e0c5;color:#14572f;border-radius:11px;padding:9px 11px;font-size:.84rem;margin:8px 0;}
       .up-f{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;} .up-f label{display:block;font-size:.78rem;color:#667;margin-bottom:3px;} .up-f input,.up-f select,.up-f textarea{width:100%;box-sizing:border-box;padding:9px;border:1px solid #cfd6e6;border-radius:10px;font:inherit;}
-      .up-tbl{width:100%;border-collapse:collapse;font-size:.86rem;} .up-tbl th,.up-tbl td{text-align:left;padding:8px 6px;border-top:1px solid #eef1f7;vertical-align:top;} .up-tbl th{font-size:.72rem;color:#667;text-transform:uppercase;}
+      .up-tbl{width:100%;border-collapse:collapse;font-size:.86rem;} .up-tbl th,.up-tbl td{text-align:left;padding:8px 6px;border-top:1px solid #eef1f7;vertical-align:top;} .up-tbl th{font-size:.72rem;color:#667;text-transform:uppercase;} .up-tbl th,.up-tbl td{font-family:'Poppins','Noto Sans Telugu','Nirmala UI','Gautami',sans-serif;letter-spacing:normal;word-break:break-word;}
       .up-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px;} .up-tile{background:#f4f7fd;border-radius:12px;padding:10px 12px;} .up-tile b{display:block;font-size:1.3rem;color:#14325c;} .up-tile span{font-size:.78rem;color:#667;}
       .up-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;} .up-flag{display:inline-block;background:#fde8d0;color:#8a4300;border-radius:8px;padding:2px 8px;font-size:.72rem;font-weight:600;margin:2px 3px 0 0;}
       .up-mt{font-size:.74rem;font-weight:700;border-radius:8px;padding:2px 8px;} .up-mt.m{background:#e1f5e8;color:#17703a;} .up-mt.d{background:#fff3d6;color:#8a5a00;} .up-mt.n{background:#fde4e1;color:#b3261e;}
@@ -83,9 +89,9 @@
   }
   function mineHtml(){
     if(!pmine.length) return '';
-    return `<table class="up-tbl"><thead><tr><th>Sent</th><th>Amount</th><th>UTR</th><th>Status</th></tr></thead><tbody>${pmine.slice(0, 8).map(c => `<tr><td>${dt(c.createdAt)}</td><td>${money(c.paidTotal)}</td><td>${esc(c.utr)}</td>
-      <td>${chip(c.status)}${c.status === 'approved' ? `<div class="up-note">Receipt ${esc((c.receiptNos || []).join(', '))}</div>` : ''}${c.status === 'rejected' ? `<div class="up-note" style="color:#b3261e">${esc(c.rejectReason)}</div>` : ''}
-      ${c.status === 'submitted' ? `<div><a href="#" data-cancel="${esc(c.id)}" style="font-size:.78rem">Withdraw</a></div>` : ''}</td></tr>`).join('')}</tbody></table>`;
+    return `<table class="up-tbl"><thead><tr><th>${tx('Sent', 'పంపినది')}</th><th>${tx('Amount', 'మొత్తం')}</th><th>UTR</th><th>${tx('Status', 'స్టేటస్')}</th></tr></thead><tbody>${pmine.slice(0, 8).map(c => `<tr><td>${dt(c.createdAt)}</td><td>${money(c.paidTotal)}</td><td>${esc(c.utr)}</td>
+      <td>${chip(c.status)}${c.status === 'approved' ? `<div class="up-note">${tx('Receipt', 'రసీదు')} ${esc((c.receiptNos || []).join(', '))}</div>` : ''}${c.status === 'rejected' ? `<div class="up-note" style="color:#b3261e">${esc(reasonText(c.rejectReason))}</div>` : ''}
+      ${c.status === 'submitted' ? `<div><a href="#" data-cancel="${esc(c.id)}" style="font-size:.78rem">${tx('Withdraw', 'వెనక్కి తీసుకోండి')}</a></div>` : ''}</td></tr>`).join('')}</tbody></table>`;
   }
   async function mountParentCard(body, s){
     if(!body || !s || !isParent()) return;
@@ -93,36 +99,36 @@
     if(!pset || !pset.enabled || !body.isConnected) return;
     let card = body.querySelector('#upParentCard'); if(card) card.remove();
     card = document.createElement('div'); card.id = 'upParentCard'; card.className = 'up-card';
-    const chg = pset.charge && pset.charge.mode !== 'none' ? `<div class="up-note">A ${esc(pset.charge.label || 'UPI charge')} applies to UPI payments${pset.charge.freeUpTo ? ' above ' + money(pset.charge.freeUpTo) : ''}${pset.charge.reason ? ' (' + esc(pset.charge.reason) + ')' : ''}. You will see it before you pay.</div>` : '';
-    card.innerHTML = `<h3><span>📲 Pay by UPI</span><button class="up-btn bl" id="upPayBtn">Pay by UPI</button></h3>
-      <div class="up-note">${pset.qr ? 'Scan the school QR with any UPI app' : 'Pay to the school UPI ID with any UPI app'}, then send us the payment reference (UTR). The office checks the bank and issues your receipt.</div>${chg}
-      ${pmine.length ? `<div style="margin-top:10px"><b style="font-size:.9rem">My UPI payments</b>${mineHtml()}</div>` : ''}`;
+    const chg = pset.charge && pset.charge.mode !== 'none' ? `<div class="up-note">${tx('A ' + esc(pset.charge.label || 'UPI charge') + ' applies to UPI payments' + (pset.charge.freeUpTo ? ' above ' + money(pset.charge.freeUpTo) : '') + (pset.charge.reason ? ' (' + esc(pset.charge.reason) + ')' : '') + '. You will see it before you pay.', 'UPI చెల్లింపులకు ' + esc(pset.charge.label || 'UPI charge') + ' ఉంటుంది' + (pset.charge.freeUpTo ? ' (' + money(pset.charge.freeUpTo) + ' కంటే ఎక్కువ అయితే)' : '') + (pset.charge.reason ? ' (' + esc(pset.charge.reason) + ')' : '') + '. చెల్లించే ముందే అది మీకు కనిపిస్తుంది.')}</div>` : '';
+    card.innerHTML = `<h3><span>📲 ${tx('Pay by UPI', 'UPI ద్వారా చెల్లించండి')}</span><button class="up-btn bl" id="upPayBtn">${tx('Pay by UPI', 'UPI ద్వారా చెల్లించండి')}</button></h3>
+      <div class="up-note">${pset.qr ? tx('Scan the school QR with any UPI app', 'పాఠశాల QR ను ఏదైనా UPI యాప్‌తో స్కాన్ చేయండి') : tx('Pay to the school UPI ID with any UPI app', 'పాఠశాల UPI ID కి ఏదైనా UPI యాప్ ద్వారా చెల్లించండి')}${tx(', then send us the payment reference (UTR). The office checks the bank and issues your receipt.', ', తర్వాత పేమెంట్ రిఫరెన్స్ నంబర్ (UTR) మాకు పంపండి. ఆఫీసు బ్యాంక్‌లో చూసి మీ రసీదు ఇస్తుంది.')}</div>${chg}
+      ${pmine.length ? `<div style="margin-top:10px"><b style="font-size:.9rem">${tx('My UPI payments', 'నా UPI చెల్లింపులు')}</b>${mineHtml()}</div>` : ''}`;
     body.insertBefore(card, body.firstChild);
     $('upPayBtn').onclick = () => openPay(s);
     card.querySelectorAll('[data-cancel]').forEach(a => a.onclick = async ev => {
-      ev.preventDefault(); if(!confirm('Withdraw this payment? Only do this if you have not actually paid.')) return;
-      try{ await api('POST', '/api/upi/claims/' + a.dataset.cancel + '/cancel'); toast('Withdrawn.'); mountParentCard(body, s); }catch(e){ toast(e.message); }
+      ev.preventDefault(); if(!confirm(tx('Withdraw this payment? Only do this if you have not actually paid.', 'ఈ చెల్లింపును వెనక్కి తీసుకోవాలా? మీరు నిజంగా డబ్బు కట్టకపోతేనే ఇలా చేయండి.'))) return;
+      try{ await api('POST', '/api/upi/claims/' + a.dataset.cancel + '/cancel'); toast(tx('Withdrawn.', 'వెనక్కి తీసుకున్నారు.')); mountParentCard(body, s); }catch(e){ toast(e.message); }
     });
   }
   function openPay(s){
     let rows = []; try{ rows = computePendingFeeRows(s).pendingRows; }catch(e){}
-    if(!rows.length){ toast('There are no pending fees to pay.'); return; }
+    if(!rows.length){ toast(tx('There are no pending fees to pay.', 'చెల్లించవలసిన ఫీజులు ఏవీ లేవు.')); return; }
     const refCode = 'RF' + Array.from(crypto.getRandomValues(new Uint8Array(4))).map(b => 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'[b % 31]).join('');
     const items = rows.map(r => ({ type: r.type, key: r.key, label: r.label, due: Math.round((r.outstanding + r.lateFee) * 100) / 100, on: false, amount: Math.round((r.outstanding + r.lateFee) * 100) / 100 }));
-    modal('Pay by UPI', `<div id="upStep"></div>`, '');
+    modal(tx('Pay by UPI', 'UPI ద్వారా చెల్లించండి'), `<div id="upStep"></div>`, '');
     const state = { step: 1, shot: '' };
     const sel = () => items.filter(i => i.on && i.amount > 0);
     const fee = () => Math.round(sel().reduce((t, i) => t + i.amount, 0) * 100) / 100;
     const chargeNow = () => calcCharge(fee(), pset.charge, today());
     function step1(){
-      $('upStep').innerHTML = `<div class="up-note" style="margin-bottom:8px">Choose what you are paying for. You can pay part of a fee.</div>
-        ${items.map((i, n) => `<div class="up-line"><input type="checkbox" data-c="${n}" ${i.on ? 'checked' : ''}><span>${esc(i.label)}<br><small style="color:#667">Due ${money(i.due)}</small></span><input type="number" min="1" max="${i.due}" step="0.01" data-a="${n}" value="${i.amount}"></div>`).join('')}
+      $('upStep').innerHTML = `<div class="up-note" style="margin-bottom:8px">${tx('Choose what you are paying for. You can pay part of a fee.', 'ఏ ఫీజు కడుతున్నారో ఎంచుకోండి. ఫీజులో కొంత మొత్తం మాత్రమే కూడా కట్టవచ్చు.')}</div>
+        ${items.map((i, n) => `<div class="up-line"><input type="checkbox" data-c="${n}" ${i.on ? 'checked' : ''}><span>${esc(i.label)}<br><small style="color:#667">${tx('Due', 'బాకీ')} ${money(i.due)}</small></span><input type="number" min="1" max="${i.due}" step="0.01" data-a="${n}" value="${i.amount}"></div>`).join('')}
         <div class="up-sum" id="upSum"></div>`;
-      document.querySelector('#upModal .up-foot').innerHTML = `<button class="up-btn" id="upCancel">Cancel</button><button class="up-btn bl" id="upNext">Next: how to pay</button>`;
+      document.querySelector('#upModal .up-foot').innerHTML = `<button class="up-btn" id="upCancel">${tx('Cancel', 'రద్దు చేయండి')}</button><button class="up-btn bl" id="upNext">${tx('Next: how to pay', 'తదుపరి: ఎలా చెల్లించాలి')}</button>`;
       $('upCancel').onclick = closeModal;
       const sum = () => {
         const f = fee(), c = chargeNow();
-        $('upSum').innerHTML = `<div><span>Fee</span><b>${money(f)}</b></div>${c ? `<div><span>${esc(pset.charge.label || 'UPI charge')}</span><b>${money(c)}</b></div>` : ''}<div class="t"><span>Amount to pay</span><span>${money(f + c)}</span></div>`;
+        $('upSum').innerHTML = `<div><span>${tx('Fee', 'ఫీజు')}</span><b>${money(f)}</b></div>${c ? `<div><span>${esc(pset.charge.label || 'UPI charge')}</span><b>${money(c)}</b></div>` : ''}<div class="t"><span>${tx('Amount to pay', 'చెల్లించవలసిన మొత్తం')}</span><span>${money(f + c)}</span></div>`;
         $('upNext').disabled = f <= 0;
       };
       document.querySelectorAll('#upStep [data-c]').forEach(x => x.onchange = () => { items[x.dataset.c].on = x.checked; sum(); });
@@ -134,44 +140,44 @@
       const total = Math.round((fee() + chargeNow()) * 100) / 100;
       const link = 'upi://pay?pa=' + encodeURIComponent(pset.upiId || '') + '&pn=' + encodeURIComponent(pset.payeeName || '') + '&am=' + total.toFixed(2) + '&cu=INR&tn=' + encodeURIComponent('School fee ' + refCode);
       const mobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
-      $('upStep').innerHTML = `<div class="up-sum"><div class="t"><span>Pay exactly</span><span>${money(total)}</span></div></div>
+      $('upStep').innerHTML = `<div class="up-sum"><div class="t"><span>${tx('Pay exactly', 'ఖచ్చితంగా ఇంత చెల్లించండి')}</span><span>${money(total)}</span></div></div>
         ${pset.qr ? `<div class="up-qr"><img src="${pset.qr}" alt="School UPI QR"></div>` : ''}
-        ${pset.upiId ? `<div class="up-id">UPI ID: <code id="upIdTxt">${esc(pset.upiId)}</code><button class="up-btn" id="upCopy">Copy</button></div>` : ''}
-        ${pset.payeeName ? `<div class="up-note" style="text-align:center">Name: <b>${esc(pset.payeeName)}</b></div>` : ''}
-        <div class="up-warn">In the UPI remarks write <b>${refCode}</b> (it helps the office find your payment). After paying, note the <b>12-digit UTR / reference number</b> from your UPI app, then press "I have paid".</div>
+        ${pset.upiId ? `<div class="up-id">UPI ID: <code id="upIdTxt">${esc(pset.upiId)}</code><button class="up-btn" id="upCopy">${tx('Copy', 'కాపీ')}</button></div>` : ''}
+        ${pset.payeeName ? `<div class="up-note" style="text-align:center">${tx('Name', 'పేరు')}: <b>${esc(pset.payeeName)}</b></div>` : ''}
+        <div class="up-warn">${tx('In the UPI remarks write <b>' + refCode + '</b> (it helps the office find your payment). After paying, note the <b>12-digit UTR / reference number</b> from your UPI app, then press "I have paid".', 'UPI లో రిమార్క్స్ (remarks) దగ్గర <b>' + refCode + '</b> రాయండి (మీ చెల్లింపును ఆఫీసు సులభంగా కనుక్కోవడానికి). చెల్లించిన తర్వాత మీ UPI యాప్‌లో కనిపించే <b>12 అంకెల UTR / రిఫరెన్స్ నంబర్</b> ను గమనించి, "నేను చెల్లించాను" నొక్కండి.')}</div>
         ${pset.instructions ? `<div class="up-note">${esc(pset.instructions)}</div>` : ''}
-        ${mobile && pset.upiId ? `<div style="text-align:center;margin-top:8px"><a class="up-btn bl" style="display:inline-block;text-decoration:none" href="${esc(link)}">Open my UPI app</a></div>` : ''}`;
-      document.querySelector('#upModal .up-foot').innerHTML = `<button class="up-btn" id="upBack">Back</button><button class="up-btn go" id="upPaid">I have paid</button>`;
+        ${mobile && pset.upiId ? `<div style="text-align:center;margin-top:8px"><a class="up-btn bl" style="display:inline-block;text-decoration:none" href="${esc(link)}">${tx('Open my UPI app', 'నా UPI యాప్ తెరవండి')}</a></div>` : ''}`;
+      document.querySelector('#upModal .up-foot').innerHTML = `<button class="up-btn" id="upBack">${tx('Back', 'వెనక్కి')}</button><button class="up-btn go" id="upPaid">${tx('I have paid', 'నేను చెల్లించాను')}</button>`;
       $('upBack').onclick = step1; $('upPaid').onclick = () => { state.step = 3; step3(total); };
-      const cp = $('upCopy'); if(cp) cp.onclick = () => { try{ navigator.clipboard.writeText(pset.upiId); toast('Copied'); }catch(e){} };
+      const cp = $('upCopy'); if(cp) cp.onclick = () => { try{ navigator.clipboard.writeText(pset.upiId); toast(tx('Copied', 'కాపీ అయింది')); }catch(e){} };
     }
     function step3(total){
-      $('upStep').innerHTML = `<div class="up-warn"><b>Please be careful.</b> The office will match the UTR and amount with the bank. A wrong or made-up reference will be rejected and your payment will not be recorded.</div>
+      $('upStep').innerHTML = `<div class="up-warn">${tx('<b>Please be careful.</b> The office will match the UTR and amount with the bank. A wrong or made-up reference will be rejected and your payment will not be recorded.', '<b>దయచేసి జాగ్రత్త.</b> మీరు రాసిన UTR, మొత్తాన్ని ఆఫీసు బ్యాంక్‌తో సరిచూస్తుంది. తప్పు లేదా కల్పిత నంబర్ ఇస్తే తిరస్కరించబడుతుంది, మీ చెల్లింపు నమోదు కాదు.')}</div>
         <div class="up-f">
-          <div><label>UTR / reference (12 digits)</label><input id="upUtr" inputmode="numeric" maxlength="14" placeholder="e.g. 412345678901"></div>
-          <div><label>Total amount you paid (₹)</label><input id="upAmt" type="number" step="0.01" value="${total}"></div>
-          <div><label>Date paid</label><input id="upDate" type="date" value="${today()}" max="${today()}"></div>
-          <div><label>Time (optional)</label><input id="upTime" type="time"></div>
+          <div><label>${tx('UTR / reference (12 digits)', 'UTR / రిఫరెన్స్ నంబర్ (12 అంకెలు)')}</label><input id="upUtr" inputmode="numeric" maxlength="14" placeholder="e.g. 412345678901"></div>
+          <div><label>${tx('Total amount you paid (₹)', 'మీరు చెల్లించిన మొత్తం (₹)')}</label><input id="upAmt" type="number" step="0.01" value="${total}"></div>
+          <div><label>${tx('Date paid', 'చెల్లించిన తేదీ')}</label><input id="upDate" type="date" value="${today()}" max="${today()}"></div>
+          <div><label>${tx('Time (optional)', 'సమయం (ఐచ్ఛికం)')}</label><input id="upTime" type="time"></div>
         </div>
-        <div style="margin-top:10px"><label class="up-note">Screenshot of the successful payment ${pset.requireScreenshot ? '<b style="color:#b3261e">(required)</b>' : '(recommended)'}</label><input type="file" id="upShot" accept="image/*"><div id="upShotPrev"></div></div>
-        <div style="margin-top:10px"><label class="up-note">Note (optional)</label><input id="upNote" maxlength="300" style="width:100%;box-sizing:border-box;padding:9px;border:1px solid #cfd6e6;border-radius:10px;font:inherit"></div>
-        <label style="display:flex;gap:8px;margin-top:12px;font-size:.86rem;align-items:flex-start"><input type="checkbox" id="upSure" style="margin-top:3px"><span>I confirm the UTR and amount above are copied from my UPI app and the money has left my account.</span></label>
+        <div style="margin-top:10px"><label class="up-note">${tx('Screenshot of the successful payment', 'చెల్లింపు విజయవంతమైనప్పటి స్క్రీన్‌షాట్')} ${pset.requireScreenshot ? '<b style="color:#b3261e">' + tx('(required)', '(తప్పనిసరి)') + '</b>' : tx('(recommended)', '(ఇవ్వడం మంచిది)')}</label><input type="file" id="upShot" accept="image/*"><div id="upShotPrev"></div></div>
+        <div style="margin-top:10px"><label class="up-note">${tx('Note (optional)', 'గమనిక (ఐచ్ఛికం)')}</label><input id="upNote" maxlength="300" style="width:100%;box-sizing:border-box;padding:9px;border:1px solid #cfd6e6;border-radius:10px;font:inherit"></div>
+        <label style="display:flex;gap:8px;margin-top:12px;font-size:.86rem;align-items:flex-start"><input type="checkbox" id="upSure" style="margin-top:3px"><span>${tx('I confirm the UTR and amount above are copied from my UPI app and the money has left my account.', 'పైన రాసిన UTR, మొత్తం నా UPI యాప్ నుంచే కాపీ చేశానని, నా ఖాతా నుంచి డబ్బు వెళ్లిందని నిర్ధారిస్తున్నాను.')}</span></label>
         <div id="upErr" style="color:#b3261e;font-size:.86rem;margin-top:8px"></div>`;
-      document.querySelector('#upModal .up-foot').innerHTML = `<button class="up-btn" id="upBack2">Back</button><button class="up-btn go" id="upSend">Send for checking</button>`;
+      document.querySelector('#upModal .up-foot').innerHTML = `<button class="up-btn" id="upBack2">${tx('Back', 'వెనక్కి')}</button><button class="up-btn go" id="upSend">${tx('Send for checking', 'తనిఖీ కోసం పంపండి')}</button>`;
       $('upBack2').onclick = step2;
       $('upShot').onchange = async ev => { const f = ev.target.files[0]; state.shot = ''; $('upShotPrev').innerHTML = ''; if(!f) return;
-        try{ state.shot = await compress(f); $('upShotPrev').innerHTML = `<img class="up-shot" src="${state.shot}">`; }catch(e){ $('upErr').textContent = 'Could not read that picture.'; } };
+        try{ state.shot = await compress(f); $('upShotPrev').innerHTML = `<img class="up-shot" src="${state.shot}">`; }catch(e){ $('upErr').textContent = tx('Could not read that picture.', 'ఆ ఫోటోను చదవలేకపోయాం.'); } };
       $('upSend').onclick = async () => {
         const err = $('upErr'); err.textContent = '';
         const utr = $('upUtr').value.replace(/\s+/g, '');
-        if(!/^\d{12}$/.test(utr)){ err.textContent = 'The UTR must be exactly 12 digits.'; return; }
-        if(!$('upSure').checked){ err.textContent = 'Please tick the confirmation.'; return; }
-        if(pset.requireScreenshot && !state.shot){ err.textContent = 'Please attach the screenshot.'; return; }
+        if(!/^\d{12}$/.test(utr)){ err.textContent = tx('The UTR must be exactly 12 digits.', 'UTR సరిగ్గా 12 అంకెలు ఉండాలి.'); return; }
+        if(!$('upSure').checked){ err.textContent = tx('Please tick the confirmation.', 'దయచేసి నిర్ధారణ బాక్స్‌ను టిక్ చేయండి.'); return; }
+        if(pset.requireScreenshot && !state.shot){ err.textContent = tx('Please attach the screenshot.', 'దయచేసి స్క్రీన్‌షాట్ జత చేయండి.'); return; }
         const btn = $('upSend'); btn.disabled = true;
         try{
           await api('POST', '/api/upi/claims', { studentId: s.id, lines: sel().map(i => ({ type: i.type, key: i.key, label: i.label, amount: i.amount })), utr, paidTotal: Number($('upAmt').value), paidOn: $('upDate').value,
             paidTime: $('upTime').value, note: $('upNote').value, screenshot: state.shot || undefined, refCode });
-          modal('Sent', `<div class="up-ok"><b>Thank you.</b> Your payment has been sent to the school office. Your receipt will appear here after they confirm it in the bank, usually within one working day.</div>`, `<button class="up-btn go" id="upDone">OK</button>`);
+          modal(tx('Sent', 'పంపబడింది'), `<div class="up-ok">${tx('<b>Thank you.</b> Your payment has been sent to the school office. Your receipt will appear here after they confirm it in the bank, usually within one working day.', '<b>ధన్యవాదాలు.</b> మీ చెల్లింపు వివరాలు పాఠశాల ఆఫీసుకు పంపబడ్డాయి. వారు బ్యాంక్‌లో చూసి నిర్ధారించిన తర్వాత మీ రసీదు ఇక్కడ కనిపిస్తుంది. సాధారణంగా ఒక పని దినంలో అవుతుంది.')}</div>`, `<button class="up-btn go" id="upDone">${tx('OK', 'సరే')}</button>`);
           $('upDone').onclick = () => { closeModal(); const b = document.getElementById('myProfileBody'); if(b) mountParentCard(b, s); };
         }catch(e){ err.textContent = e.message; btn.disabled = false; }
       };
