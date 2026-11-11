@@ -22,10 +22,10 @@
   const AUD_NAME = { parent: ['Parents', 'తల్లిదండ్రులు'], teacher: ['Teachers', 'టీచర్లు'], admin: ['Admin & Office', 'అడ్మిన్ & ఆఫీసు'], demo: ['Start here', 'ఇక్కడ మొదలు'] };
 
   /* ---------- settings (school-editable) ---------- */
-  const blank = () => ({ phone: '', hours: '', lang: '', whatsNew: [], hidden: [], custom: [], tourOff: false, fab: 'full' });
+  const blank = () => ({ phone: '', hours: '', lang: '', whatsNew: [], hidden: [], custom: [], tourOff: false, fab: 'off' });
   const clean = v => {
     const d = blank(); v = (v && typeof v === 'object') ? v : {};
-    d.phone = String(v.phone || '').slice(0, 40); d.hours = String(v.hours || '').slice(0, 80); d.tourOff = v.tourOff === true; d.fab = (v.fab === 'small' || v.fab === 'off') ? v.fab : 'full'; d.lang = v.lang === 'te' ? 'te' : v.lang === 'en' ? 'en' : '';
+    d.phone = String(v.phone || '').slice(0, 40); d.hours = String(v.hours || '').slice(0, 80); d.tourOff = v.tourOff === true; d.fab = (v.fab === 'small' || v.fab === 'full') ? v.fab : 'off'; d.lang = v.lang === 'te' ? 'te' : v.lang === 'en' ? 'en' : '';
     d.whatsNew = (Array.isArray(v.whatsNew) ? v.whatsNew : []).filter(x => x && (x.en || x.te)).slice(0, 30).map(x => ({ id: String(x.id || ''), at: String(x.at || ''), en: String(x.en || '').slice(0, 400), te: String(x.te || '').slice(0, 400) }));
     d.hidden = (Array.isArray(v.hidden) ? v.hidden : []).map(String).slice(0, 200);
     d.custom = (Array.isArray(v.custom) ? v.custom : []).filter(x => x && x.id && x.aud && (x.en || x.te)).slice(0, 80).map(x => ({
@@ -96,7 +96,7 @@
     s.textContent = `
       #hcFab,#hcFab *,.hc-sheet,.hc-sheet *,.hc-card,.hc-card *{font-family:'Poppins','Noto Sans Telugu','Nirmala UI','Gautami',system-ui,'Segoe UI',sans-serif;letter-spacing:normal;}
       #hcFab{position:fixed;right:14px;bottom:calc(16px + var(--demo-h,0px));z-index:950;display:none;align-items:center;gap:6px;background:#2f4fd8;color:#fff;border:0;border-radius:999px;padding:10px 16px;font-weight:700;font-size:.86rem;line-height:1;box-shadow:0 8px 22px rgba(30,50,140,.35);cursor:pointer;}
-      #hcFab.on{display:inline-flex;} #hcFab.small{padding:11px;} #hcFab.small .t{display:none;} #hcFab.edge{right:0;padding:0;width:10px;height:58px;border-radius:10px 0 0 10px;opacity:.4;bottom:calc(40% + var(--demo-h,0px));} #hcFab.edge span{display:none !important;} body.pp-on #hcFab.edge,body.tp-on #hcFab.edge{bottom:calc(40% + var(--demo-h,0px));}
+      #hcFab.on{display:inline-flex;} #hcFab.small{padding:11px;} #hcFab.small .t{display:none;} #hcFab.hide{display:none !important;}
       .hc-fm{display:flex;gap:4px;align-items:center;font-size:.78rem;color:#556;} .hc-fm button.on{background:#2f4fd8;color:#fff;border-color:#2f4fd8;} #hcFab:hover{background:#243fb5;} #hcFab .dot{width:9px;height:9px;border-radius:50%;background:#ffb300;display:none;} #hcFab.new .dot{display:inline-block;}
       body.pp-on #hcFab,body.tp-on #hcFab{bottom:calc(86px + env(safe-area-inset-bottom) + var(--demo-h,0px));}
       @media (max-width:760px){#hcFab{padding:11px 14px;}}
@@ -170,7 +170,7 @@
       <div class="hc-head"><div class="hc-top"><h2>❓ ${esc(L('Help', 'సహాయం'))}</h2><button type="button" class="hc-btn" id="hcLang">🌐 ${lang() === 'te' ? 'English' : 'తెలుగు'}</button><button type="button" class="hc-btn" id="hcClose" aria-label="Close">✕</button></div>
       <input class="hc-search" id="hcQ" type="search" placeholder="${esc(L('Search: for example "pay fees"', 'వెతకండి, ఉదా. "ఫీజు"'))}" value="${esc(st.q)}" autocomplete="off">${tabs}</div>
       <div class="hc-body" id="hcBody">${bodyHtml()}</div>
-      <div class="hc-foot">${phone}<span class="sp"></span><span class="hc-fm">${esc(L('Help button', 'సహాయం బటన్'))}: ${[['full', L('Show', 'చూపు')], ['small', L('Small', 'చిన్నది')], ['off', L('Hide', 'దాచు')]].map(x => `<button type="button" data-fm="${x[0]}" class="${fabMode() === x[0] ? 'on' : ''}">${esc(x[1])}</button>`).join('')}</span><button type="button" id="hcTourBtn">▶ ${esc(L('Take the tour', 'ఎలా వాడాలో చూడండి'))}</button><button type="button" id="hcPrint">🖨 ${esc(L('Print guide', 'ప్రింట్ తీసుకోండి'))}</button>${isMgr() ? `<button type="button" id="hcEdit">✏️ ${esc(L('Edit help', 'సహాయం మార్చండి'))}</button>` : ''}</div></div>`;
+      <div class="hc-foot">${phone}<span class="sp"></span><span class="hc-fm">${esc(L('Button on screen', 'స్క్రీన్‌పై బటన్'))}: ${[['full', L('Show', 'చూపు')], ['small', L('Small', 'చిన్నది')], ['off', L('Hide', 'దాచు')]].map(x => `<button type="button" data-fm="${x[0]}" class="${fabMode() === x[0] ? 'on' : ''}">${esc(x[1])}</button>`).join('')}</span><button type="button" id="hcTourBtn">▶ ${esc(L('Take the tour', 'ఎలా వాడాలో చూడండి'))}</button><button type="button" id="hcPrint">🖨 ${esc(L('Print guide', 'ప్రింట్ తీసుకోండి'))}</button>${isMgr() ? `<button type="button" id="hcEdit">✏️ ${esc(L('Edit help', 'సహాయం మార్చండి'))}</button>` : ''}</div></div>`;
   }
 
   /* ---------- editor (Admin / Principal) ---------- */
@@ -194,7 +194,7 @@
         <div class="row"><div><label>Note (English)</label><input id="hcWEn" maxlength="400"></div><div><label>Note (Telugu)</label><input id="hcWTe" maxlength="400"></div></div><div style="margin-top:8px"><button type="button" class="b g" id="hcWAdd">+ Add note</button></div>
         <h3>My own topics</h3>${mine}${form}
         <h3>Hide built-in topics</h3><div class="row"><select id="hcEdAud">${['parent', 'teacher', 'admin'].map(x => `<option value="${x}" ${a === x ? 'selected' : ''}>${esc(AUD_NAME[x][0])}</option>`).join('')}</select><div></div></div>${hideList}
-        <h3>Help button</h3><div class="row"><div><label>Floating Help button for everyone (each person can still change it for themselves)</label><select id="hcFabDef"><option value="full" ${D.fab === 'full' ? 'selected' : ''}>Show with the word Help</option><option value="small" ${D.fab === 'small' ? 'selected' : ''}>Small round button only</option><option value="off" ${D.fab === 'off' ? 'selected' : ''}>Hidden (a thin tab on the screen edge)</option></select></div><div></div></div>
+        <h3>Help on the screen</h3><div class="row"><div><label>Help is always in the side menu. Also show a floating button?</label><select id="hcFabDef"><option value="off" ${D.fab === 'off' ? 'selected' : ''}>Hidden (Help is in the menu)</option><option value="small" ${D.fab === 'small' ? 'selected' : ''}>Small round button</option><option value="full" ${D.fab === 'full' ? 'selected' : ''}>Button with the word Help</option></select></div><div></div></div>
         <h3>First-login tour</h3><label class="chk"><input type="checkbox" id="hcTourOff" ${D.tourOff ? 'checked' : ''}> Do not show the welcome tour to new users</label>
         <div class="hc-msg" id="hcSaveMsg">${esc(st.msg)}</div><button type="button" class="b" id="hcSave">Save changes</button>
       </div></div>`;
@@ -304,7 +304,7 @@
   function paintTour() {
     let ov = $('hcTour'); if (!ov) { ov = document.createElement('div'); ov.id = 'hcTour'; ov.className = 'hc-tour'; document.body.appendChild(ov); }
     const { i, cards } = tourRun; const c = cards[i]; const last = i === cards.length - 1;
-    ov.innerHTML = `<div class="hc-card" role="dialog" aria-modal="true"><div class="big">${esc(c[0])}</div><h3>${esc(pick(c[1]))}</h3><p>${esc(pick(c[2]))}</p>
+    ov.innerHTML = `<div class="hc-card" role="dialog" aria-modal="true"><div class="big">${esc(c[0])}</div><h3>${esc(pick(c[1]))}</h3><p>${esc(pick(c[2]))}</p>${last ? `<p style="font-weight:700;color:#243fb5">❓ ${esc(L('Help is always in the menu (☰).', 'సహాయం ఎప్పుడూ మెనూ (☰) లో ఉంటుంది.'))}</p>` : ''}
       <div class="hc-dots">${cards.map((_, k) => `<i class="${k === i ? 'on' : ''}"></i>`).join('')}</div>
       <div class="acts"><button type="button" class="skip" id="hcTSkip">${esc(L('Skip', 'వద్దు'))}</button><button type="button" class="skip" id="hcTLang">🌐 ${lang() === 'te' ? 'English' : 'తెలుగు'}</button><button type="button" class="go" id="hcTNext">${esc(last ? L('Got it', 'సరే') : L('Next', 'తరువాత'))}</button></div></div>`;
   }
@@ -328,10 +328,32 @@
     if (!b) { b = document.createElement('button'); b.id = 'hcFab'; b.type = 'button'; b.setAttribute('aria-label', 'Help'); b.addEventListener('click', () => openHelp(true)); document.body.appendChild(b); }
     const seen = LS.get('hcSeenNew:' + uid()) || ''; const now = S.whatsNew.map(w => w.id).join(',');
     b.classList.toggle('new', !!now && now !== seen);
-    const fm = fabMode(); b.classList.toggle('small', fm === 'small'); b.classList.toggle('edge', fm === 'off');
+    const fm = fabMode(); b.classList.toggle('small', fm === 'small'); b.classList.toggle('hide', fm === 'off');
     b.setAttribute('aria-label', L('Help', 'సహాయం'));
     b.innerHTML = '<span>❓</span><span class="t">' + esc(L('Help', 'సహాయం')) + '</span><span class="dot"></span>';
     b.classList.add('on');
+  }
+  /* Help in the side menu and the account menu (all roles) */
+  function openFromMenu() {
+    try { if (typeof closeSbUserMenu === 'function') closeSbUserMenu(); } catch (e) {}
+    try { if (typeof toggleMobileSidebar === 'function') toggleMobileSidebar(false); } catch (e) {}
+    openHelp(true);
+  }
+  function menuLabel() { return L('Help', 'సహాయం'); }
+  function ensureMenu() {
+    const dot = (() => { const seen = LS.get('hcSeenNew:' + uid()) || ''; const now = S.whatsNew.map(w => w.id).join(','); return !!now && now !== seen; })();
+    const t = $('sbToggle-overview');
+    if (t && t.parentNode) {
+      let a = $('hcMenuLink');
+      if (!a) { a = document.createElement('button'); a.type = 'button'; a.id = 'hcMenuLink'; a.className = 'sb-link'; a.addEventListener('click', openFromMenu); t.parentNode.insertBefore(a, t); }
+      a.innerHTML = '<span class="sb-icon-wrap" style="font-size:1.05rem;line-height:1">❓</span> ' + esc(menuLabel()) + (dot ? ' <span class="nb-badge" style="display:inline-block">•</span>' : '');
+    }
+    const m = $('sbUserMenu');
+    if (m) {
+      let b = $('hcMenuAcct');
+      if (!b) { b = document.createElement('button'); b.type = 'button'; b.id = 'hcMenuAcct'; b.className = 'approvals-bell-btn'; b.setAttribute('role', 'menuitem'); b.addEventListener('click', openFromMenu); m.insertBefore(b, m.firstChild); }
+      b.innerHTML = '<span class="approvals-bell-icon">❓</span><span class="sb-btn-label">' + esc(menuLabel()) + '</span>';
+    }
   }
   let lastUser = null, tourTried = false;
   async function tick() {
@@ -339,7 +361,7 @@
     if (!u) { lastUser = null; tourTried = false; const b = $('hcFab'); if (b) b.classList.remove('on'); return; }
     if (lastUser !== uid()) { lastUser = uid(); tourTried = false; sAt = 0; }
     if (!appVisible()) return;
-    await load(false); updateFab();
+    await load(false); updateFab(); ensureMenu();
     if (!tourTried && !blocked() && !$('hcOv') && !$('hcTour')) {
       tourTried = true;
       if (!S.tourOff && !u.impersonating && LS.get(tourKey()) !== '1') setTimeout(() => { if (me() && !blocked() && !$('hcOv')) startTour(false); }, 1200);

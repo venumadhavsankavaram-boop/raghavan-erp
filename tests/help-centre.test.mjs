@@ -95,7 +95,8 @@ test('copying a built-in topic gives an editable copy', () => {
 });
 test('Help button can be shown, small or hidden, per person or for the whole school', () => {
   const hc = boot({ role: 'Admin', id: 'a1' }).__hc;
-  assert.equal(hc.clean({}).fab, 'full'); assert.equal(hc.clean({ fab: 'off' }).fab, 'off'); assert.equal(hc.clean({ fab: 'small' }).fab, 'small'); assert.equal(hc.clean({ fab: 'junk' }).fab, 'full');
+  assert.equal(hc.clean({}).fab, 'off'); assert.equal(hc.clean({ fab: 'full' }).fab, 'full'); assert.equal(hc.clean({ fab: 'small' }).fab, 'small'); assert.equal(hc.clean({ fab: 'junk' }).fab, 'off');
+  assert.ok(/hcMenuLink/.test(m83) && /hcMenuAcct/.test(m83) && /sbToggle-overview/.test(m83), 'Help is added to the side menu and account menu');
   assert.ok(/data-fm=/.test(m83) && /hcFabDef/.test(m83) && /hcFab:' \+ uid\(\)/.test(m83));
 });
 test('wiring: both modules are loaded, content first', () => {
