@@ -92,6 +92,7 @@
     return y + '-' + pad(m);
   }
   window.payrollPeriod = periodOf;
+  window.payrollSettingsNow = function(){ return S; };
   const monthName = (mStr, long) => new Date(mStr + '-01').toLocaleString('en-IN', { month: long ? 'long' : 'short', year: 'numeric' });
   const periodText = p => fmtD(p.from) + ' – ' + fmtD(p.to);
 

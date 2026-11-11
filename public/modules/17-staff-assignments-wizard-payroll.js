@@ -223,6 +223,7 @@ function daysInPayrollMonth(monthStr){
                 ${rec && rec.status==='Draft' && canApprove ? `<button class="btn-edit-text" style="color:#1f7a4d;" onclick="approvePayroll('${st.id}','${staffPayrollMonth}')">Approve</button>` : ``}
                 ${locked && canApprove ? `<button class="btn-edit-text" style="color:var(--magenta);" onclick="reopenPayroll('${st.id}','${staffPayrollMonth}')">Reopen</button>` : ``}
                 ${rec && canPrintPayroll ? `<button class="btn-edit-text" onclick="printPayslip('${st.id}','${staffPayrollMonth}')">🧾 Payslip</button>` : ``}
+                ${canPrintPayroll ? `<button class="btn-edit-text" onclick="openLeaveStatement('${st.id}','${staffPayrollMonth}')">📄 Leave statement</button>` : ``}
               </div>
             </td>
           </tr>`;
