@@ -578,7 +578,7 @@
         .ac-page{ width:100%; }
         .ac-pagebreak{ page-break-after:always; }
         .ac-stack{ display:flex; flex-direction:column; height:281mm; gap:4mm; }
-        .ac-strip{ flex:1; border:1.4px solid #333; border-radius:3px; display:flex; overflow:hidden; position:relative; page-break-inside:avoid; }
+        .ac-strip{ flex:0 0 ${(281 - (perPage-1)*4) / perPage}mm; border:1.4px solid #333; border-radius:3px; display:flex; overflow:hidden; position:relative; page-break-inside:avoid; }
         .ac-strip:not(:last-child)::after{ content:''; position:absolute; left:-8mm; right:-8mm; bottom:-2.7mm; border-bottom:1px dashed #aaa; }
         .ac-strip .scissor{ position:absolute; left:-6mm; bottom:-4.6mm; font-size:9px; color:#999; background:#fff; padding:0 2px; }
 
