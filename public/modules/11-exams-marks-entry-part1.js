@@ -21,6 +21,8 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     return cfg;
   }
   function roomAllotConfig(){ return roomAllotConfigFor(roomAllotExamId); }
+  // Every class that has students (hall tickets must stay reachable for all classes, whichever session is selected).
+  function acAllClasses(){ const has = CLASS_LEVELS.filter(c => students.some(s => s.className === c && isActive(s))); return has.length ? has : CLASS_LEVELS; }
   function roomAllotCurrentExam(){ return examDefs.find(e => e.id === roomAllotExamId) || null; }
   // Saves for the three Room Allotment lists go through ONE queue per list, so two quick clicks can never both try to
   // create the same record ("Duplicate entry"). If the server already has a record this screen did not know about, it
@@ -108,7 +110,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
   function renderHallTicketsSubTab(el){
     const cfg = roomAllotConfig();
     const canEditHT = getResultTabAccess(currentUser.role, 'result_roomallotment', 'edit');
-    const classList = (cfg.selectedClasses && cfg.selectedClasses.length) ? cfg.selectedClasses : CLASS_LEVELS;
+    const classList = acAllClasses();
     el.innerHTML = `
       <div class="profile-card" style="margin-bottom:16px;">
         <h4>Generate Hall Ticket Numbers</h4>
@@ -123,8 +125,9 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
           <div class="f-field"><label>Start Number</label><input type="number" id="raHTStart" min="1" value="${roomAllotHTStart}"></div>
           ${canEditHT ? `<div class="f-field" style="align-self:flex-end;"><button class="btn btn-primary btn-sm" ${roomAllotHTClass?'':'disabled'} onclick="regenHallTicketsForClass()">Auto-Generate (this class)</button></div>` : ''}
           ${canEditHT ? `<div class="f-field" style="align-self:flex-end;"><button class="btn btn-ghost btn-sm" onclick="generateHallTicketsAllSelected()">Generate for all selected classes</button></div>` : ''}
+          ${canEditHT ? `<div class="f-field" style="align-self:flex-end;"><button class="btn btn-primary btn-sm" onclick="fillMissingHallTickets()">Give numbers to students who have none</button></div>` : ''}
         </div>
-        <span style="font-size:0.72rem; color:var(--ink-soft);">Students are numbered girls first, then boys, in the order shown below (surname first). "Generate for all selected classes" numbers every selected class in one go, counting on from the start number. Auto-Generate fills every student in this class — you can still edit individual numbers afterward.</span>
+        <span style="font-size:0.72rem; color:var(--ink-soft);">Students are numbered girls first, then boys, in the order shown below (surname first). "Generate for all selected classes" numbers every selected class in one go, counting on from the start number. Auto-Generate fills every student in this class — you can still edit individual numbers afterward. "Give numbers to students who have none" never changes a number already issued — it only numbers new or missed students (all classes), continuing after the highest number in use.</span>
       </div>
       ${!roomAllotHTClass ? '' : renderHallTicketsTable(canEditHT)}
     `;
@@ -159,6 +162,28 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     });
     await raSave(EXAM_HALL_TICKETS_KEY, () => examHallTickets);
     showToast('Hall ticket numbers generated for ' + studs.length + ' students.');
+    renderRoomAllotSubBody();
+  }
+  // Safe mid-exam: never touches a number already issued; numbers only students who have none, continuing after the highest in use.
+  async function fillMissingHallTickets(){
+    if(!roomAllotExamId){ showToast('Choose the exam first.'); return; }
+    const missing = [];
+    acAllClasses().forEach(cls => roomAllotStudentsForClass(cls).forEach(s => { const h = getHallTicket(roomAllotExamId, s.id); if(!h || !String(h.htNumber || '').trim()) missing.push(s); }));
+    if(!missing.length){ showToast('Every student already has a hall ticket number.'); return; }
+    let best = null;
+    examHallTickets.filter(h => h.examId === roomAllotExamId && h.htNumber).forEach(h => { const p = raHtParts(h.htNumber); if(isFinite(p.n) && (!best || p.n > best.n)) best = p; });
+    const formPrefix = ((document.getElementById('raHTPrefix') || {}).value || roomAllotHTPrefix || '').trim();
+    const prefix = best ? best.p : formPrefix, width = best ? Math.max(best.w, 1) : 4;
+    let n = best ? best.n + 1 : (Number((document.getElementById('raHTStart') || {}).value) || roomAllotHTStart || 1);
+    const first = prefix + String(n).padStart(width, '0');
+    if(!await showConfirmDialog('Give new hall ticket numbers to ' + missing.length + ' student' + (missing.length === 1 ? '' : 's') + ' who have none, starting from ' + first + '? Numbers already issued will not change.', { title: 'Number missing students', okText: 'Give numbers' })) return;
+    missing.forEach(s => {
+      const num = prefix + String(n++).padStart(width, '0');
+      const ex = getHallTicket(roomAllotExamId, s.id);
+      if(ex) ex.htNumber = num; else examHallTickets.push({ id: 'ht_' + roomAllotExamId + '_' + s.id, examId: roomAllotExamId, studentId: s.id, htNumber: num });
+    });
+    await raSave(EXAM_HALL_TICKETS_KEY, () => examHallTickets);
+    showToast('Numbers given to ' + missing.length + ' student' + (missing.length === 1 ? '' : 's') + '.');
     renderRoomAllotSubBody();
   }
   async function saveHallTicketNumber(studentId, value){
@@ -537,9 +562,25 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
     return list;
   }
   function buildNoticeBoardData(){ return buildNoticeBoardDataFor(roomAllotExamId); }
+  // Room for every student of the exam. The classes picked on the Room Allotment screen are worked out live; the other
+  // session (Morning/Afternoon use the same rooms at a different time) is worked out on its own, and whatever was ever
+  // worked out is remembered (roomSnapshot) — so switching session never makes an earlier class lose its room.
   function computeExamHallTicketRoomMap(examId){
-    const map = {};
+    const map = {}, cfg = roomAllotConfigFor(examId), saved = cfg.selectedClasses;
     buildNoticeBoardDataFor(examId).forEach(d => { map[d.studentId] = { ht: d.ht, room: d.room }; });
+    try{
+      const covered = (saved && saved.length) ? saved : CLASS_LEVELS, sd = raSessionDefs();
+      ['Morning', 'Afternoon'].forEach(name => {
+        const list = CLASS_LEVELS.filter(c => (sd[name] || []).includes(c));
+        if(!list.length || list.every(c => covered.includes(c))) return;
+        cfg.selectedClasses = list;
+        buildNoticeBoardDataFor(examId).forEach(d => { if(!map[d.studentId]) map[d.studentId] = { ht: d.ht, room: d.room }; });
+      });
+    }catch(e){} finally{ cfg.selectedClasses = saved; }
+    const snap = cfg.roomSnapshot || {}, next = Object.assign({}, snap); let changed = false;
+    Object.keys(map).forEach(id => { if(next[id] !== map[id].room){ next[id] = map[id].room; changed = true; } });
+    Object.keys(snap).forEach(id => { if(!map[id]){ const h = getHallTicket(examId, id); map[id] = { ht: h && h.htNumber ? h.htNumber : '', room: snap[id] }; } });
+    if(changed){ cfg.roomSnapshot = next; try{ saveRoomAllotConfig(); }catch(e){} }
     return map;
   }
   // Self-check: every student exactly once, class totals match, numbers unique, ranges add up, rooms within capacity.

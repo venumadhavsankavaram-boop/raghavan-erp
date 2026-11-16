@@ -242,7 +242,7 @@
     const exam = examDefs.find(e => e.id === admitCardsExamId); if(!exam) return;
     const d = acDraftFor(exam);
     const raCfg = roomAllotConfigFor(admitCardsExamId);
-    const classes = (raCfg.selectedClasses && raCfg.selectedClasses.length) ? raCfg.selectedClasses : CLASS_LEVELS;
+    const classes = acAllClasses();
     box.innerHTML = `
       <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin:10px 0 6px;">
         <div class="f-field" style="margin:0;"><label>All classes — starts</label><input type="time" id="acDefStart" value="${d.start}"></div>
@@ -296,7 +296,7 @@
     if(!admitCardsExamId || !examDefs.find(e => e.id === admitCardsExamId)) admitCardsExamId = acCurrentExam().id;
     const examOptions = examDefs.map(ex => `<option value="${ex.id}" ${admitCardsExamId===ex.id?'selected':''}>${ex.name}${acExamTag(ex)}</option>`).join('');
     const raCfg = roomAllotConfigFor(admitCardsExamId);
-    const visibleClasses = (raCfg.selectedClasses && raCfg.selectedClasses.length) ? raCfg.selectedClasses : CLASS_LEVELS;
+    const visibleClasses = acAllClasses();
     const gridHtml = buildModernClassGrid(
       visibleClasses,
       (cls, sec) => students.filter(s => s.className===cls && s.section===sec && isActive(s)).length,
@@ -310,7 +310,6 @@
         <select id="admitExamSelect" onchange="admitCardsExamId=this.value; renderResultBody();">${examOptions}</select>
       </div>
       ${acHeaderHtml(raCfg, visibleClasses)}
-      ${(raCfg.selectedClasses && raCfg.selectedClasses.length) ? `<p style="font-size:0.78rem; color:var(--ink-soft); margin:-10px 0 16px;">Showing only the classes selected for this exam under <a onclick="switchResultTab('roomallotment')" style="color:var(--magenta); cursor:pointer; font-weight:600;">Room Allotment → Select Classes</a>.</p>` : ''}
       ${gridHtml}
     `;
     acPaintTimes();
@@ -327,6 +326,8 @@
         <button class="btn btn-ghost btn-sm" onclick="acTickAll(true)">Tick all</button>
         <button class="btn btn-ghost btn-sm" onclick="acTickAll(false)">Clear</button>
         <button class="btn btn-primary btn-sm" onclick="acPrintSelected()">Print ticked</button>
+        <button class="btn btn-ghost btn-sm" onclick="acDownloadSelected()" title="Saves a file you can open and print or save as PDF at any time">⬇ Download ticked</button>
+        <button class="btn btn-ghost btn-sm" onclick="acDownloadEverything()">⬇ Download ALL</button>
       </div>
       <div style="max-height:260px; overflow:auto; border:1px solid var(--border); border-radius:10px; padding:6px 10px;">
         ${rows.map(r => `<div style="padding:4px 0; border-top:1px solid var(--border);">
@@ -352,7 +353,7 @@
   function acPrintEverything(){
     const exam = examDefs.find(e => e.id === admitCardsExamId); if(!exam) return;
     const raCfg = roomAllotConfigFor(admitCardsExamId);
-    const classes = (raCfg.selectedClasses && raCfg.selectedClasses.length) ? raCfg.selectedClasses : CLASS_LEVELS;
+    const classes = acAllClasses();
     const pairs = [];
     classes.forEach(c => SECTIONS.forEach(sec => { if(students.some(s => s.className === c && s.section === sec && isActive(s))) pairs.push({ cls: c, sec }); }));
     if(!pairs.length){ showToast('No students to print for.'); return; }
@@ -392,7 +393,7 @@
           : `<div style="font-size:0.85rem; color:var(--ink-soft); padding:10px 0;">${tmpl && tmpl.layout==='full' ? '1 per A4 sheet (fixed by this layout)' : '4 per A4 sheet, 2×2 grid (fixed by this layout)'}</div>`;
         return `
       <div style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap; margin-bottom:16px;">
-        ${canPrint ? `<button class="btn btn-primary" onclick="printAdmitCards('${admitCardsClass}','${admitCardsSection}', null)" ${(list.length===0 || subjects.length===0 || missingDates.length>0)?'disabled':''}>Print All Admit Cards</button>` : ''}
+        ${canPrint ? `<button class="btn btn-primary" onclick="printAdmitCards('${admitCardsClass}','${admitCardsSection}', null)" ${(list.length===0 || subjects.length===0 || missingDates.length>0)?'disabled':''}>Print All Admit Cards</button><button class="btn btn-ghost" onclick="acDownloadRoster('${admitCardsClass}','${admitCardsSection}')" ${(list.length===0 || subjects.length===0 || missingDates.length>0)?'disabled':''} title="Saves a file you can open and print or save as PDF at any time">⬇ Download All</button>` : ''}
         <div class="f-field" style="max-width:230px; margin-bottom:0;">
           <label>Template</label>
           <select id="admitCardsTemplateSelect" onchange="admitCardsTemplateId=this.value; renderResultBody();">${templateOptions}</select>
@@ -409,7 +410,7 @@
         ${list.map(s => `<tr>
           <td class="name-cell">${s.lastName} ${s.firstName}</td>
           <td class="id-cell">${s.admissionNo}</td>
-          <td>${canPrint ? `<button class="btn-edit-text" ${(subjects.length===0 || missingDates.length>0)?'disabled':''} onclick="printAdmitCards('${admitCardsClass}','${admitCardsSection}', '${s.id}')">Print Admit Card</button>` : ''}</td>
+          <td>${canPrint ? `<button class="btn-edit-text" ${(subjects.length===0 || missingDates.length>0)?'disabled':''} onclick="printAdmitCards('${admitCardsClass}','${admitCardsSection}', '${s.id}')">Print Admit Card</button> <button class="btn-edit-text" ${(subjects.length===0 || missingDates.length>0)?'disabled':''} onclick="acDownloadStudent(this,'${admitCardsClass}','${admitCardsSection}','${s.id}')">Download</button>` : ''}</td>
         </tr>`).join('')}
         </tbody></table>
         ${list.length===0 ? `<div class="empty-state"><b>No students here</b></div>` : ``}
