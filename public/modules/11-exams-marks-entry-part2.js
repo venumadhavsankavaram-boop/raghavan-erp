@@ -288,29 +288,58 @@
     expandedAdmitClass = (expandedAdmitClass === cls) ? '' : cls;
     renderAdmitCardsGrid(document.getElementById('resultBody'));
   }
+  // Simple Admit Cards screen: pick the exam, then one row per class & section (taken straight from the students,
+  // so no class can go missing). Print or Download a row, or open it to reissue a single student's card.
+  function acRows(){
+    const act = students.filter(s => isActive(s));
+    const names = Array.from(new Set(act.map(s => s.className)));
+    names.sort((x, y) => { const i = CLASS_LEVELS.indexOf(x), j = CLASS_LEVELS.indexOf(y); return (i < 0 ? 999 : i) - (j < 0 ? 999 : j) || String(x).localeCompare(String(y)); });
+    const rows = [];
+    names.forEach(c => {
+      const secs = Array.from(new Set(act.filter(s => s.className === c).map(s => s.section)));
+      secs.sort((x, y) => String(x).localeCompare(String(y)));
+      secs.forEach(sec => rows.push({ c, sec, list: act.filter(s => s.className === c && s.section === sec) }));
+    });
+    return rows;
+  }
   function renderAdmitCardsGrid(body){
     if(examDefs.length === 0){
       body.innerHTML = `<div class="empty-state"><b>No exams yet</b>Create an exam under the "Exams" tab first.</div>`;
       return;
     }
     if(!admitCardsExamId || !examDefs.find(e => e.id === admitCardsExamId)) admitCardsExamId = acCurrentExam().id;
+    const exam = examDefs.find(e => e.id === admitCardsExamId);
     const examOptions = examDefs.map(ex => `<option value="${ex.id}" ${admitCardsExamId===ex.id?'selected':''}>${ex.name}${acExamTag(ex)}</option>`).join('');
-    const raCfg = roomAllotConfigFor(admitCardsExamId);
-    const visibleClasses = acAllClasses();
-    const gridHtml = buildModernClassGrid(
-      visibleClasses,
-      (cls, sec) => students.filter(s => s.className===cls && s.section===sec && isActive(s)).length,
-      cls => `toggleAdmitClassExpand('${cls}')`,
-      (cls, sec) => `openAdmitCardsRoster('${cls}','${sec}')`,
-      cls => expandedAdmitClass === cls
-    );
+    const canPrint = getResultTabAccess(currentUser.role, 'result_admitcards', 'print');
+    let roomMap = {}; try{ roomMap = computeExamHallTicketRoomMap(admitCardsExamId) || {}; }catch(e){}
+    const rows = acRows();
+    const tr = rows.map(r => {
+      const sj = getExamSubjects(exam, r.c, r.sec);
+      const ready = sj.length > 0 && sj.every(x => x.date);
+      const why = sj.length === 0 ? 'No subjects set' : (ready ? '' : 'Exam dates missing');
+      const withNo = r.list.filter(s => { const h = getHallTicket(admitCardsExamId, s.id); return h && String(h.htNumber || '').trim(); }).length;
+      const withRoom = r.list.filter(s => roomMap[s.id] && roomMap[s.id].room).length;
+      const tag = (ok, text) => `<span style="font-size:.78rem; font-weight:600; color:${ok ? '#17603a' : '#8a4b00'};">${ok ? '✓' : '⚠'} ${text}</span>`;
+      const acts = !canPrint ? '' : `<button class="btn btn-primary btn-sm" ${ready ? '' : 'disabled'} onclick="acRunPrint([{cls:'${r.c}',sec:'${r.sec}'}])">Print</button> <button class="btn btn-ghost btn-sm" ${ready ? '' : 'disabled'} onclick="acDownloadPair('${r.c}','${r.sec}')">⬇ Download</button> `;
+      return `<tr>
+        <td class="name-cell">${r.c} — ${r.sec}</td>
+        <td>${r.list.length}</td>
+        <td>${ready ? tag(true, 'Ready') : tag(false, why)}<br>${tag(withNo === r.list.length, withNo + '/' + r.list.length + ' have numbers')}<br>${tag(withRoom === r.list.length, withRoom === 0 ? 'No room yet' : withRoom + '/' + r.list.length + ' have a room')}</td>
+        <td style="white-space:nowrap;">${acts}<button class="btn-edit-text" onclick="openAdmitCardsRoster('${r.c}','${r.sec}')">Students →</button></td>
+      </tr>`;
+    }).join('');
+    const period = exam.startDate ? exam.startDate + (exam.endDate && exam.endDate !== exam.startDate ? ' – ' + exam.endDate : '') : 'dates not set';
     body.innerHTML = `
-      <div class="f-field" style="max-width:320px; margin-bottom:12px;">
-        <label>Exam</label>
-        <select id="admitExamSelect" onchange="admitCardsExamId=this.value; renderResultBody();">${examOptions}</select>
+      <div style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap; margin-bottom:14px;">
+        <div class="f-field" style="max-width:320px; margin:0;">
+          <label>Exam</label>
+          <select id="admitExamSelect" onchange="admitCardsExamId=this.value; renderResultBody();">${examOptions}</select>
+        </div>
+        ${canPrint ? `<button class="btn btn-primary" onclick="acPrintEverything()">Print everything</button><button class="btn btn-ghost" onclick="acDownloadEverything()">⬇ Download everything</button>` : ''}
       </div>
-      ${acHeaderHtml(raCfg, visibleClasses)}
-      ${gridHtml}
+      <p style="font-size:.82rem; color:var(--ink-soft); margin:0 0 12px;">${exam.name} · ${period}. Pick a row to print or download that class &amp; section. To give one student a fresh copy (lost card), open <b>Students →</b> and print or download just that name. Numbers and rooms already given are never changed here.</p>
+      <div class="table-wrap"><table><thead><tr><th>Class — Section</th><th>Students</th><th>Status</th><th></th></tr></thead><tbody>${tr || '<tr><td colspan="4">No students found.</td></tr>'}</tbody></table></div>
+      <details style="margin-top:16px;"><summary style="cursor:pointer; font-weight:700;">Exam timings (printed on every card) — optional</summary><div id="acTimesBox"></div></details>
     `;
     acPaintTimes();
   }
@@ -352,10 +381,7 @@
   }
   function acPrintEverything(){
     const exam = examDefs.find(e => e.id === admitCardsExamId); if(!exam) return;
-    const raCfg = roomAllotConfigFor(admitCardsExamId);
-    const classes = acAllClasses();
-    const pairs = [];
-    classes.forEach(c => SECTIONS.forEach(sec => { if(students.some(s => s.className === c && s.section === sec && isActive(s))) pairs.push({ cls: c, sec }); }));
+    const pairs = acRows().map(r => ({ cls: r.c, sec: r.sec }));
     if(!pairs.length){ showToast('No students to print for.'); return; }
     acRunPrint(pairs);
   }

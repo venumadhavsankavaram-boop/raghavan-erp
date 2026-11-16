@@ -53,10 +53,11 @@
   window.acDownloadEverything = () => run(async () => {
     const exam = examDefs.find(e => e.id === admitCardsExamId); if(!exam) return;
     const pairs = [];
-    acAllClasses().forEach(c => SECTIONS.forEach(sec => { if(students.some(s => s.className === c && s.section === sec && isActive(s))) pairs.push({ cls: c, sec }); }));
+    acRows().forEach(r => pairs.push({ cls: r.c, sec: r.sec }));
     if(!pairs.length){ showToast('No students to print for.'); return; }
     await window.acPrintPairsGuarded(pairs);
   });
+  window.acDownloadPair = (cls, sec) => run(async () => { await window.acPrintPairsGuarded([{ cls, sec }]); });
   window.acDownloadRoster = (cls, sec) => run(async () => { await window.acPrintAll(cls, sec); });
   // One student (lost hall ticket): same rules as the Print button beside the name (a held card stays held).
   window.acDownloadStudent = (btn, cls, sec, sid) => {
