@@ -1411,12 +1411,9 @@ async function enforceRecordLock(req, res, resource) {
   const isAdmin = LOCK_OVERRIDE_ROLES.includes(req.authUser.role);
   if (resource === 'exam-results') {
     // Marks: a subject sheet is locked only AFTER the teacher presses "Final Submit" (see /api/marks-finalized).
-    // Marks entered before that feature went live keep the old rule (edit window of marksGraceHours, default 24h),
-    // so nothing already saved changes behaviour. A brand-new cell is always allowed (a late or missed mark).
+    // There is no time-based lock any more - not for new marks and not for marks entered earlier. A brand-new cell is always allowed (a late or missed mark).
     const fin = await marksIsFinalized(existing.exam_id, existing.class_name, existing.section, existing.subject);
-    const graceMinM = Math.round((await recordLockGraceHours()) * 60);
-    const legacyLocked = Number(existing.legacy) === 1 && Number(existing.age) >= graceMinM;
-    if (!fin && !legacyLocked) return false;
+    if (!fin) return false; // not Final Submitted: always editable (the old 24h timer no longer applies, to old marks too)
     if (!isAdmin) {
       res.status(403).json(fin
         ? { error: 'These marks are already Final Submitted, so they cannot be changed here. If a mark is wrong, use "Request mark correction" and the Principal will approve it.', code: 'MARKS_FINALIZED' }
@@ -7410,7 +7407,7 @@ async function teacherMayTeach(scope, item) {
 const TP_DEFAULTS = {
   features: { homework: true, studyMaterial: true, examPlans: true, onlineExams: true },
   approvals: { examPlans: 'review', onlineExams: 'review' },
-  windows: { attendanceBackDays: null, marksLockAfterRelease: false },
+  windows: { attendanceBackDays: null, marksLockAfterRelease: true },
   visibility: { parentContacts: true, healthDetails: true, classTeacherSeesAllMarks: false },
   language: 'en',
 };
@@ -7423,7 +7420,7 @@ function tpNormalize(b) {
   return {
     features: { homework: bool(f.homework, d.features.homework), studyMaterial: bool(f.studyMaterial, d.features.studyMaterial), examPlans: bool(f.examPlans, d.features.examPlans), onlineExams: bool(f.onlineExams, d.features.onlineExams) },
     approvals: { examPlans: a.examPlans === 'auto' ? 'auto' : 'review', onlineExams: a.onlineExams === 'auto' ? 'auto' : 'review' },
-    windows: { attendanceBackDays: Number.isFinite(back) ? back : null, marksLockAfterRelease: bool(w.marksLockAfterRelease, false) },
+    windows: { attendanceBackDays: Number.isFinite(back) ? back : null, marksLockAfterRelease: bool(w.marksLockAfterRelease, true) },
     visibility: { parentContacts: bool(v.parentContacts, true), healthDetails: bool(v.healthDetails, true), classTeacherSeesAllMarks: bool(v.classTeacherSeesAllMarks, false) },
     language: b.language === 'te' ? 'te' : 'en',
   };

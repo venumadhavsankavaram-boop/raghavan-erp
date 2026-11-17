@@ -20,7 +20,7 @@
   const DEFAULTS = {
     features: { homework: true, studyMaterial: true, examPlans: true, onlineExams: true },
     approvals: { examPlans: 'review', onlineExams: 'review' },
-    windows: { attendanceBackDays: null, marksLockAfterRelease: false },
+    windows: { attendanceBackDays: null, marksLockAfterRelease: true },
     visibility: { parentContacts: true, healthDetails: true, classTeacherSeesAllMarks: false },
     language: 'en',
   };

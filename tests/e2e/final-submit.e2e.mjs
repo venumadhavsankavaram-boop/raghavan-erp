@@ -1,9 +1,9 @@
 // Final Submit for marks against a running server (needs a mysql client + the demo teacher). Run: BASE=http://127.0.0.1:4042 node tests/e2e/final-submit.e2e.mjs
 import assert from 'node:assert/strict';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 const B='http://127.0.0.1:4042', J={'Content-Type':'application/json'};
 let n=0; const ok=m=>console.log('  ok   '+(++n)+'. '+m);
-const sqlx=q=>execSync(`mysql -uroot -S /tmp/mdb.sock erp -e "${q}"`).toString();
+const sqlx=q=>execFileSync('mysql',['-uroot','-S','/tmp/mdb.sock','erp','-e',q]).toString();
 const call=async(m,p,b,ck)=>{const r=await fetch(B+p,{method:m,headers:{...J,...(ck?{cookie:ck}:{}),'x-forwarded-for':'7.7.7.'+(1+n%200)},body:b?JSON.stringify(b):undefined});const t=await r.text();let d;try{d=JSON.parse(t)}catch(e){d=t}return{s:r.status,d,ck:(r.headers.getSetCookie?.()||[]).map(c=>c.split(';')[0]).join('; ')}};
 const login=async(u)=>call('POST','/api/login',{username:u,password:'Demo@123',audience:'staff'});
 const ad=await login('demo.admin'), te=await login('demo.teacher'); assert.equal(ad.s,200); assert.equal(te.s,200);
@@ -15,7 +15,8 @@ r=await call('PUT','/api/exam-results',mk('r1','s1','MATHS',42),te.ck); assert.e
 r=await call('POST','/api/exam-results',mk('r2','s2','MATHS',30),te.ck); assert.ok([200,201].includes(r.s)); ok('more marks can be added any time');
 // legacy row (entered before the feature went live) keeps the old 24h rule
 sqlx(`INSERT INTO exam_results (id,exam_id,student_id,subject,marks,absent,created_at) VALUES ('rl','${E}','s3','ENGLISH',50,0,NOW() - INTERVAL 40 DAY)`);
-r=await call('PUT','/api/exam-results',mk('rl','s3','ENGLISH',55),te.ck); assert.equal(r.s,403); assert.equal(r.d.code,'RECORD_LOCKED'); ok('a mark saved before this feature (older than 24h) stays locked exactly as before');
+// older marks (entered before this feature, years or days ago) follow the same rule: editable until Final Submit
+r=await call('PUT','/api/exam-results',mk('rl','s3','ENGLISH',55),te.ck); assert.equal(r.s,200,JSON.stringify(r)); ok('an older mark (40 days old) can still be fixed when its subject is not Final Submitted');
 // finalize
 r=await call('POST','/api/marks-finalized',{examId:E,className:'8th Class',section:'A',subject:'SCIENCE'},te.ck); assert.equal(r.s,403); ok('teacher cannot Final Submit a subject they do not teach');
 r=await call('POST','/api/marks-finalized',{examId:E,className:'8th Class',section:'A',subject:'MATHS',blanks:1},te.ck); assert.equal(r.s,201,JSON.stringify(r)); ok('teacher Final Submits MATHS');
@@ -34,5 +35,13 @@ r=await call('DELETE',`/api/marks-finalized?examId=${E}&className=8th%20Class&se
 r=await call('PUT','/api/exam-results',mk('r1','s1','MATHS',45),te.ck); assert.equal(r.s,200); ok('teacher can edit again after re-open');
 r=await call('POST','/api/marks-finalized',{examId:E,className:'8th Class',section:'A',subject:'MATHS'},te.ck); assert.equal(r.s,201);
 r=await call('GET','/api/exam-results',null,te.ck); assert.equal(r.s,200); ok('teacher can still read the marks');
-sqlx(`DELETE FROM exam_results WHERE exam_id='${E}'; DELETE FROM marks_finalized WHERE exam_id='${E}'`);
+// released to parents: locked for teachers (default ON)
+sqlx(`INSERT INTO exam_results (id,exam_id,student_id,subject,marks,absent) VALUES ('rr1','${E}','s2','ENGLISH',33,0)`);
+r=await call('PUT','/api/exam-results',mk('rr1','s2','ENGLISH',34),te.ck); assert.equal(r.s,200); ok('before release, ENGLISH (not Final Submitted) is editable');
+const rel=JSON.stringify({released:{[E+'|8th Class']:true}}).replace(/'/g,"''");
+sqlx(`DELETE FROM kv_store WHERE \`key\`='exam-releases'; INSERT INTO kv_store (\`key\`,value) VALUES ('exam-releases','${rel}')`);
+r=await call('PUT','/api/exam-results',mk('rr1','s2','ENGLISH',35),te.ck); assert.equal(r.s,403); assert.equal(r.d.code,'MARKS_LOCKED'); ok('once released to parents, the teacher cannot change a mark');
+r=await call('PUT','/api/exam-results',mk('rr1','s2','ENGLISH',36),ad.ck); assert.equal(r.s,200); ok('Admin can still correct after release');
+sqlx(`DELETE FROM kv_store WHERE \`key\`='exam-releases'`);
+sqlx(`DELETE FROM exam_results WHERE exam_id='${E}'; DELETE FROM marks_finalized WHERE exam_id='${E}'; DELETE FROM kv_store WHERE \`key\`='exam-releases'`);
 console.log(n+' checks passed');
