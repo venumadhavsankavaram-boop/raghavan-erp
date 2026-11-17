@@ -71,8 +71,12 @@ const SETTINGS_KEY = "finance-settings";
       throw new Error('SESSION_EXPIRED');
     }
     let msg = 'Request failed (' + res.status + ')';
-    try{ const body = await res.json(); if(body && body.error) msg = body.error; }catch(e){}
-    throw new Error(msg);
+    let code = null;
+    try{ const body = await res.json(); if(body && body.error) msg = body.error; if(body && body.code) code = body.code; }catch(e){}
+    const err = new Error(msg);
+    // A lock (Final Submitted / old 24h lock / released exam) is a deliberate rule, not a connection fault.
+    if(res.status === 403 && (code === 'MARKS_FINALIZED' || code === 'RECORD_LOCKED' || code === 'MARKS_LOCKED')){ err.locked = true; err.code = code; }
+    throw err;
   }
   async function syncArrayToApi(key, newArray){
     const apiPath = API_BACKED_KEYS[key];
@@ -86,6 +90,7 @@ const SETTINGS_KEY = "finance-settings";
       // sequential round trips. Deletes finish before creates/updates, as before.
       const oldById = new Map(oldArray.map(x => [x.id, x]));
       const deletes = [], writes = [], dupes = [];
+      let lockedErr = null;
       for(const item of oldArray){
         if(!newIds.has(item.id)) deletes.push(() => fetch(apiPath + '?id=' + encodeURIComponent(item.id), { method:'DELETE', headers: actorHeaders() }));
       }
@@ -112,7 +117,11 @@ const SETTINGS_KEY = "finance-settings";
         const worker = async () => {
           while(failed === null && next < jobs.length){
             const job = jobs[next++];
-            try{ await throwIfNotOk(await job()); }catch(e){ if(failed === null) failed = e; }
+            try{ await throwIfNotOk(await job()); }catch(e){
+              // Marks only: a locked cell must not stop the other cells from saving.
+              if(e && e.locked && key === 'exam-results'){ if(!lockedErr) lockedErr = e; continue; }
+              if(failed === null) failed = e;
+            }
           }
         };
         await Promise.all(Array.from({ length: Math.min(width, jobs.length) }, worker));
@@ -120,6 +129,7 @@ const SETTINGS_KEY = "finance-settings";
       };
       await runPool(deletes, 6);
       await runPool(writes, 6);
+      if(lockedErr) throw lockedErr;
       if(dupes.length){
         for(const d of dupes){ const ix = newArray.indexOf(d.item); if(ix >= 0) newArray.splice(ix, 1); }
         showToast("An identical entry (" + (dupes[0].number || 'same details') + ") was already saved a moment ago — the extra copy was NOT saved.");
@@ -136,6 +146,8 @@ const SETTINGS_KEY = "finance-settings";
     }catch(e){
       // Rule refusal: nothing is kept locally, the caller shows the reason (see saveKeySafely) and reloads.
       if(e && e.businessRule){ window.__saveRejected = e.message; return false; }
+      // Locked marks: nothing is "kept on this device" - the caller shows the reason and reloads the saved marks.
+      if(e && e.locked){ window.__saveLocked = e.message; return false; }
       if(e.message !== 'SESSION_EXPIRED') showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
       try{ localStorage.setItem(key, JSON.stringify(newArray)); }catch(e2){}
       if(e.message !== 'SESSION_EXPIRED') usingLocalFallback = true;

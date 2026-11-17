@@ -415,6 +415,7 @@ async function ensureSchema() {
   // Written / Internal split of `marks` (marks stays the TOTAL, so every report keeps working).
   await addColumnIfMissing('exam_results', 'written_marks DECIMAL(10,2) NULL');
   await addColumnIfMissing('exam_results', 'internal_marks DECIMAL(10,2) NULL');
+  try { await marksFinalCutoff(); } catch (e) { /* stored once; marks saved before this moment keep the old 24h rule */ }
   await sql`CREATE TABLE IF NOT EXISTS staff_attendance_records (
     id VARCHAR(191) PRIMARY KEY, staff_id VARCHAR(191), date VARCHAR(32), status TEXT,
     session VARCHAR(20), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -1394,8 +1395,9 @@ async function findLockedRow(resource, id, body) {
     rows = id ? await sql`SELECT id, status AS val, TIMESTAMPDIFF(MINUTE, created_at, NOW()) AS age FROM staff_attendance_records WHERE id = ${id}` : [];
     if (!rows.length && b.staffId && b.date) rows = await sql`SELECT id, status AS val, TIMESTAMPDIFF(MINUTE, created_at, NOW()) AS age FROM staff_attendance_records WHERE staff_id = ${b.staffId} AND date = ${b.date} AND session <=> ${sess} LIMIT 1`;
   } else {
-    rows = id ? await sql`SELECT id, marks AS val, TIMESTAMPDIFF(MINUTE, created_at, NOW()) AS age FROM exam_results WHERE id = ${id}` : [];
-    if (!rows.length && b.examId && b.studentId && b.subject) rows = await sql`SELECT id, marks AS val, TIMESTAMPDIFF(MINUTE, created_at, NOW()) AS age FROM exam_results WHERE exam_id = ${b.examId} AND student_id = ${b.studentId} AND subject = ${b.subject} LIMIT 1`;
+    const cut = (await marksFinalCutoff()) || '9999-12-31 00:00:00';
+    rows = id ? await sql`SELECT r.id, r.marks AS val, r.exam_id, r.subject, TIMESTAMPDIFF(MINUTE, r.created_at, NOW()) AS age, (r.created_at < ${cut}) AS legacy, st.class_name, st.section FROM exam_results r LEFT JOIN students st ON st.id = r.student_id WHERE r.id = ${id}` : [];
+    if (!rows.length && b.examId && b.studentId && b.subject) rows = await sql`SELECT r.id, r.marks AS val, r.exam_id, r.subject, TIMESTAMPDIFF(MINUTE, r.created_at, NOW()) AS age, (r.created_at < ${cut}) AS legacy, st.class_name, st.section FROM exam_results r LEFT JOIN students st ON st.id = r.student_id WHERE r.exam_id = ${b.examId} AND r.student_id = ${b.studentId} AND r.subject = ${b.subject} LIMIT 1`;
   }
   return rows.length ? rows[0] : null;
 }
@@ -1407,10 +1409,27 @@ async function enforceRecordLock(req, res, resource) {
   const existing = await findLockedRow(resource, id, req.method === 'DELETE' ? null : req.body);
   if (!existing) return false; // a brand-new entry in an empty slot is always allowed
   const isAdmin = LOCK_OVERRIDE_ROLES.includes(req.authUser.role);
-  const graceMin = resource === 'exam-results' ? Math.round((await recordLockGraceHours()) * 60) : Math.round(await attendanceGraceMinutes());
+  if (resource === 'exam-results') {
+    // Marks: a subject sheet is locked only AFTER the teacher presses "Final Submit" (see /api/marks-finalized).
+    // Marks entered before that feature went live keep the old rule (edit window of marksGraceHours, default 24h),
+    // so nothing already saved changes behaviour. A brand-new cell is always allowed (a late or missed mark).
+    const fin = await marksIsFinalized(existing.exam_id, existing.class_name, existing.section, existing.subject);
+    const graceMinM = Math.round((await recordLockGraceHours()) * 60);
+    const legacyLocked = Number(existing.legacy) === 1 && Number(existing.age) >= graceMinM;
+    if (!fin && !legacyLocked) return false;
+    if (!isAdmin) {
+      res.status(403).json(fin
+        ? { error: 'These marks are already Final Submitted, so they cannot be changed here. If a mark is wrong, use "Request mark correction" and the Principal will approve it.', code: 'MARKS_FINALIZED' }
+        : { error: 'This mark is locked. Only an Admin or Principal can correct it.', code: 'RECORD_LOCKED' });
+      return true;
+    }
+    const toM = req.method === 'DELETE' ? 'deleted' : String((req.body || {}).marks ?? '');
+    auditNote(req.authUser.name, req.authUser.role, 'CORRECTION', resource, existing.id, 'locked entry ' + (req.method === 'DELETE' ? 'deleted' : 'corrected') + ': ' + String(existing.val) + ' -> ' + toM, null);
+    return false;
+  }
+  const graceMin = Math.round(await attendanceGraceMinutes());
   if (!isAdmin && Number(existing.age) >= graceMin) {
-    const what = resource === 'exam-results' ? 'This mark is locked' : 'This attendance is already marked and locked (the edit time after marking is over)';
-    res.status(403).json({ error: what + '. Only an Admin or Principal can correct it.', code: 'RECORD_LOCKED' });
+    res.status(403).json({ error: 'This attendance is already marked and locked (the edit time after marking is over). Only an Admin or Principal can correct it.', code: 'RECORD_LOCKED' });
     return true;
   }
   if (isAdmin && Number(existing.age) >= graceMin) {
@@ -1418,6 +1437,48 @@ async function enforceRecordLock(req, res, resource) {
     auditNote(req.authUser.name, req.authUser.role, 'CORRECTION', resource, existing.id, 'locked entry ' + (req.method === 'DELETE' ? 'deleted' : 'corrected') + ': ' + String(existing.val) + ' -> ' + to, null);
   }
   return false;
+}
+
+// ---------- Final Submit for marks (per exam + class + section + subject) ----------
+// Teachers type marks with no time limit. Pressing "Final Submit" on a subject locks its entered marks for teachers
+// (Admin / Principal can still correct, audited). The cut-over time is stored once so older marks keep the old rule.
+var _finalCutoff = null;
+async function marksFinalCutoff() {
+  if (_finalCutoff) return _finalCutoff;
+  try {
+    const read = async () => {
+      const r = await sql`SELECT value FROM kv_store WHERE \`key\` = 'marks-final-submit-start'`;
+      let v = r.length ? r[0].value : null; if (typeof v === 'string') { try { v = JSON.parse(v); } catch (_) { v = null; } }
+      return v && v.at ? String(v.at) : null;
+    };
+    let at = await read();
+    if (!at) {
+      const t = (await sql`SELECT DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s') AS t`)[0].t;
+      await sql`INSERT INTO kv_store (\`key\`, value) VALUES ('marks-final-submit-start', ${JSON.stringify({ at: t })}) ON DUPLICATE KEY UPDATE value = value`;
+      at = await read();
+    }
+    if (at) _finalCutoff = at;
+    return at;
+  } catch (e) { return null; } // unknown -> every mark is treated as old (the previous behaviour)
+}
+var _finTableReady = null;
+function ensureFinalTable() {
+  if (!_finTableReady) {
+    _finTableReady = sql`CREATE TABLE IF NOT EXISTS marks_finalized (
+      id VARCHAR(64) PRIMARY KEY, exam_id VARCHAR(100) NOT NULL, class_name VARCHAR(50) NOT NULL, section VARCHAR(30) NOT NULL, subject VARCHAR(100) NOT NULL,
+      finalized_by TEXT, finalized_by_id VARCHAR(191), finalized_role VARCHAR(60), blanks INT NULL, finalized_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_marks_final (exam_id, class_name, section, subject)
+    )`.catch(err => { _finTableReady = null; throw err; });
+  }
+  return _finTableReady;
+}
+async function marksIsFinalized(examId, className, section, subject) {
+  if (!examId || className == null || section == null || !subject) return false;
+  try {
+    await ensureFinalTable();
+    const r = await sql`SELECT 1 AS x FROM marks_finalized WHERE exam_id = ${String(examId)} AND class_name = ${String(className)} AND section = ${String(section)} AND subject = ${String(subject)} LIMIT 1`;
+    return r.length > 0;
+  } catch (e) { return false; }
 }
 
 // ---------- Date lock on new entries ----------
@@ -8899,6 +8960,53 @@ const csvCell = v => {
   if (/^[=+\-@]/.test(t)) t = "'" + t;                       // a cell starting with = + - @ would run as a formula in Excel
   return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
 };
+// ---------- Final Submit endpoints ----------
+// GET  /api/marks-finalized                      -> list of finalized subject sheets (any staff login)
+// POST /api/marks-finalized {examId,className,section,subject,blanks}  -> teacher of that subject, Admin or Principal
+// DELETE /api/marks-finalized?examId=..&className=..&section=..&subject=..  -> Admin / Principal only (re-open), audited
+app.all('/api/marks-finalized', async (req, res) => {
+  try {
+    const u = req.authUser;
+    if (!u) return res.status(401).json({ error: 'Not logged in.' });
+    if (PARENT_LOGIN_ROLES.includes(u.role)) return res.status(403).json({ error: 'You do not have permission to access this.' });
+    await ensureFinalTable();
+    if (req.method === 'GET') {
+      const rows = await sql`SELECT exam_id, class_name, section, subject, finalized_by, finalized_at, blanks FROM marks_finalized`;
+      return res.status(200).json(rows.map(r => ({ examId: r.exam_id, className: r.class_name, section: r.section, subject: r.subject, by: r.finalized_by, at: r.finalized_at, blanks: r.blanks })));
+    }
+    if (req.method === 'POST') {
+      const b = req.body || {};
+      const examId = String(b.examId || ''), className = String(b.className || ''), section = String(b.section || ''), subject = String(b.subject || '');
+      if (!examId || !className || !section || !subject) return res.status(400).json({ error: 'Please choose the exam, class, section and subject.' });
+      if (u.role === 'Teacher') {
+        const scope = await getTeacherScope(u.id);
+        if (!(await teacherMayTeach(scope, { subject, className, section }))) return res.status(403).json({ error: 'You can only Final Submit a class and subject you are assigned to teach.' });
+      } else if (!LOCK_OVERRIDE_ROLES.includes(u.role)) {
+        return res.status(403).json({ error: 'Only the subject teacher, the Admin or the Principal can Final Submit marks.' });
+      }
+      const dup = await sql`SELECT 1 AS x FROM marks_finalized WHERE exam_id = ${examId} AND class_name = ${className} AND section = ${section} AND subject = ${subject} LIMIT 1`;
+      if (dup.length) return res.status(200).json({ ok: true, already: true });
+      const id = 'mf_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      const blanks = Number.isFinite(Number(b.blanks)) ? Math.max(0, Math.round(Number(b.blanks))) : null;
+      await sql`INSERT INTO marks_finalized (id, exam_id, class_name, section, subject, finalized_by, finalized_by_id, finalized_role, blanks)
+        VALUES (${id}, ${examId}, ${className}, ${section}, ${subject}, ${u.name}, ${String(u.id)}, ${u.role}, ${blanks})`;
+      auditNote(u.name, u.role, 'NOTE', 'marks-finalized', id, 'Final Submit: exam ' + examId + ', ' + className + '-' + section + ', ' + subject + (blanks ? ' (' + blanks + ' blank)' : ''), null);
+      return res.status(201).json({ ok: true });
+    }
+    if (req.method === 'DELETE') {
+      if (!LOCK_OVERRIDE_ROLES.includes(u.role)) return res.status(403).json({ error: 'Only the Admin or Principal can re-open a Final Submitted subject.' });
+      const q = req.query || {};
+      await sql`DELETE FROM marks_finalized WHERE exam_id = ${String(q.examId || '')} AND class_name = ${String(q.className || '')} AND section = ${String(q.section || '')} AND subject = ${String(q.subject || '')}`;
+      auditNote(u.name, u.role, 'NOTE', 'marks-finalized', null, 'Re-opened for entry: exam ' + q.examId + ', ' + q.className + '-' + q.section + ', ' + q.subject, null);
+      return res.status(200).json({ ok: true });
+    }
+    return res.status(405).json({ error: 'Method not allowed.' });
+  } catch (e) {
+    console.error('marks-finalized error:', e.message);
+    return res.status(500).json({ error: 'Could not complete that just now. Please try again.' });
+  }
+});
+
 // ---------- Correction requests ----------
 // A teacher who finds a wrong (locked) attendance entry or mark asks for a correction with a reason;
 // an Admin or Principal approves (the server applies it and writes the audit entry) or rejects it.

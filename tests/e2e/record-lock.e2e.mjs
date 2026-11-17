@@ -29,14 +29,14 @@ assert.ok([200,201].includes((await call('POST', '/api/staff-attendance', srec(S
 r = await call('PUT', '/api/staff-attendance', srec(S, 'Absent'), off.ck); assert.equal(r.s, 403); ok('staff attendance is locked for non-admin');
 assert.equal((await call('PUT', '/api/staff-attendance', srec(S, 'Absent'), ad.ck)).s, 200); ok('Admin can correct staff attendance');
 
-// marks: 24h correction window by default, then locked
+// marks: no time clock any more - a mark stays editable until its subject is Final Submitted (see final-submit.e2e.mjs)
 const M = 'zz_lock_mk_' + t, mk = v => ({ id: M, examId: 'zz_exam', studentId: 'zz_lock_stu', subject: 'Maths', marks: v, absent: false });
 r = await call('POST', '/api/exam-results', mk(40), off.ck); ok('office can enter a mark (status ' + r.s + ')');
 if (r.s === 200 || r.s === 201) {
-  assert.equal((await call('PUT', '/api/exam-results', mk(45), off.ck)).s, 200); ok('inside the correction window the entry can still be fixed');
+  assert.equal((await call('PUT', '/api/exam-results', mk(45), off.ck)).s, 200); ok('a new mark can still be fixed');
   assert.equal((await call('PUT', '/api/kv/record-lock-policy', { marksGraceHours: 0 }, ad.ck)).s, 200);
-  r = await call('PUT', '/api/exam-results', mk(50), off.ck); assert.equal(r.s, 403); ok('with the window set to 0 the mark is locked');
-  assert.equal((await call('PUT', '/api/exam-results', mk(50), ad.ck)).s, 200); ok('Admin can still correct it');
+  r = await call('PUT', '/api/exam-results', mk(50), off.ck); assert.equal(r.s, 200); ok('a new mark has no 24h timer, even with the old window set to 0');
+  assert.equal((await call('PUT', '/api/exam-results', mk(52), ad.ck)).s, 200); ok('Admin can edit it too');
   await call('PUT', '/api/kv/record-lock-policy', { marksGraceHours: 24 }, ad.ck);
 }
 

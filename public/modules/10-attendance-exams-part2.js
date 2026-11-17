@@ -181,6 +181,7 @@
     }
     window.scrollTo({top:0,left:0,behavior:'instant'});
     examCurrentClass = cls; examCurrentSection = sec;
+    marksFinalList = null; // re-read which subjects are Final Submitted (another teacher or the Admin may have changed it)
     examMarksView = 'sheet';
     renderExamBody();
   }
@@ -214,9 +215,83 @@
     return { open: sorted.filter(s => !s.date || s.date <= today), upcoming: sorted.filter(s => s.date && s.date > today) };
   }
 
+  /* --- Final Submit (per exam + class + section + subject) ---
+     Teachers type marks with no time limit (auto-save is unchanged). "Final Submit" locks that subject's
+     entered marks for teachers; blank cells can still be filled. Admin / Principal can re-open or correct. --- */
+  let marksFinalList = null;
+  async function marksFinalLoad(){
+    try{
+      const r = await fetch('/api/marks-finalized', { headers: actorHeaders() });
+      if(r.ok){ const d = await r.json(); marksFinalList = Array.isArray(d) ? d : []; }
+    }catch(e){}
+    if(marksFinalList === null) marksFinalList = [];
+  }
+  function marksFinalIs(subj){
+    return (marksFinalList || []).some(f => f.examId === examCurrentExamId && f.className === examCurrentClass && f.section === examCurrentSection && f.subject === subj);
+  }
+  function marksFinalInfo(subj){
+    return (marksFinalList || []).find(f => f.examId === examCurrentExamId && f.className === examCurrentClass && f.section === examCurrentSection && f.subject === subj) || null;
+  }
+  // A save was refused because the marks are locked: say so in plain words, show the marks as saved, and carry on.
+  async function marksHandleLocked(){
+    const msg = window.__saveLocked || 'These marks are locked.';
+    window.__saveLocked = null;
+    try{ examResults = await storageGet(EXAM_RESULTS_KEY, []); }catch(e){}
+    await marksFinalLoad();
+    const status = document.getElementById('marksAutoSaveStatus');
+    if(status) status.textContent = '🔒 Some marks are locked';
+    const hint = corrIsApprover() ? '' : (/Request mark correction/.test(msg) ? '' : ' If a mark is wrong, tap "Request mark correction".') + ' The sheet now shows the marks that are saved.';
+    await showConfirmDialog(msg + hint, { title: 'Marks are locked', okText: 'OK', cancelText: 'Close' });
+    const body = document.getElementById('examBody');
+    if(body && examMarksView === 'sheet') renderMarksSheet(body);
+  }
+  async function marksFinalSubmit(subjName){
+    await flushMarksAutoSaveIfPending();
+    await ensureDataLoaded('examResults', loadExamResultsData);
+    const exam = examDefs.find(e => e.id === examCurrentExamId);
+    if(!exam) return;
+    const list = students.filter(s => s.className===examCurrentClass && s.section===examCurrentSection && isActive(s));
+    const missing = list.filter(s => !examResults.find(r => r.examId===exam.id && r.studentId===s.id && r.subject===subjName));
+    const entered = list.length - missing.length;
+    let msg = 'Final Submit ' + subjName + ' for ' + examCurrentClass + ' — Section ' + examCurrentSection + ' (' + exam.name + ')?\n\n' + entered + ' of ' + list.length + ' students have a mark or are marked Absent.';
+    if(missing.length) msg += '\n⚠ ' + missing.length + ' student(s) have NO mark yet: ' + missing.slice(0, 6).map(s => s.firstName).join(', ') + (missing.length > 6 ? ' …' : '') + '.\nYou can still add their marks later, but the marks already entered cannot be changed.';
+    else msg += '\nAfter this, the entered marks cannot be changed by you.';
+    msg += '\nIf a mark is wrong later, you can ask the Principal for a correction.';
+    const ok = await showConfirmDialog(msg, { title: 'Final Submit — ' + subjName, okText: 'Final Submit', cancelText: 'Go back' });
+    if(!ok) return;
+    try{
+      const res = await fetch('/api/marks-finalized', { method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()},
+        body: JSON.stringify({ examId: exam.id, className: examCurrentClass, section: examCurrentSection, subject: subjName, blanks: missing.length }) });
+      await throwIfNotOk(res);
+    }catch(e){
+      if(e.message !== 'SESSION_EXPIRED') showToast('Could not Final Submit just now (' + e.message + '). Your marks are safe — please try again.');
+      return;
+    }
+    await marksFinalLoad();
+    showToast(subjName + ' Final Submitted.', 'burst');
+    const body = document.getElementById('examBody');
+    if(body && examMarksView === 'sheet') renderMarksSheet(body);
+  }
+  async function marksFinalReopen(subjName){
+    if(!await showConfirmDialog('Re-open ' + subjName + ' for ' + examCurrentClass + ' — Section ' + examCurrentSection + '? The teacher will be able to change marks again until it is Final Submitted again.', { title: 'Re-open for entry', okText: 'Re-open', cancelText: 'Cancel' })) return;
+    try{
+      const q = '?examId=' + encodeURIComponent(examCurrentExamId) + '&className=' + encodeURIComponent(examCurrentClass) + '&section=' + encodeURIComponent(examCurrentSection) + '&subject=' + encodeURIComponent(subjName);
+      await throwIfNotOk(await fetch('/api/marks-finalized' + q, { method:'DELETE', headers: actorHeaders() }));
+    }catch(e){ if(e.message !== 'SESSION_EXPIRED') showToast('Could not re-open (' + e.message + ').'); return; }
+    await marksFinalLoad();
+    showToast(subjName + ' re-opened for entry.');
+    const body = document.getElementById('examBody');
+    if(body && examMarksView === 'sheet') renderMarksSheet(body);
+  }
+
   function renderMarksSheet(body){
     const exam = examDefs.find(e => e.id === examCurrentExamId);
     if(!exam){ examMarksView = 'grid'; return renderExamBody(); }
+    if(marksFinalList === null){
+      body.innerHTML = '<div class="empty-state"><b>Loading marks sheet…</b></div>';
+      marksFinalLoad().then(() => { if(document.body.contains(body) && examMarksView === 'sheet') renderMarksSheet(body); });
+      return;
+    }
     let subjects = getExamSubjects(exam, examCurrentClass, examCurrentSection);
     // A Teacher only ever sees/enters marks for the subject(s) they're the
     // assigned Subject Teacher for in this class/section — never a
@@ -266,7 +341,13 @@
         <table><thead><tr>
           <th>Roll No</th>
           <th>Student</th>
-          ${subjects.map(s => `<th>${s.name}${s.date === todayIso ? ' <span class="pill" style="background:rgba(24,143,134,0.16); color:#0f6a63;">Today</span>' : ''} <span style="font-weight:400; color:var(--ink-soft);">(/${s.maxMarks}${s.date ? ' · '+s.date : ''})</span>${subjInternalMax(s) ? `<div style="font-weight:500; font-size:0.68rem; color:var(--ink-soft);">Written ${subjWrittenMax(s)} + Internal ${subjInternalMax(s)}</div>` : ''}</th>`).join('')}
+          ${subjects.map(s => `<th>${s.name}${s.date === todayIso ? ' <span class="pill" style="background:rgba(24,143,134,0.16); color:#0f6a63;">Today</span>' : ''} <span style="font-weight:400; color:var(--ink-soft);">(/${s.maxMarks}${s.date ? ' · '+s.date : ''})</span>${subjInternalMax(s) ? `<div style="font-weight:500; font-size:0.68rem; color:var(--ink-soft);">Written ${subjWrittenMax(s)} + Internal ${subjInternalMax(s)}</div>` : ''}${(() => {
+            const sn = escapeHtml(s.name).replace(/'/g, '&#39;');
+            if(marksFinalIs(s.name)){
+              return `<div style="margin-top:4px;"><span class="pill" style="background:rgba(24,143,134,0.15); color:#0f6a63;" title="Final Submitted — entered marks are locked">🔒 Final Submitted</span>${corrIsApprover() ? ` <button class="btn-edit-text" style="font-size:0.7rem;" onclick="marksFinalReopen('${sn}')">Re-open</button>` : ''}</div>`;
+            }
+            return canEnterMarks ? `<div style="margin-top:4px;"><button class="btn btn-primary btn-sm" style="font-size:0.72rem; padding:3px 9px;" onclick="marksFinalSubmit('${sn}')" title="Lock this subject once all marks are entered">✅ Final Submit</button></div>` : '';
+          })()}</th>`).join('')}
         </tr></thead>
         <tbody>
         ${list.map(s => `
@@ -277,9 +358,10 @@
               const r = getResult(s.id, subj.name);
               const isAbsent = r ? !!r.absent : false;
               const sub = subj.name.replace(/"/g,'&quot;');
-              const dis = (isAbsent||!canEnterMarks) ? 'disabled' : '';
+              const cellLocked = !!(r && marksFinalIs(subj.name) && !corrIsApprover());
+              const dis = (isAbsent||!canEnterMarks||cellLocked) ? 'disabled' : '';
               const absLbl = `<label style="font-size:0.68rem; color:var(--ink-soft); display:flex; align-items:center; gap:2px; cursor:pointer;" title="Mark absent for this subject">
-                    <input type="checkbox" class="marks-absent-check" data-student="${s.id}" data-subject="${sub}" ${isAbsent?'checked':''} ${!canEnterMarks?'disabled':''} onchange="onMarksAbsentToggle(this)"> Abs
+                    <input type="checkbox" class="marks-absent-check" data-student="${s.id}" data-subject="${sub}" ${isAbsent?'checked':''} ${(!canEnterMarks||cellLocked)?'disabled':''} onchange="onMarksAbsentToggle(this)"> Abs
                   </label>`;
               const im = subjInternalMax(subj);
               if(im){
@@ -389,6 +471,8 @@
       if(bad || dry) return;
       const absentBox = document.querySelector(`.marks-absent-check[data-student="${studentId}"][data-subject="${CSS.escape(subject)}"]`);
       const isAbsent = absentBox ? absentBox.checked : false;
+      // A locked (Final Submitted) cell is shown but never re-read: leave its saved mark exactly as it is.
+      if(!isAbsent && arr.every(i => i.disabled)) return;
       const split = arr.some(i => i.dataset.part === 'internal');
       const entered = Object.values(vals).filter(v => v !== null);
       const total = entered.length ? Math.round(entered.reduce((a, b) => a + b, 0) * 100) / 100 : null;
@@ -441,7 +525,9 @@
       if(!document.querySelector('.marks-input')) return;
       await ensureDataLoaded('examResults', loadExamResultsData);
       const { hasInvalid } = marksApplySheet(exam, false);
+      window.__saveLocked = null;
       const ok = await storageSet(EXAM_RESULTS_KEY, examResults);
+      if(ok === false && window.__saveLocked){ await marksHandleLocked(); return; }
       if(ok === false){
         // Server did not accept the save (network down, server restarting, session
         // ended). Keep the warning on screen, keep the leave-page guard, and retry
@@ -471,8 +557,10 @@
       return;
     }
     marksApplySheet(exam, false);
+    window.__saveLocked = null;
     const ok = await storageSet(EXAM_RESULTS_KEY, examResults);
     const status = document.getElementById('marksAutoSaveStatus');
+    if(ok === false && window.__saveLocked){ await marksHandleLocked(); return; }
     if(ok === false){
       if(status) status.textContent = '⚠️ NOT saved to the server yet — check your connection. Keep this page open; retrying…';
       window.addEventListener('beforeunload', marksBeforeUnloadGuard);
@@ -541,7 +629,9 @@
             if(im){ delete r.written; delete r.internal; }
           });
         });
-        await storageSet(EXAM_RESULTS_KEY, examResults);
+        window.__saveLocked = null;
+        const okX = await storageSet(EXAM_RESULTS_KEY, examResults);
+        if(okX === false && window.__saveLocked){ await marksHandleLocked(); e.target.value = ''; return; }
         renderMarksSheet(document.getElementById('examBody'));
         showToast(`${updated} mark(s) updated from Excel.${notFound ? ' '+notFound+' row(s) had no matching Admission No.' : ''}${badCells ? ' '+badCells+' value(s) were skipped because they are above the maximum or not a number.' : ''}`, 'ringdraw');
       }catch(err){
