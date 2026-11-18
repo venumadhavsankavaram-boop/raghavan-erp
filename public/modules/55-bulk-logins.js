@@ -128,7 +128,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         return '<tr style="border-top:1px solid #eef1f7;"><td style="padding:5px 8px;font-weight:600;">' + esc(r.name) + (r.admissionNo ? ' <span style="color:#7a859e;font-weight:400;">#' + esc(r.admissionNo) + '</span>' : '') + '</td><td>' + esc(adLabel(r)) + '</td><td style="color:' + L[1] + ';font-weight:700;">' + L[0] + '</td><td>' + (r.installed ? '✅' : '—') + '</td><td>' + (r.notifications ? '✅' : '—') + '</td><td>' + (r.hasLogin ? ago(r.lastSeen) : '-') + '</td></tr>'; }).join('')
         : '<tr><td colspan="6" style="padding:12px;' + (needPick ? 'color:#5b6784;">Pick a class above (or tap a class in the table) to see its students. Or use the red / yellow buttons to see who needs a nudge across the whole school.' : 'color:#0b7a5a;font-weight:700;">Nobody here. 🎉') + '</td></tr>') + '</table></div>' +
       '<div class="blk-hint" style="margin:8px 0 0;">“Installed”, “Last seen” and the exact first sign-in are recorded from the day this board was added; a parent shows as signed in earlier if they have already chosen their own password. They fill in as families open the app.</div>' +
-      '<div class="blk-btns"><button class="btn" id="adCopy">Copy chase list</button><button class="btn" id="adPrint">🖨️ Print chase list</button><button class="btn" id="adCsv">⬇️ Download (Excel)</button></div>';
+      '<div class="blk-btns"><button class="btn" id="adCopy">Copy chase list</button><button class="btn" id="adPrint">🖨️ Print chase list</button><button class="btn btn-primary" id="adFollow">📞 Follow-up sheet (class-wise)</button><button class="btn" id="adCsv">⬇️ Download (Excel)</button></div>';
     out(card, h);
     card.querySelector('#adCls').onchange = e => { AD.cls = e.target.value; AD.sec = ''; AD.filter = 'all'; adDraw(card); };
     card.querySelector('#adSec').onchange = e => { AD.sec = e.target.value; AD.filter = 'all'; adDraw(card); };
@@ -139,6 +139,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     card.querySelector('#adCopy').onclick = async () => { try{ await navigator.clipboard.writeText(txt); toast('List copied.'); }catch(e){ toast('Could not copy.'); } };
     card.querySelector('#adPrint').onclick = () => printHtml('<!doctype html><html><head><meta charset="utf-8"><title>Parents not signed in</title><style>body{font:14px Arial;padding:20px}h2{margin:0 0 4px}li{margin:3px 0}</style></head><body><h2>Parents who have not signed in</h2><div>' + esc(where) + ' · ' + new Date().toLocaleDateString('en-IN') + '</div><ol>' +
       chase.map(r => '<li>' + esc(r.name) + ' — ' + esc(adLabel(r)) + (r.hasLogin ? '' : ' <i>(no login yet)</i>') + '</li>').join('') + '</ol></body></html>');
+    const adF = card.querySelector('#adFollow'); if(adF) adF.onclick = () => { if(typeof lfOpen === 'function') lfOpen({ cls: AD.cls, sec: AD.sec, status: ['nologin', 'never'] }); else toast('Please refresh the page once.'); };
     card.querySelector('#adCsv').onclick = () => {
       const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
       const lines = [['Student', 'Admission no', 'Class', 'Section', 'Username', 'Login given', 'Signed in', 'Own password set', 'App installed', 'Notifications on', 'First sign-in', 'Last seen'].map(q).join(',')]

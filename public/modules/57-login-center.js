@@ -155,6 +155,7 @@
       <div class="lc-fl">Class</div><div id="lcCls">${chipRow(classes(), F.cls, 'lcSetCls', 'All')}</div>
       <div class="lc-fl">Section</div><div id="lcSec">${chipRow(sections(), F.sec, 'lcSetSec', 'All')}</div>
       <div class="lc-fl">Login</div><div class="lc-chips">${[['all', 'All'], ['has', 'Has a login'], ['none', 'No login yet'], ['never', 'Never signed in']].map(a => `<button class="lc-chip ${F.st === a[0] ? 'on' : ''}" onclick="lcSetSt('${a[0]}')">${a[1]}</button>`).join('')}</div></div>
+      <div style="display:flex;justify-content:flex-end;margin:4px 0 10px;"><button class="lc-btn pri" onclick="lcFollowUp()">📞 Print follow-up list</button></div>
       <div class="urx-resetreqs"></div><div class="lc-list" id="lcList"></div>`;
   }
 
@@ -204,7 +205,7 @@
     else SECTIONS.forEach(([k, title, hint]) => {
       const list = (H.problems[k] || []); if(!list.length) return;
       const total = H.summary[k];
-      h += `<div class="lh-sec"><h4>${title} <span class="lc-badge ${k === 'unused' ? 'new' : 'none'}">${total}</span></h4><div class="lc-sub" style="margin-bottom:4px;">${hint}</div>${list.slice(0, 50).map(x => itemHtml(k, x)).join('')}${list.length > 50 || total > list.length ? `<div class="lc-sub" style="padding-top:8px;">Showing the first ${Math.min(50, list.length)} of ${total}. Fix these and press “Check again”.</div>` : ''}</div>`;
+      h += `<div class="lh-sec"><h4>${title} <span class="lc-badge ${k === 'unused' ? 'new' : 'none'}">${total}</span>${(k === 'no_login' || k === 'unused') ? `<button class="lc-btn" style="float:right;" onclick="lfOpen({status:['${k === 'unused' ? 'never' : 'nologin'}']})">🖨️ Print list</button>` : ''}</h4><div class="lc-sub" style="margin-bottom:4px;">${hint}</div>${list.slice(0, 50).map(x => itemHtml(k, x)).join('')}${list.length > 50 || total > list.length ? `<div class="lc-sub" style="padding-top:8px;">Showing the first ${Math.min(50, list.length)} of ${total}. Fix these and press “Check again”.</div>` : ''}</div>`;
     });
     box.innerHTML = h;
   }
@@ -300,6 +301,7 @@
   window.lcSetSec = v => { F.sec = v; F.page = 1; const b = document.getElementById('lcSec'); if(b) b.innerHTML = chipRow(sections(), F.sec, 'lcSetSec', 'All'); paintList(); };
   window.lcSetSt = v => { F.st = v; F.page = 1; const f = document.getElementById('lcFind'); if(f){ const keep = document.getElementById('lcQ'); const val = keep ? keep.value : ''; f.innerHTML = findHtml(); const q = document.getElementById('lcQ'); if(q) q.value = val; } paintList(); if(typeof urxLoadResetRequests === 'function') urxLoadResetRequests(); };
   window.lcPage = d => { F.page += d; paintList(); const l = document.getElementById('lcList'); if(l) l.scrollIntoView({ block: 'start', behavior: 'smooth' }); };
+  window.lcFollowUp = () => { if(typeof lfOpen !== 'function'){ try{ showToast('Please refresh the page once.'); }catch(e){} return; } lfOpen({ cls: F.cls, sec: F.sec, status: F.st === 'none' ? ['nologin'] : F.st === 'never' ? ['never'] : ['nologin', 'never'] }); };
   window.lcViewAs = id => { try{ adminViewAs(id); }catch(e){ console.error(e); } };
   window.lcCreate = sid => { const s = active().find(x => x.id === sid); if(s) openUserModal(nm(s), 'Student', s.id, 'studentparent'); };
 

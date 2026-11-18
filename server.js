@@ -8086,7 +8086,7 @@ app.get('/api/student-logins/adoption', async (req, res) => {
       const own = !!Number(u.own_pw);
       return { studentId: k.id, name, className: k.class_name, section: k.section, admissionNo: k.admission_no || '', username: u.username, hasLogin: true,
         signedIn: !!u.first_login_at || own, signedInKnown: !!u.first_login_at, ownPassword: own, installed: !!u.installed_at, notifications: Number(u.devices) > 0,
-        firstLogin: iso(u.first_login_at), lastSeen: iso(u.last_seen_at || u.last_login_at) };
+        firstLogin: iso(u.first_login_at), lastSeen: iso(u.last_seen_at || u.last_login_at), created: iso(u.created_at) };
     });
     return res.status(200).json({ total: list.length, students: list, trackingSince: iso((await sql`SELECT MIN(first_login_at) AS m FROM users`)[0].m) });
   } catch (err) { console.error('adoption error:', err); return res.status(500).json({ error: 'Something went wrong on the server.' }); }
