@@ -7,7 +7,7 @@
 (function(){
   'use strict';
   const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
-  const num = v => { const m = String(v).match(/\d+/); return m ? parseInt(m[0], 10) : 999; };
+  const num = v => { try{ const i = CLASS_LEVELS.indexOf(v); if(i >= 0) return i; }catch(e){} const m = String(v).match(/\d+/); return m ? 100 + parseInt(m[0], 10) : 999; };
   const toast = m => { try{ showToast(m); }catch(e){} };
   const LABEL = { nologin: 'No login yet', never: 'Login given, never signed in', inactive: 'Not seen for a while', setup: 'Signed in, app / notifications not set up' };
   const SHORT = { nologin: 'No login', never: 'Never signed in', inactive: 'Inactive', setup: 'Not fully set up', ok: 'Active' };
