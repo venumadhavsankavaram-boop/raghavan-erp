@@ -1549,6 +1549,7 @@ async function enforceDateLockKv(req, res, key) {
 
 async function handleKv(req, res, key) {
   if (!key) return res.status(400).json({ error: 'Missing key.' });
+  if ((key === 'consol-report-config' || key === 'consol-final-marks') && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change the consolidated report settings and final marks.' });
   if (key === 'marks-late-entry' && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change this setting.' });
   if (key === 'date-lock-policy' && req.method === 'PUT' && (!req.authUser || req.authUser.role !== 'Admin')) return res.status(403).json({ error: 'Only the Admin can change this setting.' });
   if ((key === 'admit-card-policy' || key === 'admit-card-exceptions') && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change the admit card fee rules.' });
@@ -2371,6 +2372,8 @@ const KV_KEY_TO_MODULE = {
   'exam-types': ['exams', 'result'],
   'exam-groups': ['exams', 'result'],
   'consolidation-scale': ['exams', 'result'],
+  'consol-report-config': ['exams', 'result'],
+  'consol-final-marks': ['exams', 'result'],
   'exam-holidays': ['exams', 'result'],
   'report-templates': ['exams', 'result'],
   'staff-departments': ['staff'],
