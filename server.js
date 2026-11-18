@@ -1091,6 +1091,11 @@ async function initDb() {
   console.log('Connecting to database and ensuring schema...');
   await ensureSchema();
   try { await ensureDraftKeyTable(); } catch (e) { console.error('doc_draft_keys not created at startup (will retry on first use):', e.message); }
+  // Tables that are otherwise created on first use: create them now so a brand-new database (e.g. after a crash)
+  // has every table, and a backup restore can fill them.
+  for (const [nm, fn] of [['marks_finalized', () => ensureFinalTable()], ['online_payments', () => ensureOnlinePaymentsTable()], ['consent_history', () => consentEnsureTables()], ['upi_claims', () => upiEnsureTable()], ['correction_requests', () => ensureCorrectionTable()]]) {
+    try { await fn(); } catch (e) { console.error(nm + ' not created at startup (will retry on first use):', e.message); }
+  }
   console.log('Schema ready.');
   await migrateAccountingFromKv();
   await migrateHomeworkFromKv();
