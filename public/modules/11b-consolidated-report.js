@@ -57,25 +57,36 @@
     return crDefaultWeight(ex.name);
   }
   function crFindExam(re){ return crSortedExams().find(e => re.test(String(e.name || ''))); }
+  function crBaseName(n){ const m = String(n || '').match(/^\s*[A-Za-z]+\s*[-_]?\s*\d+/); return (m ? m[0] : String(n || '')).replace(/\s+/g, '').toUpperCase(); }
   function crStages(){
     if(crCfg.stages && crCfg.stages.length) return crCfg.stages;
     const fa2 = crFindExam(/^\s*FA\s*[-_ ]?\s*2/i), sa1 = crFindExam(/^\s*SA\s*[-_ ]?\s*1/i), fa3 = crFindExam(/^\s*FA\s*[-_ ]?\s*3/i);
     const list = [];
     const t1 = sa1 || fa2;
-    if(t1) list.push({ id: 'st_term1', name: 'Progress Report 1 — FA1, FA2 & SA1', upto: t1.id });
+    if(t1) list.push({ id: 'st_term1', name: sa1 ? 'Progress Report 1 — FA1, FA2 & SA1' : 'Progress Report 1 — up to ' + crBaseName(t1.name), upto: t1.id });
     if(fa3) list.push({ id: 'st_fa3', name: 'Progress Report 2 — After FA3 (all exams till date)', upto: fa3.id });
     list.push({ id: 'st_year', name: 'Year End — all exams', upto: 'ALL' });
     return list;
   }
   function crStage(id){ const all = crStages(); return all.find(s => s.id === id) || all[all.length - 1]; }
+  // An exam counts only once marks have been entered for it in this class/section (so exams not held yet never show as "pending").
+  let crCond = {};
+  function crConducted(ex, className, section){
+    const k = ex.id + '|' + className + '|' + section;
+    if(crCond[k] === undefined){
+      const ids = new Set(students.filter(s => s.className === className && s.section === section && isActive(s)).map(s => s.id));
+      crCond[k] = examResults.some(r => r.examId === ex.id && ids.has(r.studentId));
+    }
+    return crCond[k];
+  }
   function crStageExams(stage, className, section){
     const sorted = crSortedExams();
     let list = sorted;
     if(stage.upto && stage.upto !== 'ALL'){
-      const idx = sorted.findIndex(e => e.id === stage.upto);
-      if(idx >= 0) list = sorted.slice(0, idx + 1);
+      const last = sorted.find(e => e.id === stage.upto);
+      if(last) list = sorted.filter(e => (e.startDate || '') <= (last.startDate || ''));
     }
-    return list.filter(ex => classAllowedForExamType(ex.examType, className) && getExamSubjects(ex, className, section).length > 0 && crWeight(ex, className) > 0);
+    return list.filter(ex => classAllowedForExamType(ex.examType, className) && getExamSubjects(ex, className, section).length > 0 && crWeight(ex, className) > 0 && crConducted(ex, className, section));
   }
 
   /* ---------- calculation ---------- */
@@ -116,6 +127,7 @@
     return { s, exams, subjects, overall, grade: overall !== null ? gradeForConsolPct(overall) : '—', pendingCount, hasOverride: subjects.some(x => x.overridden) };
   }
   function crComputeClass(className, section, stage){
+    crCond = {};
     const rows = crRoster(className, section).map(s => crCompute(s, stage));
     const ranked = rows.filter(r => r.overall !== null).sort((a, b) => b.overall - a.overall);
     let rank = 0, prev = null;
@@ -125,12 +137,21 @@
 
   /* ---------- screen ---------- */
   function crPickDefaults(){
-    const withStudents = CLASS_LEVELS.filter(c => students.some(s => s.className === c && isActive(s)));
-    if(!crClass || !CLASS_LEVELS.includes(crClass)) crClass = withStudents[0] || CLASS_LEVELS[0];
-    const secs = SECTIONS.filter(sec => students.some(s => s.className === crClass && s.section === sec && isActive(s)));
-    if(!crSection || !SECTIONS.includes(crSection)) crSection = (secs[0] || SECTIONS[0]);
-    const st = crStages();
-    if(!crStageId || !st.some(x => x.id === crStageId)) crStageId = st[st.length - 1].id;
+    if(!crClass || !CLASS_LEVELS.includes(crClass)){
+      const st = crStages(); const yr = st[st.length - 1];
+      let found = null;
+      for(const c of CLASS_LEVELS){ for(const sec of SECTIONS){
+        if(students.some(s => s.className === c && s.section === sec && isActive(s)) && crStageExams(yr, c, sec).length){ found = [c, sec]; break; } }
+        if(found) break; }
+      if(found){ crClass = found[0]; crSection = found[1]; }
+      else { const withStudents = CLASS_LEVELS.filter(c => students.some(s => s.className === c && isActive(s))); crClass = withStudents[0] || CLASS_LEVELS[0]; }
+    }
+    if(!crSection || !SECTIONS.includes(crSection)){
+      const secs = SECTIONS.filter(sec => students.some(s => s.className === crClass && s.section === sec && isActive(s)));
+      crSection = (secs[0] || SECTIONS[0]);
+    }
+    const st2 = crStages();
+    if(!crStageId || !st2.some(x => x.id === crStageId)) crStageId = st2[st2.length - 1].id;
   }
   window.crRender = () => crRenderInto(document.getElementById('resultBody'));
   async function renderConsolidatedTab(body){
@@ -141,6 +162,7 @@
   }
   function crRenderInto(body){
     if(!body) return;
+    crCond = {};
     crPickDefaults();
     const stages = crStages();
     const tab = (k, label) => `<button class="${crSub === k ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'}" onclick="crSwitch('${k}')">${label}</button>`;
@@ -320,11 +342,12 @@
   };
 
   /* ---------- weightage & stages ---------- */
+  function crExamAppliesTo(ex, cls){ return Object.keys(ex.classSubjects || {}).some(k => k.split('||')[0] === cls && (ex.classSubjects[k] || []).length > 0); }
   function crViewWeights(c){
     const edit = canEditCr();
     const scope = crWeightScope;
     const cls = scope === '__all__' ? null : scope;
-    const exams = crSortedExams().filter(ex => !cls || classAllowedForExamType(ex.examType, cls));
+    const exams = crSortedExams().filter(ex => cls ? (classAllowedForExamType(ex.examType, cls) && crExamAppliesTo(ex, cls)) : true);
     const eff = ex => {
       if(cls){ const m = crCfg.weights.byClass[cls]; if(m && m[ex.id] !== undefined && m[ex.id] !== '') return Number(m[ex.id]) || 0; }
       if(crCfg.weights.all && crCfg.weights.all[ex.id] !== undefined && crCfg.weights.all[ex.id] !== '') return Number(crCfg.weights.all[ex.id]) || 0;
@@ -342,7 +365,7 @@
         </div>
         ${exams.length ? `<div class="table-wrap" style="max-width:640px;"><table><thead><tr><th>Exam</th><th>Date</th><th>Weight %</th></tr></thead><tbody>
           ${exams.map(ex => `<tr><td class="name-cell">${esc(ex.name)}</td><td>${esc(ex.startDate || '—')}</td><td><input type="number" class="input cr-w" data-eid="${ex.id}" min="0" max="100" step="0.5" style="width:90px;" value="${eff(ex)}" oninput="crUpdateTotal()" ${edit ? '' : 'disabled'}></td></tr>`).join('')}
-          <tr><td colspan="2"><b>Total of all exams listed</b></td><td><b id="crWTotal">—</b></td></tr>
+          <tr><td colspan="2"><b>${cls ? 'Total for ' + esc(cls) : 'Total of all exams listed'}</b></td><td><b id="crWTotal">—</b></td></tr>
         </tbody></table></div>
         <div id="crWWarn" style="font-size:0.8rem; margin-top:8px;"></div>` : `<div class="empty-state"><b>No exams yet</b>Create exams under Exams first.</div>`}
         ${scope !== '__all__' && crCfg.weights.byClass[scope] ? `<p style="font-size:0.78rem; color:var(--ink-soft);">${esc(scope)} has its own weightage.</p>` : ''}
@@ -366,10 +389,24 @@
   }
   window.crUpdateTotal = function(){
     const t = document.getElementById('crWTotal'); if(!t) return;
-    let total = 0; document.querySelectorAll('.cr-w').forEach(i => { total += Number(i.value) || 0; });
-    t.textContent = r1(total) + '%';
+    const map = {}; let total = 0;
+    document.querySelectorAll('.cr-w').forEach(i => { map[i.dataset.eid] = Number(i.value) || 0; total += Number(i.value) || 0; });
     const w = document.getElementById('crWWarn');
-    if(w) w.innerHTML = Math.abs(total - 100) < 0.01 ? '<span style="color:#0f6a63;">✓ Adds up to 100%.</span>' : `<span style="color:#8a6a1f;">Total is ${r1(total)}%, not 100%. This is allowed (results are still shown out of 100), but most schools use a total of 100%.</span>`;
+    if(crWeightScope !== '__all__'){
+      t.textContent = r1(total) + '%';
+      if(w) w.innerHTML = Math.abs(total - 100) < 0.01 ? '<span style="color:#0f6a63;">✓ Adds up to 100%.</span>' : `<span style="color:#8a6a1f;">Total is ${r1(total)}%, not 100%. This is allowed (results are still shown out of 100), but most schools use a total of 100%.</span>`;
+      return;
+    }
+    // All-classes view: check each class on its own (exams for other class groups, e.g. PRIMARY vs HIGH, are not mixed).
+    const bad = [];
+    CLASS_LEVELS.forEach(cl => {
+      const ex = crSortedExams().filter(e => classAllowedForExamType(e.examType, cl) && crExamAppliesTo(e, cl));
+      if(!ex.length) return;
+      const sum = ex.reduce((a, e) => a + (map[e.id] !== undefined ? map[e.id] : crWeight(e, cl)), 0);
+      if(Math.abs(sum - 100) >= 0.01) bad.push(cl + ' (' + r1(sum) + '%)');
+    });
+    t.textContent = '—';
+    if(w) w.innerHTML = bad.length ? `<span style="color:#8a6a1f;">These classes do not add up to 100%: ${esc(bad.join(', '))}. Fine while exams are still being created; pick a class above to see its own total.</span>` : '<span style="color:#0f6a63;">✓ Every class adds up to 100%.</span>';
   };
   window.crSaveWeights = async function(){
     if(!canEditCr()){ showToast('Only the Admin or Principal can change this.'); return; }
