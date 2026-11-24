@@ -50,11 +50,25 @@
     S = v; sAt = Date.now();
   }
 
+  /* Staff roles other than Admin/Principal (Accountant, Office Assistant, Staff, custom roles) use the Admin & Office guide, but only the
+     topics for modules they can open. Set-up, logins, permissions and safety topics stay with the Admin/Principal, so nobody learns what the
+     Admin controls. Demo and Admin/Principal see everything. */
+  const TOPIC_MODULES = { students: ['admissions'], fees: ['managefee'], upi: ['managefee'], accounting: ['accounting'], attendance: ['attendance'], exams: ['exams', 'result'],
+    classwork: ['subjects', 'timetable', 'syllabus'], staff: ['staff'], payroll: ['staff_payroll'], payacct: ['accounting'], leavestmt: ['staff'],
+    comms: ['announcements', 'noticeboard', 'inbox'], reports: ['reports'], yearend: ['promotransfer'], facilities: ['inventory', 'transport', 'library', 'hostel'],
+    website: ['websitegallery', 'websiteinquiries'] };
+  function roleSeesTopic(aud, id) {
+    if (aud !== 'admin' || audOf() !== 'admin' || demo || isMgr()) return true;
+    if (id === 'trouble') return true;
+    const mods = TOPIC_MODULES[id]; if (!mods) return false;
+    return mods.some(m => { try { return typeof canDo === 'function' ? !!canDo(m, 'view') : false; } catch (e) { return false; } });
+  }
+
   /* ---------- topics ---------- */
   function topicsFor(aud) {
     if (aud === 'demo') return C.demo.slice();
     const hid = new Set(S.hidden);
-    const base = (C[aud] || []).filter(t => !hid.has(aud + ':' + t.id));
+    const base = (C[aud] || []).filter(t => !hid.has(aud + ':' + t.id) && roleSeesTopic(aud, t.id));
     const mine = S.custom.filter(c => c.aud === aud).map(c => ({
       id: c.id, ic: c.ic, t: [c.en || c.te, c.te || c.en], k: '', custom: true, tip: (c.tipEn || c.tipTe) ? [c.tipEn || c.tipTe, c.tipTe || c.tipEn] : null,
       s: (c.stepsEn.length ? c.stepsEn : c.stepsTe).map((_, i) => [c.stepsEn[i] || c.stepsTe[i] || '', c.stepsTe[i] || c.stepsEn[i] || ''])
@@ -295,10 +309,20 @@
   /* ---------- first-login tour ---------- */
   let tourRun = null;
   const uid = () => { const u = me(); return u ? String(u.id || u.username || u.name || 'u') : 'u'; };
-  const tourKey = () => 'hcTour:' + uid() + ':' + audOf() + (demo ? ':demo' : '');
-  function tourCards() { const a = audOf(); return (demo ? C.tour.demo : []).concat(C.tour[a] || []); }
+  const tourKey = () => demo ? 'hcTour:demo' : 'hcTour:' + uid() + ':' + audOf();   // the demo shows its welcome once per browser, not once per demo login
+  function tourCards() {
+    const a = audOf(); let own = C.tour[a] || [];
+    if (a === 'admin' && !demo && !isMgr()) own = own.filter(c => c[1][0] !== 'You decide what they see' && (c[1][0] !== 'Fees and UPI' || roleSeesTopic('admin', 'fees')));
+    return (demo ? C.tour.demo : []).concat(own);
+  }
+  /* First login shows ONE short card ("Help is in the menu"); the full walkthrough is only a button inside Help ("Take the tour"). */
+  function introCards() {
+    const own = tourCards(), a = audOf(), mine = C.tour[a] || [];
+    const help = mine.length ? mine[mine.length - 1] : null;
+    return (demo ? C.tour.demo : []).concat(help ? [help] : []);
+  }
   function startTour(force) {
-    const cards = tourCards(); if (!cards.length || $('hcTour')) return; css();
+    const cards = force ? tourCards() : introCards(); if (!cards.length || $('hcTour')) return; css();
     tourRun = { i: 0, cards }; paintTour();
   }
   function paintTour() {
