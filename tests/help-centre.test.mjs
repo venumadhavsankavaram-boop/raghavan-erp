@@ -10,14 +10,14 @@ const rd = f => fs.readFileSync(path.join(root, f), 'utf8');
 const m82 = rd('public/modules/82-help-content.js'), m83 = rd('public/modules/83-help-centre.js'), idx = rd('public/index.html'), srv = rd('server.js');
 const TE = /[ఀ-౿]/;
 
-function boot(user) {
+function boot(user, extra) {
   const store = {};
   const el = () => ({ style: {}, classList: { add() {}, remove() {}, toggle() {} }, addEventListener() {}, setAttribute() {}, appendChild() {}, remove() {}, querySelectorAll: () => [] });
   const ctx = vm.createContext({
     console, Date, Math, Number, String, Array, Object, JSON, Set, Promise, setTimeout: () => 0, setInterval: () => 0, OBJECT_BACKED_KEYS: {},
     currentUser: user, localStorage: { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); } },
     document: { addEventListener() {}, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], head: { appendChild() {} }, body: { appendChild() {} }, createElement: el, title: 'Test School — ERP' },
-    fetch: async () => ({ ok: false, json: async () => ({}) }),
+    fetch: async () => ({ ok: false, json: async () => ({}) }), ...(extra || {}),
   });
   ctx.window = ctx; ctx.addEventListener = () => {};
   vm.runInContext(m82, ctx); vm.runInContext(m83, ctx);
@@ -103,4 +103,23 @@ test('wiring: both modules are loaded, content first', () => {
   const a = idx.indexOf('modules/82-help-content.js'), b = idx.indexOf('modules/83-help-centre.js');
   assert.ok(a > 0 && b > a);
 });
+test('staff only see Help for what their role can open (UPI follows the server rule; set-up steps stay with Admin)', () => {
+  const views = { 'Office Assistant': ['admissions', 'managefee'], Accountant: ['dashboard', 'admissions', 'managefee', 'accounting', 'reports'] };
+  const mk = role => boot({ role, id: 'u1' }, { canDo: (k, a) => (views[role] || []).includes(k), findRoleOverride: () => null }).__hc;
+  const oa = mk('Office Assistant'); oa.setState({});
+  const ids = h => h.topicsFor('admin').map(t => t.id);
+  assert.ok(ids(oa).includes('fees') && ids(oa).includes('students'), 'office assistant keeps the fee and student guides');
+  assert.ok(!ids(oa).includes('upi'), 'office assistant never sees UPI help');
+  assert.ok(!ids(oa).includes('setup') && !ids(oa).includes('logins') && !ids(oa).includes('safety') && !ids(oa).includes('payroll') && !ids(oa).includes('accounting'));
+  const fees = oa.topicsFor('admin').find(t => t.id === 'fees');
+  assert.ok(!fees.s.some(x => /Fee Structure \(under Configuration\)/.test(x[0])), 'set-up step hidden when Fee Structure is not theirs');
+  const ac = mk('Accountant'); ac.setState({});
+  const upi = ac.topicsFor('admin').find(t => t.id === 'upi');
+  assert.ok(upi, 'accountant can open UPI Payments so sees the guide');
+  assert.ok(!upi.s.some(x => /Settings and charge|UPI ID exactly|Let parents pay by UPI/.test(x[0])), 'but never the Admin-only settings steps');
+  assert.ok(upi.s.some(x => /To verify/.test(x[0])) && /check and approve/.test(upi.t[0]));
+  const ad = boot({ role: 'Admin', id: 'a1' }).__hc; ad.setState({});
+  const full = ad.topicsFor('admin').find(t => t.id === 'upi'); assert.ok(full.s.some(x => /Settings and charge/.test(x[0])) && /set up and approve/.test(full.t[0]));
+});
+
 done();

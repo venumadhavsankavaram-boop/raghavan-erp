@@ -51,24 +51,61 @@
   }
 
   /* Staff roles other than Admin/Principal (Accountant, Office Assistant, Staff, custom roles) use the Admin & Office guide, but only the
-     topics for modules they can open. Set-up, logins, permissions and safety topics stay with the Admin/Principal, so nobody learns what the
-     Admin controls. Demo and Admin/Principal see everything. */
-  const TOPIC_MODULES = { students: ['admissions'], fees: ['managefee'], upi: ['managefee'], accounting: ['accounting'], attendance: ['attendance'], exams: ['exams', 'result'],
-    classwork: ['subjects', 'timetable', 'syllabus'], staff: ['staff'], payroll: ['staff_payroll'], payacct: ['accounting'], leavestmt: ['staff'],
-    comms: ['announcements', 'noticeboard', 'inbox'], reports: ['reports'], yearend: ['promotransfer'], facilities: ['inventory', 'transport', 'library', 'hostel'],
-    website: ['websitegallery', 'websiteinquiries'] };
+     topics, and the steps inside them, for what they can really open. Each topic is tied to the SAME permission that opens that screen
+     (sub-modules included, e.g. Fee Collection, not just "Manage Fee"). Set-up, logins, permissions and safety topics stay with the
+     Admin/Principal, so nobody learns what the Admin controls. UPI follows the server rule: only Admin, Principal and Accountant open
+     UPI Payments, and only Admin/Principal change its settings. Demo and Admin/Principal see everything. */
+  const subView = (k, p) => {
+    try {
+      const ov = typeof findRoleOverride === 'function' ? findRoleOverride(role()) : null;
+      if (ov && ov.permissions && ov.permissions[k] !== undefined) return !!canDo(k, 'view');
+      return !!canDo(p, 'view');
+    } catch (e) { return false; }
+  };
+  const can = (...mods) => mods.some(m => { try { return typeof canDo === 'function' ? !!canDo(m, 'view') : false; } catch (e) { return false; } });
+  const UPI_OPEN_ROLES = ['Admin', 'Principal', 'Accountant'];
+  const TOPIC_RULES = {
+    students: () => can('admissions'),
+    fees: () => ['managefee_collection', 'managefee_refunds', 'managefee_reports', 'managefee_discounts', 'managefee_defaulters'].some(k => subView(k, 'managefee')),
+    upi: () => UPI_OPEN_ROLES.includes(role()) && can('managefee'),
+    accounting: () => can('accounting'),
+    attendance: () => can('attendance'),
+    exams: () => can('exams', 'result'),
+    classwork: () => can('subjects', 'timetable', 'syllabus'),
+    staff: () => can('staff'),
+    payroll: () => subView('staff_payroll', 'staff'),
+    payacct: () => subView('staff_payroll', 'staff') && can('accounting'),
+    leavestmt: () => can('staff'),
+    comms: () => can('announcements', 'noticeboard', 'inbox'),
+    reports: () => can('reports'),
+    yearend: () => can('promotransfer'),
+    facilities: () => can('inventory', 'transport', 'library', 'hostel'),
+    website: () => can('websitegallery', 'websiteinquiries')
+  };
   function roleSeesTopic(aud, id) {
     if (aud !== 'admin' || audOf() !== 'admin' || demo || isMgr()) return true;
     if (id === 'trouble') return true;
-    const mods = TOPIC_MODULES[id]; if (!mods) return false;
-    return mods.some(m => { try { return typeof canDo === 'function' ? !!canDo(m, 'view') : false; } catch (e) { return false; } });
+    const rule = TOPIC_RULES[id]; if (!rule) return false;   // anything not listed (set-up, logins, safety, portals...) is Admin/Principal only
+    try { return !!rule(); } catch (e) { return false; }
+  }
+  /* A step can carry a third value: 'mgr' = Admin/Principal only, or a permission key = only if the person can open that part. */
+  function stepShown(st) {
+    if (!st[2] || isMgr() || demo || audOf() !== 'admin') return true;
+    if (st[2] === 'mgr') return false;
+    return subView(st[2], String(st[2]).split('_')[0]);
+  }
+  function forRole(t, aud) {
+    if (aud !== 'admin' || audOf() !== 'admin' || demo || isMgr() || t.custom) return t;
+    const o = Object.assign({}, t, { s: t.s.filter(stepShown) });
+    if (t.id === 'upi') o.t = ['UPI payments: check and approve', 'UPI చెల్లింపులు: సరిచూసి ఆమోదించడం'];
+    return o;
   }
 
   /* ---------- topics ---------- */
   function topicsFor(aud) {
     if (aud === 'demo') return C.demo.slice();
     const hid = new Set(S.hidden);
-    const base = (C[aud] || []).filter(t => !hid.has(aud + ':' + t.id) && roleSeesTopic(aud, t.id));
+    const base = (C[aud] || []).filter(t => !hid.has(aud + ':' + t.id) && roleSeesTopic(aud, t.id)).map(t => forRole(t, aud));
     const mine = S.custom.filter(c => c.aud === aud).map(c => ({
       id: c.id, ic: c.ic, t: [c.en || c.te, c.te || c.en], k: '', custom: true, tip: (c.tipEn || c.tipTe) ? [c.tipEn || c.tipTe, c.tipTe || c.tipEn] : null,
       s: (c.stepsEn.length ? c.stepsEn : c.stepsTe).map((_, i) => [c.stepsEn[i] || c.stepsTe[i] || '', c.stepsTe[i] || c.stepsEn[i] || ''])
@@ -312,7 +349,7 @@
   const tourKey = () => demo ? 'hcTour:demo' : 'hcTour:' + uid() + ':' + audOf();   // the demo shows its welcome once per browser, not once per demo login
   function tourCards() {
     const a = audOf(); let own = C.tour[a] || [];
-    if (a === 'admin' && !demo && !isMgr()) own = own.filter(c => c[1][0] !== 'You decide what they see' && (c[1][0] !== 'Fees and UPI' || roleSeesTopic('admin', 'fees')));
+    if (a === 'admin' && !demo && !isMgr()) own = own.filter(c => c[1][0] !== 'You decide what they see' && (c[1][0] !== 'Fees and UPI' || roleSeesTopic('admin', 'upi')));
     return (demo ? C.tour.demo : []).concat(own);
   }
   /* First login shows ONE short card ("Help is in the menu"); the full walkthrough is only a button inside Help ("Take the tour"). */
