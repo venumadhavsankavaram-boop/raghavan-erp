@@ -397,20 +397,66 @@ Email: {{email}}` }
       </section>`;
   }
 
-  /* ---- Notices (read-only list; notices are still written in Communication → Notice Board) ---- */
+  /* ---- Public notices: written, edited and taken down here. Messages to parents and staff are in Messages. ---- */
+  let wnEditing = '';
+  const wnCan = () => typeof canPublishToWebsite === 'function' && canPublishToWebsite();
   function paintNotices(){
     const pane = byId('webPaneNotices'); if(!pane) return;
-    const list = websiteNotices();
-    const canBoard = allowedViews().includes('noticeboard');
+    const list = websiteNotices().slice().sort((a, b) => String(b.id).localeCompare(String(a.id)));
+    const typeOpts = (typeof noticeTypes !== 'undefined' ? noticeTypes : []).map(t => `<option value="${E(t.name)}">${E(t.icon)} ${E(t.name)}</option>`).join('');
     pane.innerHTML = `<section class="sf-card cm-post">
-      <h3 class="cm-h">📌 Notices on the website <span class="iv-count">${list.length}</span></h3>
-      <p class="cm-sub">These public notices are shown on the website now. Notices are written and taken down in the <b>Notice Board</b> (under Communication), because one notice can also go to parents and staff.</p>
-      ${canBoard ? `<button type="button" class="sf-btn sf-btn--primary" onclick="switchView('noticeboard')">Open the Notice Board</button>` : ''}
-      ${list.length ? `<div class="table-wrap" style="overflow-x:auto;margin-top:12px;"><table class="iv-table"><thead><tr><th>Date</th><th>Notice</th><th>Posted by</th></tr></thead><tbody>
-        ${list.slice(0, 50).map(n => `<tr><td>${E(n.sentDate || '')}</td><td><b>${E(n.title || '')}</b></td><td>${E(n.sentBy || '')}</td></tr>`).join('')}
-      </tbody></table></div>` : '<div class="empty-state" style="margin-top:12px;"><b>No public notices right now</b>Post one from the Notice Board and tick Public website.</div>'}
+      <h3 class="cm-h">📌 Public notices <span class="iv-count">${list.length}</span></h3>
+      <p class="cm-sub">Anyone visiting the school website can read these. Keep them suitable for the public. To message parents or staff, use <b>Messages</b>; that never goes on the website.</p>
+      ${wnCan() ? `<div class="form-grid" style="margin-top:8px;">
+        <div class="f-field"><label>Kind of notice</label><select id="wnType">${typeOpts}</select></div>
+        <div class="f-field full"><label>Title <span class="required-star">*</span></label><input type="text" id="wnTitle" placeholder="e.g. Admissions open for 2027"></div>
+        <div class="f-field full"><label>Notice <span class="required-star">*</span></label><textarea id="wnBody" rows="4" placeholder="Type the notice for the website..."></textarea></div>
+        <div class="f-field full"><label>Read-more link <small>(optional)</small></label><input type="text" id="wnLink" inputmode="url" placeholder="https://..."></div>
+      </div>
+      <button type="button" class="sf-btn sf-btn--primary sf-btn--lg" onclick="wnPost()">🌐 Publish on the website</button>` : `<p class="cm-sub"><b>Only an Admin or the Principal can publish to the website.</b></p>`}
+    </section>
+    <section class="sf-card cm-post">
+      <h3 class="cm-h">Showing on the website now</h3>
+      ${list.length ? `<div class="cm-feed">${list.map(n => wnEditing === n.id ? `<article class="cm-note">
+          <div class="f-field full" style="margin-bottom:10px;"><label>Title</label><input type="text" id="wnEditTitle" value="${E(n.title)}"></div>
+          <div class="f-field full" style="margin-bottom:10px;"><label>Notice</label><textarea id="wnEditBody" rows="4">${E(n.body)}</textarea></div>
+          <div class="f-field full" style="margin-bottom:10px;"><label>Read-more link <small>(optional)</small></label><input type="text" id="wnEditLink" value="${E(n.link || '')}"></div>
+          <div class="cm-actions"><button type="button" class="sf-btn sf-btn--link" onclick="wnEdit('')">Cancel</button><button type="button" class="sf-btn sf-btn--primary" onclick="wnSave('${E(n.id)}')">Save changes</button></div></article>`
+        : `<article class="cm-note"><div class="cm-note-head"><span class="cm-type">${E(n.type || 'Notice')}</span><span class="cm-date">${E(n.sentDate || '')}</span></div>
+          <h4>${E(n.title || '')}</h4><p class="cm-body">${E(n.body || '')}</p>
+          <div class="cm-note-foot"><span class="cm-by">by ${E(n.sentBy || '')}</span>${wnCan() ? `<span class="cm-actions"><button type="button" class="sf-btn sf-btn--soft" onclick="wnEdit('${E(n.id)}')">Edit</button><button type="button" class="sf-btn sf-btn--danger" onclick="wnDown('${E(n.id)}')">Take down</button></span>` : ''}</div></article>`).join('')}</div>`
+      : '<div class="empty-state"><b>No public notices right now</b>Write one above and press Publish.</div>'}
     </section>`;
   }
+  window.wnEdit = id => { wnEditing = id; paintNotices(); };
+  async function wnSave2(){ await storageSet(COMMS_MESSAGES_KEY, commsMessages); }
+  window.wnPost = async function(){
+    if(!wnCan()){ showToast('Only an Admin or the Principal can publish to the website.'); return; }
+    const title = byId('wnTitle').value.trim(), body = byId('wnBody').value.trim();
+    if(!title){ showToast('Enter a title.'); return; }
+    if(!body){ showToast('Enter the notice.'); return; }
+    const l = typeof cleanNoticeLink === 'function' ? cleanNoticeLink(byId('wnLink').value) : { ok: true, value: '' };
+    if(!l.ok){ showToast('That link does not look right. Use a web address like https://example.com/page'); return; }
+    commsMessages.push({ id: 'msg_' + Date.now(), type: byId('wnType').value || 'Announcement', title, body, link: l.value, audienceScope: 'web', audienceLabel: 'Public website', channels: ['Website'], toWebsite: true, recipientCount: 0, sentBy: currentUser.name, sentDate: new Date().toISOString().slice(0, 10) });
+    await wnSave2(); showToast('Published on the website.', 'burst'); paintNotices();
+  };
+  window.wnSave = async function(id){
+    const n = commsMessages.find(m => m.id === id); if(!n || !wnCan()) return;
+    const title = byId('wnEditTitle').value.trim(), body = byId('wnEditBody').value.trim();
+    if(!title || !body){ showToast('Title and notice cannot be empty.'); return; }
+    const l = typeof cleanNoticeLink === 'function' ? cleanNoticeLink(byId('wnEditLink').value) : { ok: true, value: '' };
+    if(!l.ok){ showToast('That link does not look right.'); return; }
+    n.title = title; n.body = body; n.link = l.value; wnEditing = '';
+    await wnSave2(); showToast('Notice updated.', 'burst'); paintNotices();
+  };
+  window.wnDown = async function(id){
+    if(!wnCan()) return;
+    if(!await showConfirmDialog('Take this notice off the public website? It stays in your records.')) return;
+    const n = commsMessages.find(m => m.id === id); if(!n) return;
+    if((n.channels || []).includes('In-App')){ n.toWebsite = false; n.channels = n.channels.filter(c => c !== 'Website'); }   // older notice also sent in the app: keep it there
+    else n.boardRemoved = true;
+    await wnSave2(); showToast('Taken down from the website.', 'burst'); paintNotices();
+  };
 
   /* ---- tab switching ---- */
   async function ensureContent(force){

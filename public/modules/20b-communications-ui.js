@@ -28,7 +28,7 @@ function cmToggleHeadings(){
 
 function cmLogRows(){
   const q = cmLogSearch.trim().toLowerCase();
-  return commsMessages.slice().sort((a, b) => b.id.localeCompare(a.id))
+  return commsMessages.filter(m => m.audienceScope !== 'web').sort((a, b) => b.id.localeCompare(a.id))
     .filter(m => !q || `${m.title} ${m.type} ${m.audienceLabel} ${m.sentBy}`.toLowerCase().includes(q));
 }
 function onCmLogSearch(v){ cmLogSearch = v; paintCmLog(); }
@@ -45,11 +45,12 @@ function paintCmLog(){
 function renderCommsLog(body){
   cmLogSearch = '';
   const month = new Date().toISOString().slice(0, 7);
-  const thisMonth = commsMessages.filter(m => (m.sentDate || '').startsWith(month));
-  const reach = commsMessages.reduce((t, m) => t + (Number(m.recipientCount) || 0), 0);
+  const sentMsgs = commsMessages.filter(m => m.audienceScope !== 'web');
+  const thisMonth = sentMsgs.filter(m => (m.sentDate || '').startsWith(month));
+  const reach = sentMsgs.reduce((t, m) => t + (Number(m.recipientCount) || 0), 0);
   body.innerHTML = `
     <section class="sf-kpis">
-      ${sfKpi('Messages sent', commsMessages.length, 'plain')}
+      ${sfKpi('Messages sent', sentMsgs.length, 'plain')}
       ${sfKpi('This month', thisMonth.length, 'plain')}
       ${sfKpi('Total recipients', reach, 'plain', 'across all messages')}
     </section>
