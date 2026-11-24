@@ -30,4 +30,9 @@ test('a signed-in person is recognised on the notices list, and staff only get s
 test('one alert per login even when a login is linked to a student twice', () => {
   assert.ok(server.includes('for (const userId of new Set(userIds)) await sendPushToUser'));
 });
+test('a Teacher can notify only the parents of their own classes and sections', () => {
+  assert.ok(server.includes('async function teacherNoticeRooms') && server.includes('TEACHER_NOTICE_MSG'));
+  assert.ok(server.includes("req.authUser.role === 'Teacher' && !(await teacherNoticeOk(req.authUser.id, req.body || {}))"));
+  assert.ok(index.includes('modules/99-teacher-notice-scope.js'));
+});
 done('approvals-comms');

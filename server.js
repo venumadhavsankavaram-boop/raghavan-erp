@@ -6225,6 +6225,12 @@ app.post('/api/notifications/broadcast', async (req, res) => {
     const url = b.url ? String(b.url).slice(0, 300) : '/?view=noticeboard';
     const studentIds = Array.isArray(b.studentIds) ? b.studentIds.filter(Boolean).slice(0, 5000) : [];
     const staffIds = Array.isArray(b.staffIds) ? b.staffIds.filter(Boolean).slice(0, 5000) : [];
+    if (req.authUser.role === 'Teacher') {
+      if (staffIds.length) return res.status(403).json({ error: TEACHER_NOTICE_MSG });
+      const rooms = await teacherNoticeRooms(req.authUser.id);
+      const map = await studentClassMap(studentIds);
+      if (studentIds.some(id => !map[id] || !rooms.has(map[id].className + '|' + map[id].section))) return res.status(403).json({ error: TEACHER_NOTICE_MSG });
+    }
     const userIds = new Set();
     if (studentIds.length) {
       const placeholders = studentIds.map((_, i) => `$${i + 1}`).join(', ');
@@ -7676,6 +7682,25 @@ async function studentClassMap(studentIds) {
   const map = {};
   rows.forEach(r => { map[r.id] = { className: r.class_name, section: r.section }; });
   return map;
+}
+// Notices from a Teacher may go only to the parents of the classes and sections they teach (class teacher or subject teacher).
+async function teacherNoticeRooms(userId) {
+  const sc = await getTeacherScope(userId);
+  const rooms = new Set();
+  if (sc.classTeacherOf) rooms.add(sc.classTeacherOf.className + '|' + sc.classTeacherOf.section);
+  sc.subjectSections.forEach(x => rooms.add(x.className + '|' + x.section));
+  return rooms;
+}
+const TEACHER_NOTICE_MSG = 'Teachers can send notices only to the parents of the classes and sections they teach. Ask the Admin or Principal to send anything wider.';
+async function teacherNoticeOk(userId, m) {
+  const rooms = await teacherNoticeRooms(userId);
+  const sc = m.audienceScope;
+  if (sc === 'section') return rooms.has(m.audienceClass + '|' + m.audienceSection);
+  if (sc === 'class') { const secs = [...rooms].filter(r => r.split('|')[0] === m.audienceClass); if (!secs.length) return false;
+    const all = await sql`SELECT DISTINCT section FROM students WHERE class_name = ${m.audienceClass} AND deleted_at IS NULL`;
+    return all.every(r => rooms.has(m.audienceClass + '|' + r.section)); }
+  if (sc === 'individual') { const map = await studentClassMap([m.individualId].filter(Boolean)); const c = map[m.individualId]; return !!c && rooms.has(c.className + '|' + c.section); }
+  return false; // all students, all staff, everyone, fee defaulters, website
 }
 function validateRecipient(b) {
   const recipientType = CONCERN_RECIPIENT_TYPES.includes(b.recipientType) ? b.recipientType : null;
@@ -9465,6 +9490,9 @@ app.all('/api/:resource', async (req, res) => {
     // write — everything else for 'students' still goes through the normal
     // 'admissions' gate right below.
     if (resource === 'comms-messages' && req.method === 'GET') return await handleCommsMessagesRead(req, res);
+    if (resource === 'comms-messages' && (req.method === 'POST' || req.method === 'PUT') && req.authUser && req.authUser.role === 'Teacher' && !(await teacherNoticeOk(req.authUser.id, req.body || {}))) {
+      return res.status(403).json({ error: TEACHER_NOTICE_MSG });
+    }
     if (resource === 'comms-messages' && (req.method === 'POST' || req.method === 'PUT') && req.authUser && noticeIsWebsite(req.body || {}) && !(await canPublishToWebsite(req.authUser.role))) {
       return res.status(403).json({ error: 'You do not have permission to publish notices to the public website.' });
     }
