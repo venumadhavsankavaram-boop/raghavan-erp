@@ -344,13 +344,23 @@ async function submitRefundRequest(){
     if(nonRefOverride && !(await showConfirmDialog('One of the selected heads is marked non-refundable. Continue as an Admin override?'))) return;
     const first = payments.find(x => x.id === full[0].paymentId);
     const total = full.reduce((s, l) => s + l.amount, 0);
+    // A bus fee refund for a student who is still marked as a bus rider would leave the full bus fare billed, so
+    // the refunded part would show as "due" again. Ask, and when the bus is stopped, bill only what is kept.
+    let stopBus = false;
+    const busStu = students.find(x => x.id === first.studentId);
+    if(full.some(l => l.category === 'bus') && busStu && busStu.needsTransport === 'Yes' && ['Student withdrawn / TC issued', 'Service not availed (transport / hostel)'].includes(reasonCode)){
+      stopBus = true; // the reason already says the bus is not used, so no choice is offered: the bus billing is settled with the refund
+      showToast('Bus stopped for this student: only what stays paid is billed, so no bus fee will show as due.');
+    }else if(full.some(l => l.category === 'bus') && busStu && busStu.needsTransport === 'Yes'){
+      stopBus = await showConfirmDialog(`${rfStudentName(first.studentId, first.studentName)} is still marked as a bus rider. If the bus has stopped, the bus fee billed will be only what stays paid after this refund, so no bus fee shows as due.\n\nIf the student still uses the bus (for example this is a duplicate or excess payment), choose "No, still rides".`, { title: 'Has this student stopped the bus?', okText: 'Yes, stop transport', cancelText: 'No, still rides' });
+    }
     const r = {
       id: 'rf_' + Date.now(), refundNo: rfNextNo(), status: 'pending',
       studentId: first.studentId, studentName: rfStudentName(first.studentId, first.studentName),
       className: (students.find(x => x.id === first.studentId) || {}).className || first.classAtPayment || '',
       receiptNo: Array.from(new Set(full.map(l => l.receiptNo).filter(Boolean))).join(', '), lines: full, total, reasonCode, note, method, bankAccountId,
       requestedBy: currentUser.name, requestedByRole: currentUser.role, requestedAt: new Date().toISOString(),
-      nonRefundableOverride: nonRefOverride, audit: [],
+      nonRefundableOverride: nonRefOverride, stopTransport: stopBus, audit: [],
     };
     rfAudit(r, 'requested', `${fmtMoney(total)} · ${reasonCode}${note ? ' — ' + note : ''}`);
     feeRefunds.push(r); _rfCache = null;
@@ -363,6 +373,37 @@ async function submitRefundRequest(){
       refreshAfterRefund();
     }
   }finally{ rfBusy = false; }
+}
+// After a bus refund for a student who has stopped the bus: bill exactly what is still paid (months used worked out
+// from it), so the bus fee balance is zero instead of showing the refunded part as due.
+async function rfApplyStopFromRefund(r){
+  const s = students.find(x => x.id === r.studentId);
+  if(!s || s.needsTransport !== 'Yes') return;
+  const fare = Number(studentBusFare(s)) || 0;
+  const kept = payments.filter(p => p.studentId === s.id && p.category === 'bus' && !p.voided && (p.classAtPayment === s.className || !p.classAtPayment)).reduce((a, p) => a + payNet(p), 0);
+  const months = fare > 0 ? Math.min(12, Math.max(0, Math.round(kept / fare * 12))) : 0;
+  s.transportEnd = { className: s.className, date: new Date().toISOString().slice(0, 10), months, amount: kept, fare, reason: 'Bus stopped with refund ' + r.refundNo, by: currentUser.name, at: new Date().toISOString() };
+  s.needsTransport = 'No';
+  await persist();
+  rfAudit(r, 'transport stopped', `bus fee billed ${fmtMoney(kept)} (${months} month${months === 1 ? '' : 's'}), balance ₹0`);
+  await storageSet(FEE_REFUNDS_KEY, feeRefunds);
+}
+// Students refunded for bus fee earlier who are still marked as riders (the stop step was missed): list them with a one-press fix.
+function rfMissedBusStops(){
+  const out = [];
+  feeRefunds.filter(r => r.status === 'processed' && (r.lines || []).some(l => l.category === 'bus')).forEach(r => {
+    const s = students.find(x => x.id === r.studentId);
+    if(s && s.needsTransport === 'Yes' && !out.some(o => o.s.id === s.id)) out.push({ s, r });
+  });
+  return out;
+}
+async function rfFixBus(refundId){
+  const r = feeRefunds.find(x => x.id === refundId); if(!r) return;
+  const s = students.find(x => x.id === r.studentId); if(!s) return;
+  if(!(await showConfirmDialog(`Stop the bus for ${rfStudentName(s.id)} and bill only what is still paid after the refund ${r.refundNo}? The bus fee due will become ₹0.`, { title: 'Fix bus fee due', okText: 'Yes, fix it' }))) return;
+  try{ await rfEnsureAll(); await rfApplyStopFromRefund(r); showToast('Done. Bus fee due is now ₹0 for this student.', 'burst'); }
+  catch(e){ showToast('Could not fix it (' + e.message + '). Use Stop transport on the student refund page.'); }
+  if(typeof renderRefundsTab === 'function' && document.getElementById('feeBody')) renderRefundsTab(document.getElementById('feeBody'));
 }
 function refreshAfterRefund(){
   try{ renderDashboard(); }catch(e){}
@@ -436,6 +477,10 @@ async function rfProcess(refundId){
     }
   }catch(e){
     showToast(`Refund ${r.refundNo} was recorded, but a follow-up save failed (${e.message}). Please check Accounting and the student's fee screen.`);
+  }
+  if(r.stopTransport){
+    try{ await rfApplyStopFromRefund(r); }
+    catch(e){ showToast(`Refund ${r.refundNo} is done, but the bus could not be stopped automatically (${e.message}). Press "Stop transport" on the student's refund page.`); }
   }
   refreshAfterRefund();
   showToast(r.method === 'credit' ? `Refund ${r.refundNo}: ${fmtMoney(r.total)} credited to ${r.studentName}'s account.` : `Refund ${r.refundNo} of ${fmtMoney(r.total)} paid out (voucher ${voucherNos.join(', ')}).`, 'burst');
@@ -605,7 +650,10 @@ async function renderRefundsTab(body){
     <td>${escapeHtml(r.reasonCode)}${r.note ? `<br><small>${escapeHtml(r.note)}</small>` : ''}${r.rejectReason ? `<br><small style="color:#b91c1c;">Rejected: ${escapeHtml(r.rejectReason)}</small>` : ''}</td>
     <td>${statusPill(r)}<br><small>by ${escapeHtml(r.requestedBy)}${r.approvedBy ? ' · ok ' + escapeHtml(r.approvedBy) : ''}</small></td>
     <td>${actionCell(r)}<br>${trail(r)}</td></tr>`;
+  const missed = refundPerm('create') ? rfMissedBusStops() : [];
+  const missedHtml = missed.length ? `<div class="box warn" style="margin-bottom:14px;white-space:normal;"><b>⚠️ Bus fee still showing as due after a refund (${missed.length})</b><br><small>These students were refunded bus fee but are still marked as bus riders, so the refunded part appears as due. Press Fix if the bus has stopped.</small>${missed.map(m => `<div style="display:flex;gap:10px;align-items:center;justify-content:space-between;margin-top:8px;"><span>${escapeHtml(rfStudentName(m.s.id))} · ${escapeHtml(m.s.className || '')} · refund ${escapeHtml(m.r.refundNo)}</span>${sfBtn('primary', 'check', 'Fix', `rfFixBus('${m.r.id}')`)}</div>`).join('')}</div>` : '';
   body.innerHTML = `
+    ${missedHtml}
     ${refundPerm('create') ? `<div style="display:flex;justify-content:flex-end;margin-bottom:14px;">${sfBtn('primary', 'plus', 'New Refund', 'openRefundCreate()')}</div>` : ''}
     <section class="sf-kpis">
       ${sfKpi('Pending approval', pend.length, pend.length ? 'danger' : 'plain', fmtMoney(sum(pend)))}
@@ -672,7 +720,8 @@ function rfStopBannerHtml(s){
   if(!s) return '';
   const te = s.transportEnd && (!s.transportEnd.className || s.transportEnd.className === s.className) ? s.transportEnd : null;
   if(s.needsTransport === 'Yes'){
-    return `<div class="sf-kpi sf-kpi--warn" style="margin:0 0 14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:space-between;">
+    const busRefunded = feeRefunds.some(r => r.status === 'processed' && r.studentId === s.id && (r.lines || []).some(l => l.category === 'bus'));
+    return `${busRefunded ? '<div class="box warn" style="margin:0 0 10px;white-space:normal;">⚠️ A bus fee refund was made for this student, but the student is still a bus rider, so the refunded part shows as bus fee due. If the bus has stopped, press <b>Stop transport</b> and choose <b>Keep what is already paid</b>.</div>' : ''}<div class="sf-kpi sf-kpi--warn" style="margin:0 0 14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:space-between;">
       <div><span>Bus rider</span><b>${fmtMoney(studentBusFare(s))} / year</b><small>If this student has stopped using the bus, stop transport so only the months used are billed.</small></div>
       ${sfBtn('primary', 'check', 'Stop transport', `openStopTransport('${s.id}')`)}</div>`;
   }
@@ -704,6 +753,15 @@ function rfStopUpdate(fromCharge){
       ? `Paid so far <b>${fmtMoney(c.paid)}</b>, billed <b>${fmtMoney(c.charge)}</b> → <b style="color:#b3261e;">${fmtMoney(-c.diff)} still payable</b>.`
       : `Paid <b>${fmtMoney(c.paid)}</b> = billed <b>${fmtMoney(c.charge)}</b>. Nothing to refund and nothing pending.`;
 }
+function rfStopKeepPaid(){
+  const sid = document.getElementById('stSid').value;
+  const c = rfStopCalc(sid); if(!c) return;
+  const el = document.getElementById('stCharge');
+  el.value = Math.round(c.paid);
+  const m = document.getElementById('stMonths');
+  if(c.fare > 0) m.value = String(Math.min(12, Math.max(0, Math.round(c.paid / c.fare * 12))));
+  rfStopUpdate(true);
+}
 function openStopTransport(sid){
   if(!refundPerm('create')){ showToast("You don't have permission to change transport billing."); return; }
   const s = students.find(x => x.id === sid); if(!s) return;
@@ -715,6 +773,7 @@ function openStopTransport(sid){
     <div class="f-field" style="margin-bottom:10px;"><label>Date transport stopped</label><input type="date" id="stDate" value="${new Date().toISOString().slice(0, 10)}"></div>
     <div class="f-field" style="margin-bottom:10px;"><label>Months of bus service used (billed)</label><select id="stMonths" onchange="rfStopUpdate(false)">${opts}</select></div>
     <div class="f-field" style="margin-bottom:10px;"><label>Bus fee to keep (₹) <small>— auto = fare × months ÷ 12; change only if your school rounds differently</small></label><input type="number" min="0" id="stCharge" oninput="rfStopUpdate(true)"></div>
+    <div style="margin:-4px 0 10px;"><button type="button" class="btn btn-ghost btn-sm" onclick="rfStopKeepPaid()">Keep what is already paid (no more due)</button></div>
     <div class="f-field" style="margin-bottom:10px;"><label>Reason</label><input type="text" id="stReason" value="Discontinued transport"></div>
     <div id="stResult" style="background:var(--surface-2,#f4f1f8);border-radius:10px;padding:12px;font-size:.9rem;margin-bottom:14px;"></div>
     <div class="modal-actions" style="display:flex;gap:10px;justify-content:flex-end;">
