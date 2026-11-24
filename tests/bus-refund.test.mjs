@@ -13,4 +13,7 @@ test('a bus refund for a student who has stopped the bus settles the bus billing
 test('earlier refunds that missed the stop are listed with a one-press fix', () => {
   assert.ok(m.includes('function rfMissedBusStops') && m.includes('async function rfFixBus') && m.includes('Keep what is already paid'));
 });
+test('a refund where staff answered "No, still rides" is not listed as a miss', () => {
+  assert.ok(m.includes("r.stopTransport !== false"));
+});
 done('bus-refund');

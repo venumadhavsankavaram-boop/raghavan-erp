@@ -391,7 +391,7 @@ async function rfApplyStopFromRefund(r){
 // Students refunded for bus fee earlier who are still marked as riders (the stop step was missed): list them with a one-press fix.
 function rfMissedBusStops(){
   const out = [];
-  feeRefunds.filter(r => r.status === 'processed' && (r.lines || []).some(l => l.category === 'bus')).forEach(r => {
+  feeRefunds.filter(r => r.status === 'processed' && r.stopTransport !== false && (r.lines || []).some(l => l.category === 'bus')).forEach(r => { // stopTransport === false means staff answered "No, still rides", so it is not a miss
     const s = students.find(x => x.id === r.studentId);
     if(s && s.needsTransport === 'Yes' && !out.some(o => o.s.id === s.id)) out.push({ s, r });
   });
