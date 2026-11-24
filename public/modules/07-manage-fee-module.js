@@ -49,10 +49,11 @@ const FEE_TYPES_KEY = "fee-types";
     if(secSel.options.length <= 1){
       SECTIONS.forEach(s => { const o=document.createElement('option'); o.value=s; o.textContent='Section '+s; secSel.appendChild(o); });
     }
-    const accessibleTabs = Object.keys(MF_TAB_PERM_KEYS).filter(t => getManageFeeTabAccess(currentUser.role, MF_TAB_PERM_KEYS[t]));
+    // Receipt & Counter (date lock, receipt numbering) is Admin-only; deciding it here, in the one place that shows/hides tabs, stops the tab flashing on and off for other roles.
+    const accessibleTabs = Object.keys(MF_TAB_PERM_KEYS).filter(t => (t !== 'receipt' || currentUser.role === 'Admin') && getManageFeeTabAccess(currentUser.role, MF_TAB_PERM_KEYS[t]));
     Object.keys(MF_TAB_PERM_KEYS).forEach(t => {
       const btn = document.getElementById('mftab-'+t);
-      if(btn) btn.style.display = accessibleTabs.includes(t) ? '' : 'none';
+      if(btn){ const want = accessibleTabs.includes(t) ? '' : 'none'; if(btn.style.display !== want) btn.style.display = want; }
     });
     if(!accessibleTabs.includes(feeTab)) feeTab = accessibleTabs[0] || 'fees';
     switchFeeTab(feeTab);

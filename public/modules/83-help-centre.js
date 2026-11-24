@@ -381,6 +381,7 @@
   const appVisible = () => { const a = $('appShell'); return !!(a && a.style.display !== 'none' && a.offsetParent !== null); };
   function blocked() { return !!($('cnOverlay') || document.querySelector('.cn-ov,.sw-ov')); }
   const fabMode = () => { const m = LS.get('hcFab:' + uid()); return (m === 'full' || m === 'small' || m === 'off') ? m : (S.fab || 'full'); };
+  const setHtml = (el, html) => { if (el.__hcHtml !== html) { el.innerHTML = html; el.__hcHtml = html; } };
   function updateFab() {
     const show = !!me() && appVisible();
     let b = $('hcFab');
@@ -388,11 +389,12 @@
     css();
     if (!b) { b = document.createElement('button'); b.id = 'hcFab'; b.type = 'button'; b.setAttribute('aria-label', 'Help'); b.addEventListener('click', () => openHelp(true)); document.body.appendChild(b); }
     const seen = LS.get('hcSeenNew:' + uid()) || ''; const now = S.whatsNew.map(w => w.id).join(',');
-    b.classList.toggle('new', !!now && now !== seen);
-    const fm = fabMode(); b.classList.toggle('small', fm === 'small'); b.classList.toggle('hide', fm === 'off');
-    b.setAttribute('aria-label', L('Help', 'సహాయం'));
-    b.innerHTML = '<span>❓</span><span class="t">' + esc(L('Help', 'సహాయం')) + '</span><span class="dot"></span>';
-    b.classList.add('on');
+    const wantNew = !!now && now !== seen; if (b.classList.contains('new') !== wantNew) b.classList.toggle('new', wantNew);
+    const fm = fabMode(); if (b.classList.contains('small') !== (fm === 'small')) b.classList.toggle('small', fm === 'small'); if (b.classList.contains('hide') !== (fm === 'off')) b.classList.toggle('hide', fm === 'off');
+    const lab = L('Help', 'సహాయం');
+    if (b.getAttribute('aria-label') !== lab) b.setAttribute('aria-label', lab);
+    setHtml(b, '<span>❓</span><span class="t">' + esc(lab) + '</span><span class="dot"></span>');   // only redraw when the words change, so the button never flickers
+    if (!b.classList.contains('on')) b.classList.add('on');
   }
   /* Help in the side menu and the account menu (all roles) */
   function openFromMenu() {
@@ -407,13 +409,13 @@
     if (t && t.parentNode) {
       let a = $('hcMenuLink');
       if (!a) { a = document.createElement('button'); a.type = 'button'; a.id = 'hcMenuLink'; a.className = 'sb-link'; a.addEventListener('click', openFromMenu); t.parentNode.insertBefore(a, t); }
-      a.innerHTML = '<span class="sb-icon-wrap" style="font-size:1.05rem;line-height:1">❓</span> ' + esc(menuLabel()) + (dot ? ' <span class="nb-badge" style="display:inline-block">•</span>' : '');
+      setHtml(a, '<span class="sb-icon-wrap" style="font-size:1.05rem;line-height:1">❓</span> ' + esc(menuLabel()) + (dot ? ' <span class="nb-badge" style="display:inline-block">•</span>' : ''));
     }
     const m = $('sbUserMenu');
     if (m) {
       let b = $('hcMenuAcct');
       if (!b) { b = document.createElement('button'); b.type = 'button'; b.id = 'hcMenuAcct'; b.className = 'approvals-bell-btn'; b.setAttribute('role', 'menuitem'); b.addEventListener('click', openFromMenu); m.insertBefore(b, m.firstChild); }
-      b.innerHTML = '<span class="approvals-bell-icon">❓</span><span class="sb-btn-label">' + esc(menuLabel()) + '</span>';
+      setHtml(b, '<span class="approvals-bell-icon">❓</span><span class="sb-btn-label">' + esc(menuLabel()) + '</span>');
     }
   }
   let lastUser = null, tourTried = false;

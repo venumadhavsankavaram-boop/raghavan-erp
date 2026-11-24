@@ -69,7 +69,7 @@
   // Receipt & Counter tab belongs to Admin only.
   function hideReceiptTab(){
     const b = document.getElementById('mftab-receipt');
-    if(b && loggedIn()) b.style.display = isAdmin() ? '' : 'none';
+    if(b && loggedIn()){ const want = isAdmin() ? '' : 'none'; if(b.style.display !== want) b.style.display = want; }
   }
   // Forms are drawn when they are opened, so watch for the date boxes appearing.
   let t = null;

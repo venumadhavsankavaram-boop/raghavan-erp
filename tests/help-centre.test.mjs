@@ -122,4 +122,12 @@ test('staff only see Help for what their role can open (UPI follows the server r
   const full = ad.topicsFor('admin').find(t => t.id === 'upi'); assert.ok(full.s.some(x => /Settings and charge/.test(x[0])) && /set up and approve/.test(full.t[0]));
 });
 
+test('no blinking: the Help button/menu are only redrawn when their words change, and the Receipt tab is decided in one place', () => {
+  assert.ok(/const setHtml = \(el, html\) => \{ if \(el\.__hcHtml !== html\)/.test(m83));
+  assert.ok(!/b\.innerHTML = '<span>❓<\/span>/.test(m83) && !/a\.innerHTML = '<span class="sb-icon-wrap"/.test(m83));
+  const mf = rd('public/modules/07-manage-fee-module.js'), dl = rd('public/modules/36-date-lock.js');
+  assert.ok(/t !== 'receipt' \|\| currentUser\.role === 'Admin'/.test(mf), 'fee tabs: receipt tab is Admin-only where tabs are shown');
+  assert.ok(/if\(b\.style\.display !== want\) b\.style\.display = want/.test(dl), 'date lock never rewrites an unchanged style');
+});
+
 done();
