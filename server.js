@@ -1582,6 +1582,38 @@ async function enforceDateLockKv(req, res, key) {
   return false;
 }
 
+// Requests that wait for Admin/Principal (promotion, transfer, section change, stock change). They are saved as one
+// list, so the server compares the list before and after a save: each NEW pending request alerts the approvers
+// once (phone push + the bell list), and every request that is no longer pending clears its alert, so a decided
+// request never leaves a stale "approval needed" behind.
+const APPROVAL_TYPE_LABEL = { promote: 'Promotion request', transfer: 'Transfer request', section: 'Section change request', inventory_item: 'Stock change request' };
+async function getStaffUserId(staffId) {
+  if (!staffId) return null;
+  const rows = await sql`SELECT extra FROM staff WHERE id = ${staffId}`;
+  const uid = rows.length && rows[0].extra && rows[0].extra.linkedUserId;
+  return uid || null;
+}
+async function approvalsChanged(before, after, actor) {
+  const list = v => (Array.isArray(v) ? v : []).filter(x => x && x.id);
+  const was = new Map(list(before).map(x => [x.id, x]));
+  for (const x of list(after)) {
+    const old = was.get(x.id);
+    if (x.status === 'Pending' && !old) {
+      if (actor && x.requestedByUserId && x.requestedByUserId !== actor.id) continue; // only the requester's own save raises an alert
+      await notifyUsersByRole(['Admin', 'Principal'], {
+        title: 'Approval needed: ' + (APPROVAL_TYPE_LABEL[x.type] || 'Request'),
+        body: `${x.requestedBy || 'Someone'} (${x.requestedByRole || 'staff'}): ${String(x.explanation || '').slice(0, 160)}`,
+        tag: 'approval', url: '/?approval=' + encodeURIComponent(x.id),
+      });
+    } else if (x.status !== 'Pending' && old && old.status === 'Pending') {
+      await sql`UPDATE user_notifications SET read_at = now() WHERE read_at IS NULL AND type = 'approval' AND url = ${'/?approval=' + encodeURIComponent(x.id)}`;
+    }
+  }
+  const now = new Set(list(after).map(x => x.id));
+  for (const [id, old] of was) {
+    if (!now.has(id) && old.status === 'Pending') await sql`UPDATE user_notifications SET read_at = now() WHERE read_at IS NULL AND type = 'approval' AND url = ${'/?approval=' + encodeURIComponent(id)}`;
+  }
+}
 async function handleKv(req, res, key) {
   if (!key) return res.status(400).json({ error: 'Missing key.' });
   if ((key === 'consol-report-config' || key === 'consol-final-marks') && req.method === 'PUT' && (!req.authUser || (req.authUser.role !== 'Admin' && req.authUser.role !== 'Principal'))) return res.status(403).json({ error: 'Only the Admin or Principal can change the consolidated report settings and final marks.' });
@@ -1640,10 +1672,11 @@ async function handleKv(req, res, key) {
   if (req.method === 'PUT') {
     const value = req.body;
     const json = JSON.stringify(value === undefined ? {} : value);
-    let summary = null;
+    let summary = null, beforeVal = null;
     try {
       const prev = await sql`SELECT value FROM kv_store WHERE \`key\` = ${key}`;
       let before = prev.length ? prev[0].value : {}; if (typeof before === 'string') { try { before = JSON.parse(before); } catch (_) {} }
+      beforeVal = before;
       summary = kvChangeSummary(before, value === undefined ? {} : value);
     } catch (_) { summary = 'updated'; }
     await sql`
@@ -1651,6 +1684,7 @@ async function handleKv(req, res, key) {
       ON DUPLICATE KEY UPDATE value = ${json}::jsonb, updated_at = now()
     `;
     if (summary && req.authUser) auditNote(req.authUser.name, req.authUser.role, 'SETTING', 'kv', key, summary, null);
+    if (key === 'pending-approvals') approvalsChanged(beforeVal, value, req.authUser).catch(e => console.error('approvals alert error:', e && e.message));
     return res.status(200).json({ ok: true });
   }
   return res.status(405).json({ error: 'Method not allowed.' });
@@ -2379,7 +2413,7 @@ const SERVER_ROLE_VIEWS = {
   Principal: ['dashboard','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','inbox','noticeboard','websiteinquiries','websitegallery','contactvendor','reports','inventory','timetable','syllabus','transport','library','hostel','scouts','setup'],
   Accountant: ['dashboard','admissions','managefee','accounting','reports','inventory','transport'],
   'Office Assistant': ['admissions'],
-  Teacher: ['admissions','attendance','exams','subjects','result','timetable','syllabus','library','scouts','announcements','inbox'],
+  Teacher: ['admissions','attendance','exams','subjects','result','timetable','syllabus','library','scouts','announcements','noticeboard','inbox'],
   Staff: ['admissions','attendance','inbox'],
   Student: ['myprofile'],
   Parent: ['myprofile'],
@@ -4445,7 +4479,7 @@ async function sendPushToUser(userId, payload) {
 }
 async function sendPushToStudent(studentId, payload) {
   const userIds = await getStudentContactUserIds(studentId);
-  for (const userId of userIds) await sendPushToUser(userId, payload);
+  for (const userId of new Set(userIds)) await sendPushToUser(userId, payload); // one alert per login, even if a login is linked twice
 }
 // Alerts every login of the given role(s) — used for approval workflows,
 // where "who should be notified" is "whoever can act on this", not one

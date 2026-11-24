@@ -716,6 +716,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       const explanation = document.getElementById('invItemExplanation').value.trim();
       if(!explanation){ showToast('Enter an explanation before submitting for approval.'); return; }
       if(!await showConfirmDialog('Submit this stock change to Admin for approval?')) return;
+      if(window.freshApprovals) await freshApprovals();
       pendingApprovals.push({
         id:'appr_'+Date.now(), type:'inventory_item', requestedBy:currentUser.name, requestedByRole:currentUser.role, requestedByUserId: currentUser.id,
         requestDate:new Date().toISOString().slice(0,10), explanation, payload, status:'Pending',

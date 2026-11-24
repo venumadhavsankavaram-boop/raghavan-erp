@@ -169,6 +169,7 @@ const PENDING_APPROVALS_KEY = "pending-approvals";
       const explanation = document.getElementById('ptExplanation').value.trim();
       if(!explanation){ showToast('Enter an explanation before submitting for approval.'); return; }
       if(!await showConfirmDialog(`Submit this promotion request for ${payloadStudents.length} student(s) to Admin for approval?`)) return;
+      if(window.freshApprovals) await freshApprovals();
       pendingApprovals.push({
         id: 'appr_'+Date.now(), type:'promote', requestedBy: currentUser.name, requestedByRole: currentUser.role, requestedByUserId: currentUser.id,
         requestDate: new Date().toISOString().slice(0,10), explanation, payload: payloadStudents, status:'Pending',
@@ -225,6 +226,7 @@ const PENDING_APPROVALS_KEY = "pending-approvals";
       const explanation = document.getElementById('ptExplanation').value.trim();
       if(!explanation){ showToast('Enter an explanation before submitting for approval.'); return; }
       if(!await showConfirmDialog(`Submit this transfer request for ${selected.length} student(s) to Admin for approval?`)) return;
+      if(window.freshApprovals) await freshApprovals();
       pendingApprovals.push({
         id: 'appr_'+Date.now(), type:'transfer', requestedBy: currentUser.name, requestedByRole: currentUser.role, requestedByUserId: currentUser.id,
         requestDate: new Date().toISOString().slice(0,10), explanation, payload: { studentIds: selected, date, reason }, status:'Pending',
@@ -273,6 +275,7 @@ const PENDING_APPROVALS_KEY = "pending-approvals";
       const explanation = document.getElementById('ptExplanation').value.trim();
       if(!explanation){ showToast('Enter an explanation before submitting for approval.'); return; }
       if(!await showConfirmDialog(`Submit this section change for ${changes.length} student(s) to Admin for approval?`)) return;
+      if(window.freshApprovals) await freshApprovals();
       pendingApprovals.push({
         id: 'appr_'+Date.now(), type:'section', requestedBy: currentUser.name, requestedByRole: currentUser.role, requestedByUserId: currentUser.id,
         requestDate: new Date().toISOString().slice(0,10), explanation, payload: { changes }, status:'Pending',

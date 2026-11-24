@@ -166,6 +166,7 @@
     const opts = { mode: st.mode, date: st.date || today(), reason };
     if(!isAdmin()){
       if(!await showConfirmDialog('Submit this change for ' + ch.length + ' student(s) to Admin for approval?')) return;
+      if(window.freshApprovals) await freshApprovals();
       pendingApprovals.push({ id: 'appr_' + Date.now(), type: 'section', requestedBy: currentUser.name, requestedByRole: currentUser.role, requestedByUserId: currentUser.id, requestDate: today(), explanation: reason || 'Section change', payload: { changes, opts }, status: 'Pending' });
       await storageSet(PENDING_APPROVALS_KEY, pendingApprovals); st.pick = {}; st.reason = ''; await render(); showToast('Submitted for Admin approval.', 'burst'); return;
     }

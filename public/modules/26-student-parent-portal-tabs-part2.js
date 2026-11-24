@@ -714,7 +714,7 @@
       showToast(msg, 'burst');
       playApprovalChime();
       if('Notification' in window && Notification.permission === 'granted'){
-        try{ new Notification('Approval needed', { body: msg, icon:'/icon-192.png', tag:'approvals-center' }); }catch(e){}
+        if(document.hidden){ try{ new Notification('Approval needed', { body: msg, icon:'/icon-192.png', tag:'approval' }); }catch(e){} }
       }
     }
     approvalsBaselineDone = true;
