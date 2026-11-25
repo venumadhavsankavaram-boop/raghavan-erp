@@ -1266,7 +1266,22 @@ async function userNeeds2faSetup(userId) {
 const parentSeenAt = new Map();
 app.use(async (req, res, next) => {
   if (!req.path.startsWith('/api/')) return next(); // static files / the app shell itself stay open
-  if (req.method === 'OPTIONS' || isPublicApiRoute(req)) return next();
+  if (req.method === 'OPTIONS' || isPublicApiRoute(req)) {
+    // The notices list is public (the school website reads it), but a signed-in person must be recognised on it,
+    // otherwise parents, teachers and the Admin would only ever get the notices ticked for the public website
+    // and every notice meant for a class, staff, one student, or the Message Log would never reach them.
+    if (req.method === 'GET' && req.path === '/api/comms-messages') {
+      try {
+        const tok = parseCookies(req).sid;
+        if (tok) {
+          const r0 = await sql`SELECT * FROM sessions WHERE id = ${hashSessionToken(tok)}`;
+          const s0 = r0[0];
+          if (s0 && new Date(s0.expires_at).getTime() > Date.now()) req.authUser = { id: s0.user_id, role: s0.role, name: s0.name, impersonatedBy: s0.impersonated_by || null };
+        }
+      } catch (_) { /* treated as a visitor */ }
+    }
+    return next();
+  }
   try {
     const token = parseCookies(req).sid;
     if (!token) return res.status(401).json({ error: 'Not logged in.' });
@@ -7369,6 +7384,12 @@ async function handleCommsMessagesRead(req, res) {
   if (PARENT_LOGIN_ROLES.includes(req.authUser.role)) {
     const student = await getLinkedStudent(req.authUser.id);
     return res.status(200).json(student ? all.filter(m => noticeForStudent(m, student)) : []);
+  }
+  // A Teacher reads the notices meant for staff (All staff, Teachers only, Everyone) and the ones they sent
+  // themselves, not every parent notice or fee reminder in the school.
+  if (!MANAGEMENT_ROLES.includes(req.authUser.role)) {
+    const mine = String(req.authUser.name || '');
+    return res.status(200).json(all.filter(m => ['allstaff', 'teachers', 'everyone'].includes(m.audienceScope) || /^all staff|^teachers/i.test(String(m.audienceLabel || '')) || (mine && m.sentBy === mine)));
   }
   return res.status(200).json(all);
 }
