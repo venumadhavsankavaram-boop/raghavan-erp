@@ -623,12 +623,13 @@ let myProfileTab = 'notifications';
     });
     renderInboxBody();
   }
+  function inboxPageOpen(){ const b = document.getElementById('inboxBody'); return !!(b && b.offsetParent !== null); }
   async function loadInboxConcerns(){
     try{
       const res = await throwIfNotOk(await fetch('/api/concerns/inbox', { headers: actorHeaders() }));
       inboxConcerns = await res.json();
     }catch(e){
-      if(e.message !== 'SESSION_EXPIRED') showToast(e.message || 'Could not load concerns.');
+      if(e.message !== 'SESSION_EXPIRED' && inboxPageOpen()) showToast(e.message || 'Could not load concerns.'); /* background loads (the bell's to-do list runs for every staff login) stay silent - a role without an Inbox is not an error */
       inboxConcerns = [];
     }
     if(inboxTab === 'concerns') renderInboxBody();
@@ -638,7 +639,7 @@ let myProfileTab = 'notifications';
       const res = await throwIfNotOk(await fetch('/api/submissions/inbox', { headers: actorHeaders() }));
       inboxSubmissions = await res.json();
     }catch(e){
-      if(e.message !== 'SESSION_EXPIRED') showToast(e.message || 'Could not load submissions.');
+      if(e.message !== 'SESSION_EXPIRED' && inboxPageOpen()) showToast(e.message || 'Could not load submissions.'); /* background loads (the bell's to-do list runs for every staff login) stay silent - a role without an Inbox is not an error */
       inboxSubmissions = [];
     }
     if(inboxTab === 'submissions') renderInboxBody();
