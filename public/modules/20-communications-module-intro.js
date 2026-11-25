@@ -369,7 +369,16 @@ const COMMS_MESSAGES_KEY = "comms-messages";
       channels, toWebsite:false, recipientCount:targets.length, sentBy:currentUser.name, sentDate:new Date().toISOString().slice(0,10),
     };
     commsMessages.push(record);
-    await storageSet(COMMS_MESSAGES_KEY, commsMessages);
+    // The message must be saved in the Message Log BEFORE anything goes out. If the server did not take it
+    // (connection dropped, server busy, session ended), stop: nothing is sent and the person is told plainly,
+    // so a notice can never reach people while missing from the school's log.
+    let savedOk = false;
+    try { savedOk = (await storageSet(COMMS_MESSAGES_KEY, commsMessages)) !== false; } catch(e){ savedOk = false; }
+    if(!savedOk){
+      const i = commsMessages.indexOf(record); if(i >= 0) commsMessages.splice(i, 1);
+      showToast('NOT SENT - the message could not be saved on the server, so nothing went out. Check the connection and press Send again.');
+      return;
+    }
     if(inApp || push){
       const studentIds = targets.filter(t => t.kind==='student').map(t => t.student.id);
       const staffIds = targets.filter(t => t.kind==='staff').map(t => t.staff.id);
