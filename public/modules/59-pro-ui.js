@@ -26,6 +26,7 @@
     .px-collapsed .px-acc-head::after{transform:rotate(-90deg)}
     .px-collapsed > :not(.px-keep){display:none !important}
     .px-more-wrap{position:relative;display:inline-block}
+    .mf-tabs .px-tab-off{display:none !important}
     .px-more-btn{border:1.5px dashed var(--border,#cfcbe6);background:#fff;border-radius:999px;padding:7px 14px;font:inherit;font-size:.82rem;font-weight:700;cursor:pointer;color:var(--navy,#211a4e)}
     .px-more-btn.has-active{background:var(--navy,#211a4e);color:#fff;border-style:solid}
     .px-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:50;min-width:210px;background:#fff;border:1px solid var(--border,#e3e0f0);border-radius:14px;box-shadow:0 14px 34px rgba(30,27,75,.18);padding:6px}
@@ -96,13 +97,13 @@
   function enhanceTabs(){
     $$('.mf-tabs').forEach(row => {
       if(row.offsetParent === null) return;
-      const tabs = Array.from(row.children).filter(b => b.tagName === 'BUTTON' && !b.classList.contains('px-more-btn'));
-      if(tabs.length < 9) return;
+      const tabs = Array.from(row.children).filter(b => b.tagName === 'BUTTON' && !b.classList.contains('px-more-btn') && b.style.display !== 'none'); /* tabs another script hid (e.g. fee tabs this role may not open) are not ours: never count, show or re-hide them, or two scripts fight and the row flickers */
+      if(tabs.length < 9){ tabs.forEach(b => b.classList.remove('px-tab-off')); const w = row.querySelector('.px-more-wrap'); if(w) w.remove(); return; }
       const act = tabs.findIndex(b => b.classList.contains('active') || b.classList.contains('on') || b.getAttribute('aria-selected') === 'true');
       const KEEP = 5; const keep = new Set(tabs.slice(0, KEEP)); if(act >= 0) keep.add(tabs[act]);
       tabs.forEach(b => { if(/Receipt|Defaulter|Reports/i.test(b.textContent)) keep.add(b); });
       const rest = tabs.filter(b => !keep.has(b));
-      tabs.forEach(b => { b.style.display = keep.has(b) ? '' : 'none'; });
+      tabs.forEach(b => b.classList.toggle('px-tab-off', !keep.has(b))); /* hidden with a class, never with style.display, which belongs to the permission code */
       let wrap = row.querySelector('.px-more-wrap');
       const sig = rest.map(b => b.id + (b === tabs[act] ? '*' : '')).join(',') + '|' + act;
       if(wrap && wrap.dataset.sig === sig) return;
