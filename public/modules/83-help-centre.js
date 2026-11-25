@@ -50,11 +50,62 @@
     S = v; sAt = Date.now();
   }
 
+  /* Staff roles other than Admin/Principal (Accountant, Office Assistant, Staff, custom roles) use the Admin & Office guide, but only the
+     topics, and the steps inside them, for what they can really open. Each topic is tied to the SAME permission that opens that screen
+     (sub-modules included, e.g. Fee Collection, not just "Manage Fee"). Set-up, logins, permissions and safety topics stay with the
+     Admin/Principal, so nobody learns what the Admin controls. UPI follows the server rule: only Admin, Principal and Accountant open
+     UPI Payments, and only Admin/Principal change its settings. Demo and Admin/Principal see everything. */
+  const subView = (k, p) => {
+    try {
+      const ov = typeof findRoleOverride === 'function' ? findRoleOverride(role()) : null;
+      if (ov && ov.permissions && ov.permissions[k] !== undefined) return !!canDo(k, 'view');
+      return !!canDo(p, 'view');
+    } catch (e) { return false; }
+  };
+  const can = (...mods) => mods.some(m => { try { return typeof canDo === 'function' ? !!canDo(m, 'view') : false; } catch (e) { return false; } });
+  const UPI_OPEN_ROLES = ['Admin', 'Principal', 'Accountant'];
+  const TOPIC_RULES = {
+    students: () => can('admissions'),
+    fees: () => ['managefee_collection', 'managefee_refunds', 'managefee_reports', 'managefee_discounts', 'managefee_defaulters'].some(k => subView(k, 'managefee')),
+    upi: () => UPI_OPEN_ROLES.includes(role()) && can('managefee'),
+    accounting: () => can('accounting'),
+    attendance: () => can('attendance'),
+    exams: () => can('exams', 'result'),
+    classwork: () => can('subjects', 'timetable', 'syllabus'),
+    staff: () => can('staff'),
+    payroll: () => subView('staff_payroll', 'staff'),
+    payacct: () => subView('staff_payroll', 'staff') && can('accounting'),
+    leavestmt: () => can('staff'),
+    comms: () => can('announcements', 'noticeboard', 'inbox'),
+    reports: () => can('reports'),
+    yearend: () => can('promotransfer'),
+    facilities: () => can('inventory', 'transport', 'library', 'hostel'),
+    website: () => can('websitegallery', 'websiteinquiries')
+  };
+  function roleSeesTopic(aud, id) {
+    if (aud !== 'admin' || audOf() !== 'admin' || demo || isMgr()) return true;
+    if (id === 'trouble') return true;
+    const rule = TOPIC_RULES[id]; if (!rule) return false;   // anything not listed (set-up, logins, safety, portals...) is Admin/Principal only
+    try { return !!rule(); } catch (e) { return false; }
+  }
+  /* A step can carry a third value: 'mgr' = Admin/Principal only, or a permission key = only if the person can open that part. */
+  function stepShown(st) {
+    if (!st[2] || isMgr() || demo || audOf() !== 'admin') return true;
+    if (st[2] === 'mgr') return false;
+    return subView(st[2], String(st[2]).split('_')[0]);
+  }
+  function forRole(t, aud) {
+    if (aud !== 'admin' || audOf() !== 'admin' || demo || isMgr() || t.custom) return t;
+    const o = Object.assign({}, t, { s: t.s.filter(stepShown) });
+    if (t.id === 'upi') o.t = ['UPI payments: check and approve', 'UPI చెల్లింపులు: సరిచూసి ఆమోదించడం'];
+    return o;
+  }
+
   /* ---------- topics ---------- */
   function topicsFor(aud) {
     if (aud === 'demo') return C.demo.slice();
     const hid = new Set(S.hidden);
-    const base = (C[aud] || []).filter(t => !hid.has(aud + ':' + t.id));
+    const base = (C[aud] || []).filter(t => !hid.has(aud + ':' + t.id) && roleSeesTopic(aud, t.id)).map(t => forRole(t, aud));
     const mine = S.custom.filter(c => c.aud === aud).map(c => ({
       id: c.id, ic: c.ic, t: [c.en || c.te, c.te || c.en], k: '', custom: true, tip: (c.tipEn || c.tipTe) ? [c.tipEn || c.tipTe, c.tipTe || c.tipEn] : null,
       s: (c.stepsEn.length ? c.stepsEn : c.stepsTe).map((_, i) => [c.stepsEn[i] || c.stepsTe[i] || '', c.stepsTe[i] || c.stepsEn[i] || ''])
@@ -295,10 +346,20 @@
   /* ---------- first-login tour ---------- */
   let tourRun = null;
   const uid = () => { const u = me(); return u ? String(u.id || u.username || u.name || 'u') : 'u'; };
-  const tourKey = () => 'hcTour:' + uid() + ':' + audOf() + (demo ? ':demo' : '');
-  function tourCards() { const a = audOf(); return (demo ? C.tour.demo : []).concat(C.tour[a] || []); }
+  const tourKey = () => demo ? 'hcTour:demo' : 'hcTour:' + uid() + ':' + audOf();   // the demo shows its welcome once per browser, not once per demo login
+  function tourCards() {
+    const a = audOf(); let own = C.tour[a] || [];
+    if (a === 'admin' && !demo && !isMgr()) own = own.filter(c => c[1][0] !== 'You decide what they see' && (c[1][0] !== 'Fees and UPI' || roleSeesTopic('admin', 'upi')));
+    return (demo ? C.tour.demo : []).concat(own);
+  }
+  /* First login shows ONE short card ("Help is in the menu"); the full walkthrough is only a button inside Help ("Take the tour"). */
+  function introCards() {
+    const own = tourCards(), a = audOf(), mine = C.tour[a] || [];
+    const help = mine.length ? mine[mine.length - 1] : null;
+    return (demo ? C.tour.demo : []).concat(help ? [help] : []);
+  }
   function startTour(force) {
-    const cards = tourCards(); if (!cards.length || $('hcTour')) return; css();
+    const cards = force ? tourCards() : introCards(); if (!cards.length || $('hcTour')) return; css();
     tourRun = { i: 0, cards }; paintTour();
   }
   function paintTour() {
@@ -320,6 +381,7 @@
   const appVisible = () => { const a = $('appShell'); return !!(a && a.style.display !== 'none' && a.offsetParent !== null); };
   function blocked() { return !!($('cnOverlay') || document.querySelector('.cn-ov,.sw-ov')); }
   const fabMode = () => { const m = LS.get('hcFab:' + uid()); return (m === 'full' || m === 'small' || m === 'off') ? m : (S.fab || 'full'); };
+  const setHtml = (el, html) => { if (el.__hcHtml !== html) { el.innerHTML = html; el.__hcHtml = html; } };
   function updateFab() {
     const show = !!me() && appVisible();
     let b = $('hcFab');
@@ -327,11 +389,12 @@
     css();
     if (!b) { b = document.createElement('button'); b.id = 'hcFab'; b.type = 'button'; b.setAttribute('aria-label', 'Help'); b.addEventListener('click', () => openHelp(true)); document.body.appendChild(b); }
     const seen = LS.get('hcSeenNew:' + uid()) || ''; const now = S.whatsNew.map(w => w.id).join(',');
-    b.classList.toggle('new', !!now && now !== seen);
-    const fm = fabMode(); b.classList.toggle('small', fm === 'small'); b.classList.toggle('hide', fm === 'off');
-    b.setAttribute('aria-label', L('Help', 'సహాయం'));
-    b.innerHTML = '<span>❓</span><span class="t">' + esc(L('Help', 'సహాయం')) + '</span><span class="dot"></span>';
-    b.classList.add('on');
+    const wantNew = !!now && now !== seen; if (b.classList.contains('new') !== wantNew) b.classList.toggle('new', wantNew);
+    const fm = fabMode(); if (b.classList.contains('small') !== (fm === 'small')) b.classList.toggle('small', fm === 'small'); if (b.classList.contains('hide') !== (fm === 'off')) b.classList.toggle('hide', fm === 'off');
+    const lab = L('Help', 'సహాయం');
+    if (b.getAttribute('aria-label') !== lab) b.setAttribute('aria-label', lab);
+    setHtml(b, '<span>❓</span><span class="t">' + esc(lab) + '</span><span class="dot"></span>');   // only redraw when the words change, so the button never flickers
+    if (!b.classList.contains('on')) b.classList.add('on');
   }
   /* Help in the side menu and the account menu (all roles) */
   function openFromMenu() {
@@ -346,13 +409,13 @@
     if (t && t.parentNode) {
       let a = $('hcMenuLink');
       if (!a) { a = document.createElement('button'); a.type = 'button'; a.id = 'hcMenuLink'; a.className = 'sb-link'; a.addEventListener('click', openFromMenu); t.parentNode.insertBefore(a, t); }
-      a.innerHTML = '<span class="sb-icon-wrap" style="font-size:1.05rem;line-height:1">❓</span> ' + esc(menuLabel()) + (dot ? ' <span class="nb-badge" style="display:inline-block">•</span>' : '');
+      setHtml(a, '<span class="sb-icon-wrap" style="font-size:1.05rem;line-height:1">❓</span> ' + esc(menuLabel()) + (dot ? ' <span class="nb-badge" style="display:inline-block">•</span>' : ''));
     }
     const m = $('sbUserMenu');
     if (m) {
       let b = $('hcMenuAcct');
       if (!b) { b = document.createElement('button'); b.type = 'button'; b.id = 'hcMenuAcct'; b.className = 'approvals-bell-btn'; b.setAttribute('role', 'menuitem'); b.addEventListener('click', openFromMenu); m.insertBefore(b, m.firstChild); }
-      b.innerHTML = '<span class="approvals-bell-icon">❓</span><span class="sb-btn-label">' + esc(menuLabel()) + '</span>';
+      setHtml(b, '<span class="approvals-bell-icon">❓</span><span class="sb-btn-label">' + esc(menuLabel()) + '</span>');
     }
   }
   let lastUser = null, tourTried = false;

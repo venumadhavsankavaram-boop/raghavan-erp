@@ -76,6 +76,11 @@ export const pool = mysql.createPool({
   // reached at all (see server.js's initDb()): now a bad connection fails
   // loudly within 15s and gets logged, instead of hanging forever silently.
   connectTimeout: 15000,
+  // Keep-alive packets stop a router or the host's network from silently dropping a connection that is
+  // quiet for a while. A connection dropped that way never errors: the next query on it just waits forever,
+  // which is what froze the whole ERP once overnight (health check never answered, logs showed no crash).
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000,
   ssl,
   typeCast,
 });
@@ -96,7 +101,33 @@ async function withIdleRetry(fn) {
   try { return await fn(); }
   catch (err) { if (isIdleDisconnect(err)) return await fn(); throw err; }
 }
-function queryRetry(text, params) { return withIdleRetry(() => pool.query(text, params)); }
+// Every database request now has a time limit. Without one, a request waiting on a dead connection never
+// ends, other requests pile up behind it, and the site looks frozen until someone restarts it.
+// dbHealth feeds the self-check in server.js (restart itself when requests keep timing out).
+const QUERY_TIMEOUT_MS = Number(process.env.DB_QUERY_TIMEOUT_MS || 120000);
+export const dbHealth = { timeouts: 0, lastTimeoutAt: 0 };
+function withTimeout(promise, what) {
+  let timer;
+  const limit = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      dbHealth.timeouts++; dbHealth.lastTimeoutAt = Date.now();
+      const err = new Error('Database did not answer within ' + Math.round(QUERY_TIMEOUT_MS / 1000) + 's (' + String(what).replace(/\s+/g, ' ').slice(0, 60) + ')');
+      err.code = 'DB_QUERY_TIMEOUT'; reject(err);
+    }, QUERY_TIMEOUT_MS);
+  });
+  promise.catch(() => {});   // a late answer after the timeout is ignored
+  return Promise.race([promise, limit]).finally(() => clearTimeout(timer));
+}
+function queryRetry(text, params) { return withIdleRetry(() => withTimeout(pool.query(text, params), text)); }
+function getConnTimed() { return withTimeout(pool.getConnection(), 'get connection'); }
+// Quick "is the database answering" check used by the self-check and /api/health. Resolves true/false, never throws.
+export async function pingDb(ms = 10000) {
+  let timer;
+  try {
+    const ok = await Promise.race([pool.query('SELECT 1').then(() => true), new Promise(r => { timer = setTimeout(() => r(false), ms); })]);
+    return ok;
+  } catch { return false; } finally { clearTimeout(timer); }
+}
 
 // Postgres cast syntax (`::jsonb`, `::int`, ...) has no MySQL equivalent and
 // isn't needed there — a JSON column accepts a plain JSON string on write,
@@ -173,7 +204,7 @@ sql.query = async function (text, params = []) {
 // than through the pool, which could hand the next query to a different
 // connection) is what keeps this correct.
 async function nextDocSeqOnce(series, period) {
-  const conn = await pool.getConnection();
+  const conn = await getConnTimed();
   try {
     await conn.query(
       `INSERT INTO doc_counters (series, period, next_seq) VALUES (?, ?, LAST_INSERT_ID(1))
@@ -193,7 +224,7 @@ export function nextDocSeq(series, period) { return withIdleRetry(() => nextDocS
 // only ever RAISES the counter (first-time seed, or a raised "next receipt starts at"
 // setting) — it never moves it backwards, so a number is never handed out twice.
 async function reserveDocSeqRangeOnce(series, period, count, minNext) {
-  const conn = await pool.getConnection();
+  const conn = await getConnTimed();
   try {
     await conn.query(
       `INSERT INTO doc_counters (series, period, next_seq) VALUES (?, ?, ?)

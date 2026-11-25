@@ -164,46 +164,49 @@ const COMMS_MESSAGES_KEY = "comms-messages";
   }
 
   /* --- Compose --- */
+  const COMMS_SCOPES = [['allstudents','All students & parents'],['allstaff','All staff'],['teachers','Teachers only'],['everyone','Everyone'],['class','A class'],['section','A class & section'],['defaulters','Fee defaulters'],['individual','One student']];
+  let commsPush = false, commsInApp = true, commsWa = false, commsSent = null;
+  function setCommsScope(k){ commsAudienceScope = k; commsPreparedRecipients = []; const pv = document.getElementById('commsRecipientsPreview'); if(pv) pv.innerHTML = ''; document.querySelectorAll('#commsScopeSeg button').forEach(b => b.classList.toggle('on', b.dataset.k === k)); renderCommsAudienceFields(); }
+  function toggleCommsChannel(k){
+    if(k === 'inapp') commsInApp = !commsInApp; else if(k === 'push') commsPush = !commsPush; else commsWa = !commsWa;
+    commsPreparedRecipients = []; const pv = document.getElementById('commsRecipientsPreview'); if(pv) pv.innerHTML = '';
+    document.querySelectorAll('#commsChips .nbx-chip').forEach(b => { const on = ({inapp:commsInApp,push:commsPush,wa:commsWa})[b.dataset.k]; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); b.querySelector('.nbx-tick').textContent = on ? '✓' : ''; });
+  }
+  function commsChip(on, icon, title, sub, key){
+    return `<button type="button" class="nbx-chip ${on?'on':''}" data-k="${key}" aria-pressed="${on}" onclick="toggleCommsChannel('${key}')"><span class="nbx-chip-ic" aria-hidden="true">${icon}</span><span><b>${title}</b><small>${sub}</small></span><i class="nbx-tick" aria-hidden="true">${on?'✓':''}</i></button>`;
+  }
   function renderCommsCompose(body){
     commsPreparedRecipients = [];
+    if(commsSent){
+      const r = commsSent; commsSent = null;
+      body.innerHTML = `<div class="sf-card cm-post cmp-ok"><h3 class="cm-h">✅ Sent to ${r.count} ${r.count === 1 ? 'person' : 'people'}</h3>
+        <p class="cm-sub"><b>${cmEsc(r.title)}</b> · ${cmEsc(r.audience)} · ${cmEsc(r.channels.join(' + '))}</p>
+        <div class="cmp-btns"><button class="btn btn-primary" onclick="renderCommsCompose(document.getElementById('commsBody'))">✍️ Write another message</button>
+        <button class="btn" onclick="switchCommsTab('log')">🗂️ See sent messages</button>
+        ${r.inApp && allowedViews().includes('noticeboard') ? `<button class="btn" onclick="switchView('noticeboard')">📌 View on the Notice Board</button>` : ''}</div></div>`;
+      return;
+    }
     body.innerHTML = `
-      <div class="profile-card" style="max-width:680px;">
-        <div class="form-grid" style="margin-bottom:14px;">
-          <div class="f-field full">
-            <label>Message Type / Heading</label>
-            <select id="commsType" onchange="onCommsTypeChange()">
-              ${noticeTypes.map(t => `<option value="${t.name}">${t.icon} ${t.name}</option>`).join('')}
-              <option value="__new__">+ New Heading...</option>
-            </select>
-          </div>
-          <div class="f-field full" id="commsNewTypeField" style="display:none;"><label>New Heading Name</label><input type="text" id="commsNewTypeName" placeholder="e.g. Sports Day Update"></div>
-          <div class="f-field full"><label>Title <span class="required-star">*</span></label><input type="text" id="commsTitle" placeholder="e.g. Diwali Holidays Announcement"></div>
+      <div style="max-width:760px;">
+      <section class="sf-card cmp-step"><div class="cmp-n">1</div><div class="cmp-b"><h3 class="cm-h">Who should get it?</h3>
+        <div class="nbx-seg" id="commsScopeSeg" role="group" aria-label="Audience">${COMMS_SCOPES.map(([k,t]) => `<button type="button" data-k="${k}" class="${commsAudienceScope===k?'on':''}" onclick="setCommsScope('${k}')">${t}</button>`).join('')}</div>
+        <div id="commsAudienceFields" style="margin-top:10px;"></div></div></section>
+      <section class="sf-card cmp-step"><div class="cmp-n">2</div><div class="cmp-b"><h3 class="cm-h">What do you want to say?</h3>
+        <div class="form-grid">
+          <div class="f-field"><label>Kind of message</label>
+            <select id="commsType" onchange="onCommsTypeChange()">${noticeTypes.map(t => `<option value="${cmEsc(t.name)}">${t.icon} ${cmEsc(t.name)}</option>`).join('')}<option value="__new__">+ New heading...</option></select></div>
+          <div class="f-field full" id="commsNewTypeField" style="display:none;"><label>New heading name</label><input type="text" id="commsNewTypeName" placeholder="e.g. Sports Day Update"></div>
+          <div class="f-field full"><label>Title <span class="required-star">*</span></label><input type="text" id="commsTitle" placeholder="e.g. Diwali holidays"></div>
           <div class="f-field full"><label>Message <span class="required-star">*</span></label><textarea id="commsBodyText" rows="6" placeholder="Type your message..."></textarea></div>
-        </div>
-
-        <h4 style="margin-bottom:10px;">Audience</h4>
-        <div class="form-grid" style="margin-bottom:10px;">
-          <div class="f-field full">
-            <select id="commsAudienceScope" onchange="commsAudienceScope=this.value; renderCommsAudienceFields();">
-              <option value="allstudents" ${commsAudienceScope==='allstudents'?'selected':''}>All Students (Parents)</option>
-              <option value="allstaff" ${commsAudienceScope==='allstaff'?'selected':''}>All Staff</option>
-              <option value="class" ${commsAudienceScope==='class'?'selected':''}>Specific Class</option>
-              <option value="section" ${commsAudienceScope==='section'?'selected':''}>Specific Class &amp; Section</option>
-              <option value="defaulters" ${commsAudienceScope==='defaulters'?'selected':''}>Fee Defaulters (auto)</option>
-              <option value="individual" ${commsAudienceScope==='individual'?'selected':''}>Individual Student</option>
-            </select>
-          </div>
-        </div>
-        <div id="commsAudienceFields"></div>
-
-        <h4 style="margin:16px 0 10px;">Send Via</h4>
-        <div style="display:flex; gap:20px; margin-bottom:16px;">
-          <label class="admission-toggle"><input type="checkbox" id="commsChannelInApp" checked> 📌 In-App Notice Board</label>
-          <label class="admission-toggle"><input type="checkbox" id="commsChannelWhatsApp"> 💬 WhatsApp</label>
-        </div>
-
-        <button class="btn btn-primary" onclick="prepareCommsRecipients()">Prepare &amp; Preview Recipients</button>
-        <div id="commsRecipientsPreview" style="margin-top:16px;"></div>
+        </div></div></section>
+      <section class="sf-card cmp-step"><div class="cmp-n">3</div><div class="cmp-b"><h3 class="cm-h">How should it reach them?</h3>
+        <div class="nbx-chips" id="commsChips">
+          ${commsChip(commsInApp,'📱','In the app','Notice Board, parent portal, staff inbox','inapp')}
+          ${commsChip(commsPush,'🔔','Phone alert','A notification on their phone','push')}
+          ${commsChip(commsWa,'💬','WhatsApp','Pre-filled chats you press Send on','wa')}
+        </div></div></section>
+      <button class="btn btn-primary" onclick="prepareCommsRecipients()">Review and send</button>
+      <div id="commsRecipientsPreview" style="margin-top:16px;"></div>
       </div>
     `;
     renderCommsAudienceFields();
@@ -286,6 +289,8 @@ const COMMS_MESSAGES_KEY = "comms-messages";
   function commsAudienceTargets(){
     if(commsAudienceScope === 'allstudents') return students.filter(isActive).map(s => ({ kind:'student', student:s }));
     if(commsAudienceScope === 'allstaff') return staffList.filter(staffIsActive).map(st => ({ kind:'staff', staff:st }));
+    if(commsAudienceScope === 'teachers') return staffList.filter(st => staffIsActive(st) && (/teach/i.test(st.designation || '') || !!st.classTeacherClass)).map(st => ({ kind:'staff', staff:st }));
+    if(commsAudienceScope === 'everyone') return students.filter(isActive).map(s => ({ kind:'student', student:s })).concat(staffList.filter(staffIsActive).map(st => ({ kind:'staff', staff:st })));
     if(commsAudienceScope === 'class'){
       if(!commsAudienceClass) return [];
       return students.filter(s => isActive(s) && s.className===commsAudienceClass).map(s => ({ kind:'student', student:s }));
@@ -331,11 +336,10 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     if(commsAudienceScope === 'defaulters') await ensureDataLoaded('payments', loadPaymentsData);
     const title = document.getElementById('commsTitle').value.trim();
     const bodyText = document.getElementById('commsBodyText').value.trim();
-    const inApp = document.getElementById('commsChannelInApp').checked;
-    const whatsapp = document.getElementById('commsChannelWhatsApp').checked;
+    const inApp = commsInApp, push = commsPush, whatsapp = commsWa;
     if(!title){ showToast('Enter a title.'); return; }
     if(!bodyText){ showToast('Enter a message.'); return; }
-    if(!inApp && !whatsapp){ showToast('Select at least one channel.'); return; }
+    if(!inApp && !push && !whatsapp){ showToast('Choose how it should reach them: in the app, phone alert or WhatsApp.'); return; }
     const targets = commsAudienceTargets();
     if(targets.length === 0){ showToast('No recipients match this audience.'); return; }
     commsPreparedRecipients = targets;
@@ -344,7 +348,8 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     preview.innerHTML = `
       <div class="profile-card" style="background:rgba(24,143,134,0.06); border-left:4px solid var(--teal);">
         <p style="font-size:0.85rem; margin-bottom:10px;"><b>${targets.length}</b> recipient${targets.length===1?'':'s'} matched${whatsapp?` · <b>${withPhone.length}</b> have a phone number on file for WhatsApp`:''}.</p>
-        ${canSub('comms_compose','announcements','create') ? `<button class="btn btn-primary" onclick="sendCommsMessage()">Send Now</button>` : ''}
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin-bottom:10px;">This goes only to these people. It is not shown on the public website.</p>
+        ${canSub('comms_compose','announcements','create') ? `<button class="btn btn-primary" onclick="sendCommsMessage()">Send now</button>` : ''}
       </div>
     `;
   }
@@ -353,11 +358,11 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     if(!typeName){ showToast('Enter a name for the new heading.'); return; }
     const title = document.getElementById('commsTitle').value.trim();
     const bodyText = document.getElementById('commsBodyText').value.trim();
-    const inApp = document.getElementById('commsChannelInApp').checked;
-    const whatsapp = document.getElementById('commsChannelWhatsApp').checked;
+    const inApp = commsInApp, push = commsPush, whatsapp = commsWa;
     const targets = commsPreparedRecipients;
-    const channels = [inApp?'In-App':null, whatsapp?'WhatsApp':null].filter(Boolean);
-    const audienceLabels = { allstudents:'All Students', allstaff:'All Staff', class:`${commsAudienceClass} (Whole Class)`, section:`${commsAudienceClass} — Section ${commsAudienceSection}`, defaulters:'Fee Defaulters', individual:'Individual Student' };
+    if(!targets.length){ showToast('Press Review and send first.'); return; }
+    const channels = [inApp?'In-App':null, push?'Push':null, whatsapp?'WhatsApp':null].filter(Boolean);
+    const audienceLabels = { allstudents:'All Students', allstaff:'All Staff', teachers:'Teachers', everyone:'Everyone (students + staff)', class:`${commsAudienceClass} (Whole Class)`, section:`${commsAudienceClass} — Section ${commsAudienceSection}`, defaulters:'Fee Defaulters', individual:'Individual Student' };
     const record = {
       id:'msg_'+Date.now(), type:typeName, title, body:bodyText, audienceLabel:audienceLabels[commsAudienceScope]||commsAudienceScope,
       audienceScope: commsAudienceScope, audienceClass: commsAudienceClass, audienceSection: commsAudienceSection, individualId: commsIndividualId,
@@ -365,21 +370,22 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     };
     commsMessages.push(record);
     await storageSet(COMMS_MESSAGES_KEY, commsMessages);
-    if(inApp){
+    if(inApp || push){
       const studentIds = targets.filter(t => t.kind==='student').map(t => t.student.id);
       const staffIds = targets.filter(t => t.kind==='staff').map(t => t.staff.id);
       if(studentIds.length || staffIds.length){
         fetch('/api/notifications/broadcast', {
           method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()},
-          body: JSON.stringify({ title, body:bodyText, type:'circular', url:'/?view=myprofile', studentIds, staffIds }),
+          body: JSON.stringify({ title, body:bodyText, type:'circular', url:'/?view=myprofile', studentIds, staffIds, push }),
         }).catch(err => console.error('notification broadcast failed:', err));
       }
     }
     if(whatsapp){
       renderCommsWhatsAppQueue(record, targets, bodyText);
     }else{
-      showToast(`${channels.join(' + ')} message sent to ${targets.length} recipient(s).`);
-      if(inApp){ switchView('noticeboard'); } else { switchCommsTab('log'); }
+      commsSent = { count: targets.length, title, audience: record.audienceLabel, channels: channels.map(c => c === 'In-App' ? 'In the app' : c === 'Push' ? 'Phone alert' : c), inApp };
+      showToast('Message sent.', 'burst');
+      renderCommsCompose(document.getElementById('commsBody'));
     }
   }
   function renderCommsWhatsAppQueue(record, targets, template){
@@ -417,10 +423,11 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     renderNoticeBoard(document.getElementById('noticeBoardBody'));
   }
   async function deleteNotice(id){
-    if(!await showConfirmDialog('Take this notice down from the website\'s notice board? It stays in the Message Log for your records.')) return;
+    if(!await showConfirmDialog('Take this notice down from the app\'s Notice Board? Parents and staff will no longer see it. It stays in the Message Log for your records.')) return;
     const n = commsMessages.find(m => m.id === id);
     if(!n) return;
-    n.boardRemoved = true;
+    if(n.toWebsite === true){ n.channels = (n.channels || []).filter(c => c !== 'In-App'); }   // older notice that was also on the website: keep the website copy
+    else n.boardRemoved = true;
     await storageSet(COMMS_MESSAGES_KEY, commsMessages);
     renderNoticeBoard(document.getElementById('noticeBoardBody'));
     showToast('Notice taken down.', 'burst');

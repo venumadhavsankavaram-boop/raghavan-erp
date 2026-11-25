@@ -17,7 +17,7 @@ import crypto from 'crypto';
 import { AsyncLocalStorage } from 'async_hooks';
 import zlib from 'zlib';
 import bcrypt from 'bcryptjs';
-import { sql, nextDocSeq, reserveDocSeqRange, insertNotificationEventIfNew, addColumnIfMissing, createIndexIfMissing } from './db.js';
+import { sql, nextDocSeq, reserveDocSeqRange, insertNotificationEventIfNew, addColumnIfMissing, createIndexIfMissing, pingDb } from './db.js';
 import webpush from 'web-push';
 // Fleet reporting + support-login — see ../reporting-client/ for the
 // canonical copies and full wiring docs (also README.md, "Reporting
@@ -8473,10 +8473,23 @@ app.get('/api/health', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   try {
     const t0 = Date.now();
-    await sql`SELECT 1 AS ok`;
+    if (!(await pingDb(8000))) return res.status(503).json({ ok: false, db: false });   // answers within 8s even when the database is stuck
     return res.status(200).json({ ok: true, db: true, ms: Date.now() - t0 });
   } catch (e) { return res.status(503).json({ ok: false, db: false }); }
 });
+// Self-check: every 30s ask the database a trivial question. If it stays silent for ~90s (three checks in a row)
+// the app exits so the host starts it again fresh - this is what a person did by pressing Restart when the ERP
+// froze overnight. Skipped in the first 3 minutes after start so a database that is slow to wake can't cause a restart loop.
+let dbSilentStreak = 0;
+setInterval(async () => {
+  const ok = await pingDb(10000);
+  dbSilentStreak = ok ? 0 : dbSilentStreak + 1;
+  if (!ok) console.error('Self-check: database did not answer (' + dbSilentStreak + '/3)');
+  if (dbSilentStreak >= 3 && Date.now() - SERVER_STARTED_AT > 3 * 60 * 1000) {
+    console.error('Self-check: database silent for about 90 seconds - restarting the app so it recovers.');
+    setTimeout(() => process.exit(1), 300);
+  }
+}, 30 * 1000).unref();
 // ---- Database size: how big the school's database is, how fast it grows, and (once the Admin enters the plan limit) how full ----
 async function kvRead(key) {
   try { const r = await sql`SELECT value FROM kv_store WHERE \`key\` = ${key}`; let v = r[0] && r[0].value; if (typeof v === 'string') { try { v = JSON.parse(v); } catch (e) { /* keep */ } } return v === undefined ? null : v; } catch (e) { return null; }
@@ -8647,15 +8660,27 @@ async function ensureAutoBackupTable() {
   )`);
 }
 function istDay(d = new Date()) { return new Date(d.getTime() + 330 * 60000).toISOString().slice(0, 10); }
-async function buildBackupObject() {
+// The backup is written table by table straight into one buffer, and each table's rows are dropped as soon as
+// they are written, so memory never holds the whole database twice over (as rows AND as one giant string).
+// Between tables it lets other requests run, and the compressing is done off the main thread, so a big school's
+// backup no longer freezes the ERP. The file has the same shape as before, so restore and download are unchanged.
+async function buildBackupBuffer() {
   const names = await backupTableNames();
-  const backup = { generatedAt: new Date().toISOString(), format: 'erp-full-backup-v2', serverTzOffsetMin: new Date().getTimezoneOffset(), skippedTables: BACKUP_SKIP_TABLES, counts: {}, totalRows: 0, tables: {} };
+  const counts = {}; let totalRows = 0;
+  const head = { generatedAt: new Date().toISOString(), format: 'erp-full-backup-v2', serverTzOffsetMin: new Date().getTimezoneOffset(), skippedTables: BACKUP_SKIP_TABLES };
+  const parts = [Buffer.from(JSON.stringify(head).slice(0, -1) + ',"tables":{', 'utf8')];
+  let first = true;
   for (const name of names) {
     const rows = await sql.query(`SELECT * FROM \`${name}\``);
-    backup.tables[name] = rows; backup.counts[name] = rows.length; backup.totalRows += rows.length;
+    counts[name] = rows.length; totalRows += rows.length;
+    parts.push(Buffer.from((first ? '' : ',') + JSON.stringify(name) + ':' + JSON.stringify(rows), 'utf8'));
+    first = false;
+    await new Promise(r => setImmediate(r));
   }
-  backup.complete = true; backup.totalTables = names.length;
-  return backup;
+  parts.push(Buffer.from('},"counts":' + JSON.stringify(counts) + ',"totalRows":' + totalRows + ',"complete":true,"totalTables":' + names.length + '}', 'utf8'));
+  const raw = Buffer.concat(parts); parts.length = 0;
+  const gz = await new Promise((resolve, reject) => zlib.gzip(raw, { level: 6 }, (e, out) => e ? reject(e) : resolve(out)));
+  return { gz, totalTables: names.length, totalRows };
 }
 async function runAutoBackup(kind = 'auto') {
   const keepN = (await abSettings()).keep;
@@ -8663,8 +8688,7 @@ async function runAutoBackup(kind = 'auto') {
   autoBackupBusy = true;
   try {
     await ensureAutoBackupTable();
-    const b = await buildBackupObject();
-    const gz = zlib.gzipSync(Buffer.from(JSON.stringify(b), 'utf8'), { level: 6 });
+    const b = await buildBackupBuffer(); const gz = b.gz;
     if (gz.length > 200 * 1024 * 1024) throw new Error('backup too large');
     await sql`INSERT INTO auto_backups (created_at, day, kind, tables_n, rows_n, bytes) VALUES (${new Date().toISOString()}, ${istDay()}, ${kind}, ${b.totalTables}, ${b.totalRows}, ${gz.length})`;
     const idRow = await sql`SELECT MAX(id) AS id FROM auto_backups`;
