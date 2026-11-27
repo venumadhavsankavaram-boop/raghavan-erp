@@ -71,6 +71,7 @@ function renderInventoryItemsList(body){
     ['inventory_approvals', 'approvals', `✅ Approvals${pendingInventoryApprovalsCount() > 0 ? ` (${pendingInventoryApprovalsCount()})` : ''}`],
     ['inventory_saleshistory', 'saleshistory', '🧾 Sales History'],
     ['inventory_stockoverview', 'stockoverview', '📊 Stock Overview'],
+    ['inventory_items', 'stockorders', `📥 Stock Orders${typeof ivpOpenCount === 'function' && ivpOpenCount() > 0 ? ` (${ivpOpenCount()})` : ''}`],
   ].filter(([perm]) => getInventoryTabAccess(currentUser.role, perm))
    .map(([, tab, label]) => `<button type="button" onclick="switchInventoryTab('${tab}')">${label}</button>`).join('');
 
@@ -172,7 +173,7 @@ function paintInvItemsRows(){
           <small>${it.createdBy ? 'Added by ' + escapeHtml(it.createdBy) : ''}</small></span>
       </div></td>
       <td>${escapeHtml(it.category || 'General')}${it.subCategory ? `<small>${escapeHtml(it.subCategory)}</small>` : ''}</td>
-      <td class="iv-qty iv-qty--${state}">${it.quantity}${state !== 'ok' ? `<small>min ${it.threshold}</small>` : ''}</td>
+      <td class="iv-qty iv-qty--${state}">${it.quantity}${state !== 'ok' ? `<small>min ${it.threshold}</small>` : ''}${ivOnOrderTag(it)}</td>
       <td>${sold}</td>
       <td>${fmtMoney(it.sellingPrice)}</td>
       <td>${ivStockBadge(it)}</td>

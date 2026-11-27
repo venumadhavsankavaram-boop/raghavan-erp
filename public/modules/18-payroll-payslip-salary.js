@@ -311,13 +311,15 @@ function salaryDisbursementData(monthStr){
   const INVENTORY_SALES_KEY = "inventory-sales";
   const INVENTORY_RETURNS_KEY = "inventory-returns";
   const INVENTORY_VENDOR_RETURNS_KEY = "inventory-vendor-returns";
-  [INVENTORY_ITEMS_KEY, INVENTORY_SALES_KEY, INVENTORY_RETURNS_KEY, INVENTORY_VENDOR_RETURNS_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
-  let inventoryItems = [], inventorySales = [], inventoryReturns = [], inventoryVendorReturns = [];
+  const INVENTORY_PURCHASES_KEY = "inventory-purchases";
+  [INVENTORY_ITEMS_KEY, INVENTORY_SALES_KEY, INVENTORY_RETURNS_KEY, INVENTORY_VENDOR_RETURNS_KEY, INVENTORY_PURCHASES_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
+  let inventoryItems = [], inventorySales = [], inventoryReturns = [], inventoryVendorReturns = [], inventoryPurchases = [];
   async function loadInventory(){
     inventoryItems = await storageGet(INVENTORY_ITEMS_KEY, []);
     inventorySales = await storageGet(INVENTORY_SALES_KEY, []);
     inventoryReturns = await storageGet(INVENTORY_RETURNS_KEY, []);
     inventoryVendorReturns = await storageGet(INVENTORY_VENDOR_RETURNS_KEY, []);
+    inventoryPurchases = await storageGet(INVENTORY_PURCHASES_KEY, []);
   }
   // How much of a sale line has already been returned — always derived from the
   // returns log itself, never stored back onto the original sale, so the sale

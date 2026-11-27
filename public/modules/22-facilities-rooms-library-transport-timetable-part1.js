@@ -533,7 +533,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
   function pendingInventoryApprovalsCount(){
     return pendingApprovals.filter(a => a.type==='inventory_item' && a.status==='Pending').length;
   }
-  const INV_TAB_PERM_KEYS = { items:'inventory_items', sellcart:'inventory_sell', sellcheckout:'inventory_sell', approvals:'inventory_approvals', saleshistory:'inventory_saleshistory', stockoverview:'inventory_stockoverview' };
+  const INV_TAB_PERM_KEYS = { items:'inventory_items', sellcart:'inventory_sell', sellcheckout:'inventory_sell', approvals:'inventory_approvals', saleshistory:'inventory_saleshistory', stockoverview:'inventory_stockoverview', stockorders:'inventory_items' };
   function renderInventoryBody(){
     const body = document.getElementById('inventoryBody');
     if(!body) return;
@@ -547,6 +547,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     if(inventoryTab === 'approvals') return renderInventoryApprovalsTab(body);
     if(inventoryTab === 'saleshistory') return renderInventorySalesHistoryTab(body);
     if(inventoryTab === 'stockoverview') return renderInventoryStockOverviewTab(body);
+    if(inventoryTab === 'stockorders') return renderInventoryStockOrdersTab(body);
   }
 
   function setInvFilterType(t){ invFilterType = t; renderInventoryItemsList(document.getElementById('inventoryBody')); }
@@ -698,6 +699,14 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     const description = document.getElementById('invItemDescription').value.trim();
     if(!name){ showToast('Enter a product name.'); return; }
     if(costPrice <= 0 || sellingPrice <= 0){ showToast('Enter both a cost price and a selling price.'); return; }
+    {
+      const dup = ivpFindDuplicate({ name, size, applicableClass, type }, editingInventoryItemId);
+      if(dup){ showToast(`"${name}" is already in your products (${dup.quantity} in stock). Use "Add Stock" on it instead of adding it again, so your sales and accounts stay in one place.`); return; }
+      const cur = editingInventoryItemId ? inventoryItems.find(x => x.id === editingInventoryItemId) : null;
+      if(cur && quantity > (Number(cur.quantity) || 0) && currentUser.role === 'Admin'){
+        if(!await showConfirmDialog(`You are raising the stock of "${cur.name}" from ${cur.quantity} to ${quantity} by typing it in. If this is newly bought stock, press Cancel and use "Add Stock" on the product, so the purchase, its cost and the supplier are recorded. Continue anyway?`, { title: 'Newly bought stock?', okText: 'Continue anyway', cancelText: 'Cancel' })) return;
+      }
+    }
     const payload = {
       editingId: editingInventoryItemId, name, type, category, subCategory, quantity, threshold, costPrice, sellingPrice,
       unit, size, applicableClass, taxRate, hsnCode, description,

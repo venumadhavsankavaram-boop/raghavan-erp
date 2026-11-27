@@ -2403,6 +2403,7 @@ const KV_KEY_TO_MODULE = {
   'inventory-sales': ['inventory'],
   'inventory-returns': ['inventory'],
   'inventory-vendor-returns': ['inventory'],
+  'inventory-purchases': ['inventory'],
   'timetable-entries': ['timetable'],
   'timetable-periods': ['timetable'],
   'timetable-days': ['timetable'],

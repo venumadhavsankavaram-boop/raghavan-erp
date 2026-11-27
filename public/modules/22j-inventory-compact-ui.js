@@ -69,6 +69,7 @@ function ivItemActions(it){
     canSub('inventory_sell', 'inventory', 'create') && !disabled && it.quantity > 0
       ? `<button type="button" class="ivq-btn ivq-btn--sell" onclick="quickSellItem('${it.id}')">${IVQ_ICON.sell}<span>Sell</span></button>` : '',
     canEdit ? `<button type="button" class="ivq-btn ivq-btn--ghost" title="Edit product" aria-label="Edit ${escapeHtml(it.name)}" onclick="openInventoryItemEditor('${it.id}')">${IVQ_ICON.edit}<span>Edit</span></button>` : '',
+    isAdmin && !disabled ? `<button type="button" class="ivq-btn ivq-btn--ghost" title="Add stock that has arrived" aria-label="Add stock to ${escapeHtml(it.name)}" onclick="openReceiveStockModal('', '${it.id}')">${IVQ_ICON.plus}<span>Stock</span></button>` : '',
     hasMore ? `<button type="button" class="ivq-btn ivq-btn--icon ivq-more" title="More actions" aria-label="More actions for ${escapeHtml(it.name)}" aria-haspopup="menu" onclick="ivqMenu('${it.id}', event)">${IVQ_ICON.more}</button>` : ''
   ].join('');
 }
@@ -90,7 +91,7 @@ function ivItemCard(it){
       <span class="ivq-price">${fmtMoney(it.sellingPrice)}</span>
     </div>
     <div class="ivq-stock">
-      <div class="ivq-stock-row"><span><b class="iv-qty--${state}">${it.quantity}</b> in stock${state === 'low' && it.threshold != null ? ` <small>(min ${it.threshold})</small>` : ''} · <b>${sold}</b> sold</span>
+      <div class="ivq-stock-row"><span><b class="iv-qty--${state}">${it.quantity}</b> in stock${ivOnOrderTag(it)}${state === 'low' && it.threshold != null ? ` <small>(min ${it.threshold})</small>` : ''} · <b>${sold}</b> sold</span>
         ${it.active === false ? '<span class="pill">Disabled</span>' : ivStockBadge(it)}</div>
       ${ivqStockBar(it, state)}
     </div>
