@@ -446,6 +446,10 @@ async function ensureSchema() {
     requested_by TEXT, requested_by_name TEXT, requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     decided_by TEXT, decided_by_name TEXT, decided_at DATETIME, decision_note TEXT
   )`;
+  // first_part = 'Afternoon' when a multi-day leave starts at lunch (teacher attended the morning);
+  // last_part = 'Morning' when the person is back for the afternoon on the last day. NULL = whole day.
+  await addColumnIfMissing('staff_leave_requests', 'first_part VARCHAR(12)');
+  await addColumnIfMissing('staff_leave_requests', 'last_part VARCHAR(12)');
   await createIndexIfMissing('idx_staff_leave_requests_staff_id', 'staff_leave_requests', 'staff_id');
   await createIndexIfMissing('idx_staff_leave_requests_status', 'staff_leave_requests', 'status');
   await sql`CREATE TABLE IF NOT EXISTS admission_inquiries (
@@ -3434,6 +3438,7 @@ async function handleStaffLeaveRequests(req, res) {
     if (!staffRows.length) return res.status(404).json({ error: 'Linked staff record not found.' });
     const staffName = `${staffRows[0].first_name || ''} ${staffRows[0].last_name || ''}`.trim();
     const { fromDate, toDate, isHalfDay, session, reason } = req.body || {};
+    let { firstPart, lastPart } = req.body || {};
     if (!reason || !String(reason).trim()) return res.status(400).json({ error: 'A reason is required.' });
     if (!fromDate) return res.status(400).json({ error: 'Missing fromDate.' });
     let finalToDate, finalSession;
@@ -3446,12 +3451,18 @@ async function handleStaffLeaveRequests(req, res) {
       finalSession = null;
       if (finalToDate < fromDate) return res.status(400).json({ error: 'toDate cannot be before fromDate.' });
     }
+    // Part-days at the two ends of a multi-day leave (only meaningful when it spans 2+ dates).
+    if (isHalfDay || finalToDate === fromDate) { firstPart = null; lastPart = null; }
+    else {
+      firstPart = firstPart === 'Afternoon' ? 'Afternoon' : null;
+      lastPart = lastPart === 'Morning' ? 'Morning' : null;
+    }
     const id = 'stflv_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
     await sql`
-      INSERT INTO staff_leave_requests (id, staff_id, staff_name, from_date, to_date, session, reason, requested_by, requested_by_name)
-      VALUES (${id}, ${myStaffId}, ${staffName}, ${fromDate}, ${finalToDate}, ${finalSession}, ${String(reason).trim()}, ${req.authUser.id}, ${req.authUser.name})
+      INSERT INTO staff_leave_requests (id, staff_id, staff_name, from_date, to_date, session, first_part, last_part, reason, requested_by, requested_by_name)
+      VALUES (${id}, ${myStaffId}, ${staffName}, ${fromDate}, ${finalToDate}, ${finalSession}, ${firstPart}, ${lastPart}, ${String(reason).trim()}, ${req.authUser.id}, ${req.authUser.name})
     `;
-    const span = finalSession ? `${fromDate} (${finalSession})` : (fromDate === finalToDate ? fromDate : `${fromDate} to ${finalToDate}`);
+    const span = finalSession ? `${fromDate} (${finalSession})` : (fromDate === finalToDate ? fromDate : `${fromDate}${firstPart ? ' (from afternoon)' : ''} to ${finalToDate}${lastPart ? ' (morning only)' : ''}`);
     notifyUsersByRole(MANAGEMENT_ROLES, {
       title: 'Leave request needs approval',
       body: `${staffName} applied for leave: ${span}. Reason: ${String(reason).trim()}`,
@@ -3478,7 +3489,12 @@ async function handleStaffLeaveRequests(req, res) {
         await markHalfDayLeave(reqRow.staff_id, reqRow.from_date, reqRow.session);
       } else {
         const dates = staffLeaveDatesInRange(reqRow.from_date, reqRow.to_date);
-        for (const d of dates) await markFullDayLeave(reqRow.staff_id, d);
+        for (let i = 0; i < dates.length; i++) {
+          const d = dates[i];
+          if (i === 0 && dates.length > 1 && reqRow.first_part === 'Afternoon') await markHalfDayLeave(reqRow.staff_id, d, 'Afternoon');
+          else if (i === dates.length - 1 && dates.length > 1 && reqRow.last_part === 'Morning') await markHalfDayLeave(reqRow.staff_id, d, 'Morning');
+          else await markFullDayLeave(reqRow.staff_id, d);
+        }
       }
     }
     await sql`
@@ -3501,7 +3517,7 @@ async function handleStaffLeaveRequests(req, res) {
 function shapeStaffLeaveRequest(r) {
   return {
     id: r.id, staffId: r.staff_id, staffName: r.staff_name,
-    fromDate: r.from_date, toDate: r.to_date, session: r.session, reason: r.reason,
+    fromDate: r.from_date, toDate: r.to_date, session: r.session, firstPart: r.first_part || null, lastPart: r.last_part || null, reason: r.reason,
     status: r.status, requestedBy: r.requested_by, requestedByName: r.requested_by_name, requestedAt: r.requested_at,
     decidedBy: r.decided_by, decidedByName: r.decided_by_name, decidedAt: r.decided_at, decisionNote: r.decision_note,
   };

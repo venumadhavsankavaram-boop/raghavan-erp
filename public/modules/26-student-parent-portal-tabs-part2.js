@@ -93,7 +93,19 @@
     while(cur <= end && g++ < 366){ out.push(cur.toISOString().slice(0,10)); cur = new Date(cur.getTime() + 86400000); }
     return out;
   }
-  function apxLeaveDays(r){ return r.session ? 0.5 : apxLeaveDates(r.fromDate, r.toDate || r.fromDate).length; }
+  // One entry per calendar day of a leave request: w = 1 (whole day) or 0.5 (only the afternoon on the first
+  // day / only the morning on the last day of a multi-day leave).
+  function apxLeaveParts(r){
+    if(r.session) return [{ date: r.fromDate, w: 0.5, part: r.session }];
+    const ds = apxLeaveDates(r.fromDate, r.toDate || r.fromDate);
+    return ds.map((d, i) => {
+      if(ds.length > 1 && i === 0 && r.firstPart === 'Afternoon') return { date: d, w: 0.5, part: 'Afternoon' };
+      if(ds.length > 1 && i === ds.length - 1 && r.lastPart === 'Morning') return { date: d, w: 0.5, part: 'Morning' };
+      return { date: d, w: 1, part: 'Full' };
+    });
+  }
+  function apxLeaveDays(r){ return apxLeaveParts(r).reduce((n, p) => n + p.w, 0); }
+  function apxDaysText(n){ const w = Math.floor(n + 1e-9), h = n - w > 0.25; return (w ? w : '') + (h ? '½' : '') || '0'; }
   function apxStaffById(id){ return (typeof staffList !== 'undefined' ? staffList : []).find(x => x.id === id); }
   function apxLeaveDetail(r){
     const facts = [], flags = [];
@@ -104,20 +116,17 @@
     facts.push(['Staff', escapeHtml(r.staffName || (st ? st.firstName + ' ' + st.lastName : r.staffId))]);
     if(st) facts.push(['Role', escapeHtml([st.designation, st.department].filter(Boolean).join(' · ') || '—')]);
     facts.push(['Leave', r.session ? 'Half day — ' + escapeHtml(r.session) + ' on ' + apxDay(r.fromDate)
-      : (r.fromDate === (r.toDate || r.fromDate) ? '1 day — ' + apxDay(r.fromDate) : days + ' days — ' + apxDay(r.fromDate) + ' to ' + apxDay(r.toDate))]);
+      : (r.fromDate === (r.toDate || r.fromDate) ? '1 day — ' + apxDay(r.fromDate) : apxDaysText(days) + ' days — ' + apxDay(r.fromDate) + (r.firstPart ? ' (from afternoon)' : '') + ' to ' + apxDay(r.toDate) + (r.lastPart ? ' (morning only)' : ''))]);
     facts.push(['Reason', escapeHtml(r.reason || 'No reason given')]);
     facts.push(['Applied on', apxDay(r.requestedAt)]);
     // Leave already taken in the same month (approved requests), against the monthly paid-leave allowance.
     const all = (typeof _staffLeaveCache !== 'undefined' ? _staffLeaveCache : []);
     const mine = all.filter(x => x.staffId === r.staffId && x.id !== r.id);
     const ym = String(r.fromDate || '').slice(0,7), yr = String(r.fromDate || '').slice(0,4);
-    const spanIn = (x, pref) => {
-      if(x.session) return String(x.fromDate).startsWith(pref) ? 0.5 : 0;
-      return apxLeaveDates(x.fromDate, x.toDate || x.fromDate).filter(d => d.startsWith(pref)).length;
-    };
+    const spanIn = (x, pref) => apxLeaveParts(x).filter(p => String(p.date).startsWith(pref)).reduce((n, p) => n + p.w, 0);
     const takenMonth = mine.filter(x => x.status === 'Approved').reduce((n, x) => n + spanIn(x, ym), 0);
     const takenYear = mine.filter(x => x.status === 'Approved').reduce((n, x) => n + spanIn(x, yr), 0);
-    const thisInMonth = r.session ? 0.5 : dates.filter(d => d.startsWith(ym)).length;
+    const thisInMonth = apxLeaveParts(r).filter(p => String(p.date).startsWith(ym)).reduce((n, p) => n + p.w, 0);
     const quotaRaw = (st && typeof payrollQuotaFor === 'function') ? payrollQuotaFor(st, ym) : (st && st.paidLeavesPerMonth !== undefined && st.paidLeavesPerMonth !== '' ? Number(st.paidLeavesPerMonth) : 1);
     const quota = Number.isFinite(quotaRaw) ? quotaRaw : 1;
     facts.push(['This month', `${takenMonth} day(s) already approved + ${thisInMonth} requested · paid allowance ${quota} day(s)/month`]);
@@ -467,16 +476,36 @@
   // way wherever it's shown.
   function staffLeaveSpanLabel(r){
     if(r.session) return `${r.fromDate} · ${r.session} (half day)`;
-    return r.fromDate === r.toDate ? r.fromDate : `${r.fromDate} to ${r.toDate}`;
+    if(r.fromDate === r.toDate) return r.fromDate;
+    const d = apxLeaveDays(r);
+    return `${r.fromDate}${r.firstPart ? ' (from afternoon)' : ''} to ${r.toDate}${r.lastPart ? ' (morning only)' : ''}${(r.firstPart || r.lastPart) ? ' · ' + apxDaysText(d) + ' days' : ''}`;
   }
   function toggleStaffLeaveKind(){
     const isHalf = document.querySelector('input[name="slKind"]:checked').value === 'half';
     document.getElementById('slSessionWrap').style.display = isHalf ? 'block' : 'none';
     document.getElementById('slToDateWrap').style.display = isHalf ? 'none' : 'block';
+    slRefreshParts();
     if(isHalf){
       const from = document.getElementById('slFromDate').value;
       if(from) document.getElementById('slToDate').value = from;
     }
+  }
+  // Shows the "first day / last day" choices only when the leave spans two or more dates, and a live total.
+  function slRefreshParts(){
+    const wrap = document.getElementById('slPartsWrap'); if(!wrap) return;
+    const kindEl = document.querySelector('input[name="slKind"]:checked');
+    const isHalf = kindEl && kindEl.value === 'half';
+    const from = (document.getElementById('slFromDate') || {}).value, to = (document.getElementById('slToDate') || {}).value;
+    const multi = !isHalf && from && to && to > from;
+    wrap.style.display = multi ? 'flex' : 'none';
+    const tot = document.getElementById('slTotal'); if(!tot) return;
+    if(!from){ tot.textContent = ''; return; }
+    if(isHalf){ tot.textContent = 'Total: ½ day'; return; }
+    const r = { fromDate: from, toDate: (to && to >= from) ? to : from,
+      firstPart: multi && (document.getElementById('slFirstPart') || {}).value === 'Afternoon' ? 'Afternoon' : null,
+      lastPart: multi && (document.getElementById('slLastPart') || {}).value === 'Morning' ? 'Morning' : null };
+    const n = apxLeaveDays(r);
+    tot.textContent = 'Total: ' + apxDaysText(n) + (n === 1 ? ' day' : ' days');
   }
   async function renderStaffLeaveModalBody(){
     const body = document.getElementById('staffLeaveModalBody');
@@ -491,11 +520,11 @@
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
           <div>
             <label style="font-size:0.78rem; color:var(--ink-soft); display:block; margin-bottom:4px;">From</label>
-            <input type="date" class="input" id="slFromDate" value="${today}" style="max-width:180px;">
+            <input type="date" class="input" id="slFromDate" value="${today}" style="max-width:180px;" onchange="slRefreshParts()">
           </div>
           <div id="slToDateWrap">
             <label style="font-size:0.78rem; color:var(--ink-soft); display:block; margin-bottom:4px;">To</label>
-            <input type="date" class="input" id="slToDate" value="${today}" style="max-width:180px;">
+            <input type="date" class="input" id="slToDate" value="${today}" style="max-width:180px;" onchange="slRefreshParts()">
           </div>
           <div id="slSessionWrap" style="display:none;">
             <label style="font-size:0.78rem; color:var(--ink-soft); display:block; margin-bottom:4px;">Session</label>
@@ -505,10 +534,28 @@
             </select>
           </div>
         </div>
+        <div id="slPartsWrap" style="display:none; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
+          <div>
+            <label style="font-size:0.78rem; color:var(--ink-soft); display:block; margin-bottom:4px;">First day</label>
+            <select class="input" id="slFirstPart" onchange="slRefreshParts()" style="max-width:260px;">
+              <option value="Full">Whole day</option>
+              <option value="Afternoon">Afternoon only (I attend the morning)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:0.78rem; color:var(--ink-soft); display:block; margin-bottom:4px;">Last day</label>
+            <select class="input" id="slLastPart" onchange="slRefreshParts()" style="max-width:260px;">
+              <option value="Full">Whole day</option>
+              <option value="Morning">Morning only (I come back for the afternoon)</option>
+            </select>
+          </div>
+        </div>
+        <div id="slTotal" style="font-weight:700; font-size:0.85rem; margin-bottom:12px;"></div>
         <label style="font-size:0.78rem; color:var(--ink-soft); display:block; margin-bottom:4px;">Reason</label>
         <textarea class="input" id="slReason" rows="3" placeholder="Reason for leave" style="width:100%; margin-bottom:14px;"></textarea>
         <button type="button" class="btn btn-primary" onclick="submitStaffLeaveRequest()">Submit Request</button>
       `;
+      slRefreshParts();
       return;
     }
     body.innerHTML = `<div class="empty-state"><b>Loading…</b></div>`;
@@ -557,6 +604,8 @@
     const fromDate = document.getElementById('slFromDate').value;
     const toDate = document.getElementById('slToDate').value;
     const session = document.getElementById('slSession').value;
+    const firstPart = (document.getElementById('slFirstPart') || {}).value === 'Afternoon' ? 'Afternoon' : null;
+    const lastPart = (document.getElementById('slLastPart') || {}).value === 'Morning' ? 'Morning' : null;
     const reason = document.getElementById('slReason').value.trim();
     if(!fromDate){ showToast('Pick a from date.'); return; }
     if(!isHalf && toDate && toDate < fromDate){ showToast('To date cannot be before from date.'); return; }
@@ -564,7 +613,7 @@
     try{
       await throwIfNotOk(await fetch('/api/staff-leave-requests', {
         method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()},
-        body: JSON.stringify({ fromDate, toDate: isHalf ? fromDate : toDate, isHalfDay:isHalf, session: isHalf ? session : null, reason })
+        body: JSON.stringify({ fromDate, toDate: isHalf ? fromDate : toDate, isHalfDay:isHalf, session: isHalf ? session : null, firstPart: isHalf ? null : firstPart, lastPart: isHalf ? null : lastPart, reason })
       }));
       showToast('Leave request submitted.', 'burst');
       switchStaffLeaveTab('mine');
