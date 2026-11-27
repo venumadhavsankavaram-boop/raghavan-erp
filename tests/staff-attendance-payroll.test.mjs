@@ -4,7 +4,7 @@ import { loadMany, test, done, plain } from './helpers.mjs';
 
 function sandbox(records, staff) {
   return loadMany([
-    ['09-fees-subtabs.js', ['attSingleRange', 'attIsSingleSession', 'staffAttDayFractions', 'staffAttDaysByStatus', 'computeStaffAttendanceStats']],
+    ['09-fees-subtabs.js', ['attSingleRange', 'attSessionMode', 'attIsSingleSession', 'staffAttDayFractions', 'staffAttDaysByStatus', 'computeStaffAttendanceStats']],
     ['17-staff-assignments-wizard-payroll.js', ['daysInPayrollMonth', 'staffAttendanceCountInMonth', 'computeStaffPayroll']],
   ], { staffAttendanceRecords: records, staffList: staff || [], attSettings: {} });
 }
