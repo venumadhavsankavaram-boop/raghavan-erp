@@ -493,17 +493,29 @@
   // Shows the "first day / last day" choices only when the leave spans two or more dates, and a live total.
   function slRefreshParts(){
     const wrap = document.getElementById('slPartsWrap'); if(!wrap) return;
+    const single = d => { try { return !!d && typeof attIsSingleSession === 'function' && attIsSingleSession(d); } catch(e){ return false; } };
+    const from = (document.getElementById('slFromDate') || {}).value, to = (document.getElementById('slToDate') || {}).value;
+    // One-session school day: no half days / part days — a day is one mark.
+    const halfLbl = document.getElementById('slHalfLbl');
+    if(halfLbl){
+      const hide = single(from);
+      halfLbl.style.display = hide ? 'none' : 'flex';
+      const full = document.querySelector('input[name="slKind"][value="full"]');
+      if(hide && full && !full.checked){ full.checked = true; toggleStaffLeaveKind(); return; }
+    }
     const kindEl = document.querySelector('input[name="slKind"]:checked');
     const isHalf = kindEl && kindEl.value === 'half';
-    const from = (document.getElementById('slFromDate') || {}).value, to = (document.getElementById('slToDate') || {}).value;
     const multi = !isHalf && from && to && to > from;
-    wrap.style.display = multi ? 'flex' : 'none';
+    const fw = document.getElementById('slFirstWrap'), lw = document.getElementById('slLastWrap');
+    if(fw) fw.style.display = single(from) ? 'none' : 'block';
+    if(lw) lw.style.display = single(to) ? 'none' : 'block';
+    wrap.style.display = (multi && ((fw && fw.style.display !== 'none') || (lw && lw.style.display !== 'none'))) ? 'flex' : 'none';
     const tot = document.getElementById('slTotal'); if(!tot) return;
     if(!from){ tot.textContent = ''; return; }
     if(isHalf){ tot.textContent = 'Total: ½ day'; return; }
     const r = { fromDate: from, toDate: (to && to >= from) ? to : from,
-      firstPart: multi && (document.getElementById('slFirstPart') || {}).value === 'Afternoon' ? 'Afternoon' : null,
-      lastPart: multi && (document.getElementById('slLastPart') || {}).value === 'Morning' ? 'Morning' : null };
+      firstPart: multi && !single(from) && (document.getElementById('slFirstPart') || {}).value === 'Afternoon' ? 'Afternoon' : null,
+      lastPart: multi && !single(to) && (document.getElementById('slLastPart') || {}).value === 'Morning' ? 'Morning' : null };
     const n = apxLeaveDays(r);
     tot.textContent = 'Total: ' + apxDaysText(n) + (n === 1 ? ' day' : ' days');
   }
@@ -515,7 +527,7 @@
       body.innerHTML = `
         <div style="display:flex; gap:16px; align-items:center; margin-bottom:14px;">
           <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem; cursor:pointer;"><input type="radio" name="slKind" value="full" checked onchange="toggleStaffLeaveKind()"> Full day(s)</label>
-          <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem; cursor:pointer;"><input type="radio" name="slKind" value="half" onchange="toggleStaffLeaveKind()"> Half day</label>
+          <label id="slHalfLbl" style="display:flex; align-items:center; gap:6px; font-size:0.85rem; cursor:pointer;"><input type="radio" name="slKind" value="half" onchange="toggleStaffLeaveKind()"> Half day</label>
         </div>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
           <div>
@@ -535,14 +547,14 @@
           </div>
         </div>
         <div id="slPartsWrap" style="display:none; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
-          <div>
+          <div id="slFirstWrap">
             <label style="font-size:0.78rem; color:var(--ink-soft); display:block; margin-bottom:4px;">First day</label>
             <select class="input" id="slFirstPart" onchange="slRefreshParts()" style="max-width:260px;">
               <option value="Full">Whole day</option>
               <option value="Afternoon">Afternoon only (I attend the morning)</option>
             </select>
           </div>
-          <div>
+          <div id="slLastWrap">
             <label style="font-size:0.78rem; color:var(--ink-soft); display:block; margin-bottom:4px;">Last day</label>
             <select class="input" id="slLastPart" onchange="slRefreshParts()" style="max-width:260px;">
               <option value="Full">Whole day</option>

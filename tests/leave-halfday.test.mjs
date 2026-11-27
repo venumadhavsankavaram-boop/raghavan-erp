@@ -67,6 +67,23 @@ try {
   await call('PUT', '/api/staff-leave-requests?id=' + r.j.id, A.ck, { decision: 'Approve' });
   const g1 = await att('2027-01-04');
   ok('single half-day request still works', g1.length === 1 && g1[0].session === 'Afternoon', g1);
+
+  // ---- School-wide attendance mode ----
+  const AS = async body => call('PUT', '/api/attendance-settings', A.ck, body);
+  const GS = async () => (await call('GET', '/api/attendance-settings', A.ck)).j || {};
+  ok('default mode is auto', (await GS()).sessionMode === undefined || (await GS()).sessionMode === 'auto', await GS());
+  ok('admin switches the school to one session', (await AS({ threshold: 75, workingDays: [1,2,3,4,5,6], sessionMode: 'single' })).s === 200);
+  ok('mode saved as single', (await GS()).sessionMode === 'single', await GS());
+  r = await call('POST', '/api/staff-leave-requests', T.ck, { fromDate: '2027-02-01', toDate: '2027-02-01', isHalfDay: true, session: 'Afternoon', reason: 'half' });
+  ok('half-day leave refused in a one-session school', r.s === 400, r);
+  r = await call('POST', '/api/staff-leave-requests', T.ck, { fromDate: '2027-02-02', toDate: '2027-02-03', isHalfDay: false, firstPart: 'Afternoon', lastPart: 'Morning', reason: 'range' });
+  list = (await call('GET', '/api/staff-leave-requests', T.ck)).j || [];
+  const rr = list.find(x => x.id === r.j.id);
+  ok('part-days dropped in a one-session school (whole days)', r.s === 201 && rr && rr.firstPart === null && rr.lastPart === null, rr);
+  ok('admin switches back to two sessions', (await AS({ threshold: 75, workingDays: [1,2,3,4,5,6], sessionMode: 'double' })).s === 200 && (await GS()).sessionMode === 'double');
+  r = await call('POST', '/api/staff-leave-requests', T.ck, { fromDate: '2027-02-09', toDate: '2027-02-09', isHalfDay: true, session: 'Afternoon', reason: 'half again' });
+  ok('half-day leave works again in two-session mode', r.s === 201, r);
+  ok('auto mode returns to the date rule', (await AS({ threshold: 75, workingDays: [1,2,3,4,5,6], sessionMode: 'auto' })).s === 200 && (await GS()).sessionMode === 'auto');
 } catch (e) { fail++; console.error('ERROR', e.message); }
 console.log(`\nleave-halfday: ${pass} passed${fail ? ', ' + fail + ' FAILED' : ''}`);
 try { srv.kill(); } catch (_) {}

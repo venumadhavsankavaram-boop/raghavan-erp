@@ -26,7 +26,16 @@ const ATTENDANCE_KEY = "attendance-records";
     if(s.singleFrom === undefined && s.singleTo === undefined) return ['03-15', '05-31'];
     return [s.singleFrom || '', s.singleTo || ''];
   }
+  // School-wide switch (Attendance > Settings): 'single' = one session every day, 'double' = Morning + Afternoon
+  // every day, 'auto' (default) = follow the yearly date range below.
+  function attSessionMode(){
+    const s = (typeof attSettings === 'object' && attSettings) || {};
+    return (s.sessionMode === 'single' || s.sessionMode === 'double') ? s.sessionMode : 'auto';
+  }
   function attIsSingleSession(ds){
+    const mode = attSessionMode();
+    if(mode === 'single') return true;
+    if(mode === 'double') return false;
     const [f, t] = attSingleRange(); if(!f || !t) return false;
     const md = String(ds || '').slice(5, 10); if(!md) return false;
     return f <= t ? (md >= f && md <= t) : (md >= f || md <= t);
@@ -750,9 +759,33 @@ const ATTENDANCE_KEY = "attendance-records";
     renderHolidaysTab(document.getElementById('attendanceBody'));
   }
   /* --- Settings --- */
+  function attModeCardHtml(){
+    const mode = attSessionMode();
+    const [rf, rt] = attSingleRange();
+    const mdText = md => { const [m, d] = String(md).split('-').map(Number); return d + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m - 1]; };
+    const opt = (key, icon, title, sub) => `<button type="button" class="${mode === key ? 'btn btn-primary' : 'btn'}" onclick="setAttSessionMode('${key}')" style="display:block; width:100%; text-align:left; margin-bottom:8px; padding:10px 12px; white-space:normal;">
+      <span style="font-weight:700;">${icon} ${title}${mode === key ? ' &nbsp;✓ ON NOW' : ''}</span><br><span style="font-size:0.76rem; font-weight:400; opacity:.85;">${sub}</span></button>`;
+    return `<div class="profile-card" style="max-width:420px; margin-bottom:14px;">
+      <h4>Attendance system</h4>
+      <p style="font-size:0.78rem; color:var(--ink-soft); margin:0 0 10px;">How many times a day is attendance taken? One click changes it everywhere: student and staff attendance, Teacher Activity, leave applications, parent alerts and biometric punches. Attendance already marked is never changed.</p>
+      ${opt('single', '☀️', 'One session a day', 'Only the Morning register is used — Afternoon attendance is not taken (one full day = one mark).')}
+      ${opt('double', '🌗', 'Two sessions a day', 'Morning and Afternoon are both taken, every day of the year.')}
+      ${opt('auto', '📅', 'Automatic by dates', rf && rt ? 'One session from ' + mdText(rf) + ' to ' + mdText(rt) + ' each year, two sessions the rest of the year (set the dates below).' : 'Two sessions all year (no single-session dates are set below).')}
+    </div>`;
+  }
+  async function setAttSessionMode(mode){
+    if(!['single','double','auto'].includes(mode) || mode === attSessionMode()) return;
+    if(!['Admin','Principal'].includes(currentUser.role)){ showToast('Only Admin or Principal can change the attendance system.'); return; }
+    const label = { single: 'ONE session a day (Morning register only)', double: 'TWO sessions a day (Morning + Afternoon)', auto: 'AUTOMATIC by the dates set below' }[mode];
+    if(!await showConfirmDialog(`Switch the whole school to ${label}? Teachers will see the change the next time they open Attendance. Attendance already marked stays as it is.`, { title: 'Change attendance system', okText: 'Yes, switch', cancelText: 'Cancel' })) return;
+    attSettings = { ...attSettings, sessionMode: mode };
+    await storageSet(ATT_SETTINGS_KEY, attSettings);
+    showToast('Attendance system changed.', 'burst');
+    const b = document.getElementById('attendanceBody'); if(b) renderAttSettingsTab(b);
+  }
   function renderAttSettingsTab(body){
     const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    body.innerHTML = `
+    body.innerHTML = attModeCardHtml() + `
       <div class="profile-card" style="max-width:420px;">
         <h4>Attendance Settings</h4>
         <div class="f-field" style="margin-bottom:14px;"><label>Low Attendance Threshold (%)</label><input type="number" min="0" max="100" class="input" id="atThreshold" value="${attSettings.threshold||75}" style="width:100%;"></div>
@@ -763,7 +796,7 @@ const ATTENDANCE_KEY = "attendance-records";
           </div>
         </div>
         <div class="f-field" style="margin-bottom:16px;">
-          <label>Single-session period <small style="font-weight:400;">(school runs one session, 7:45–12:30; Afternoon attendance is not taken)</small></label>
+          <label>Single-session dates <small style="font-weight:400;">(used only when the system above is on "Automatic by dates")</small></label>
           <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:6px; font-size:0.82rem;">
             <label style="display:flex; align-items:center; gap:4px;"><input type="checkbox" id="atSingleOn" ${attSingleRange()[0] && attSingleRange()[1] ? 'checked' : ''}> Enabled</label>
             From ${attMdPicker('atSingleFrom', attSingleRange()[0] || '03-15')} to ${attMdPicker('atSingleTo', attSingleRange()[1] || '05-31')}
@@ -788,7 +821,7 @@ const ATTENDANCE_KEY = "attendance-records";
     const threshold = Number(document.getElementById('atThreshold').value) || 75;
     const workingDays = Array.from(document.querySelectorAll('.atWorkDay:checked')).map(el => Number(el.value));
     const on = document.getElementById('atSingleOn').checked;
-    attSettings = { threshold, workingDays, singleFrom: on ? attReadMd('atSingleFrom') : '', singleTo: on ? attReadMd('atSingleTo') : '' };
+    attSettings = { threshold, workingDays, singleFrom: on ? attReadMd('atSingleFrom') : '', singleTo: on ? attReadMd('atSingleTo') : '', sessionMode: attSessionMode() };
     await storageSet(ATT_SETTINGS_KEY, attSettings);
     showToast('Attendance settings saved.', 'burst');
   }

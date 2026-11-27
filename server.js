@@ -593,6 +593,8 @@ async function ensureSchema() {
   await addColumnIfMissing('attendance_settings', 'single_from VARCHAR(5)');
   await addColumnIfMissing('attendance_settings', 'single_to VARCHAR(5)');
   await addColumnIfMissing('attendance_settings', 'single_set TINYINT DEFAULT 0');
+  // 'single' = always one session a day, 'double' = always Morning + Afternoon, NULL/'auto' = follow the date range above.
+  await addColumnIfMissing('attendance_settings', 'session_mode VARCHAR(8)');
   await sql`CREATE TABLE IF NOT EXISTS school_info (
     id INT PRIMARY KEY, data JSON NOT NULL DEFAULT ('{}')
   )`;
@@ -3451,11 +3453,14 @@ async function handleStaffLeaveRequests(req, res) {
       finalSession = null;
       if (finalToDate < fromDate) return res.status(400).json({ error: 'toDate cannot be before fromDate.' });
     }
+    if (isHalfDay && await attendanceIsSingle(fromDate)) return res.status(400).json({ error: 'The school runs a single session on that date, so please apply for a full day.' });
     // Part-days at the two ends of a multi-day leave (only meaningful when it spans 2+ dates).
     if (isHalfDay || finalToDate === fromDate) { firstPart = null; lastPart = null; }
     else {
       firstPart = firstPart === 'Afternoon' ? 'Afternoon' : null;
       lastPart = lastPart === 'Morning' ? 'Morning' : null;
+      if (firstPart && await attendanceIsSingle(fromDate)) firstPart = null;
+      if (lastPart && await attendanceIsSingle(finalToDate)) lastPart = null;
     }
     const id = 'stflv_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
     await sql`
@@ -3491,8 +3496,8 @@ async function handleStaffLeaveRequests(req, res) {
         const dates = staffLeaveDatesInRange(reqRow.from_date, reqRow.to_date);
         for (let i = 0; i < dates.length; i++) {
           const d = dates[i];
-          if (i === 0 && dates.length > 1 && reqRow.first_part === 'Afternoon') await markHalfDayLeave(reqRow.staff_id, d, 'Afternoon');
-          else if (i === dates.length - 1 && dates.length > 1 && reqRow.last_part === 'Morning') await markHalfDayLeave(reqRow.staff_id, d, 'Morning');
+          if (i === 0 && dates.length > 1 && reqRow.first_part === 'Afternoon' && !(await attendanceIsSingle(d))) await markHalfDayLeave(reqRow.staff_id, d, 'Afternoon');
+          else if (i === dates.length - 1 && dates.length > 1 && reqRow.last_part === 'Morning' && !(await attendanceIsSingle(d))) await markHalfDayLeave(reqRow.staff_id, d, 'Morning');
           else await markFullDayLeave(reqRow.staff_id, d);
         }
       }
@@ -3845,6 +3850,7 @@ async function handleAttendanceSettings(req, res) {
     // single_set = 0 means the period was never configured: the client falls back to its default (15 Mar to 31 May).
     const out = { threshold: Number(r0.threshold), workingDays: r0.working_days };
     if (r0.single_set) { out.singleFrom = r0.single_from || ''; out.singleTo = r0.single_to || ''; }
+    out.sessionMode = ['single', 'double'].includes(r0.session_mode) ? r0.session_mode : 'auto';
     return res.status(200).json(out);
   }
   if (req.method === 'PUT') {
@@ -3852,11 +3858,12 @@ async function handleAttendanceSettings(req, res) {
     const mdOk = v => (typeof v === 'string' && /^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v)) ? v : null;
     const sf = mdOk(s.singleFrom), st = mdOk(s.singleTo);
     const sset = (s.singleFrom !== undefined || s.singleTo !== undefined) ? 1 : 0;
+    const smode = ['single', 'double'].includes(s.sessionMode) ? s.sessionMode : null;
     await sql`
-      INSERT INTO attendance_settings (id, threshold, working_days, single_from, single_to, single_set)
-      VALUES (1, ${s.threshold || 75}, ${JSON.stringify(s.workingDays || [1,2,3,4,5,6])}::jsonb, ${sf}, ${st}, ${sset})
+      INSERT INTO attendance_settings (id, threshold, working_days, single_from, single_to, single_set, session_mode)
+      VALUES (1, ${s.threshold || 75}, ${JSON.stringify(s.workingDays || [1,2,3,4,5,6])}::jsonb, ${sf}, ${st}, ${sset}, ${smode})
       ON DUPLICATE KEY UPDATE threshold = ${s.threshold || 75}, working_days = ${JSON.stringify(s.workingDays || [1,2,3,4,5,6])}::jsonb,
-        single_from = ${sf}, single_to = ${st}, single_set = ${sset}
+        single_from = ${sf}, single_to = ${st}, single_set = ${sset}, session_mode = ${smode}
     `;
     return res.status(200).json({ ok: true });
   }
@@ -4405,6 +4412,15 @@ async function notifyFeePayment({ studentId, amount, mode, receiptNo }) {
 //    roster, or saving both sessions at once, never repeats it. The 4 s wait lets the second record of a
 //    both-sessions save land first so it becomes a single "full day" message;
 //  - only today's and yesterday's marks push: back-filling older dates never floods parents.
+// True when the school takes ONE attendance (Morning register only) on this date: the Admin's one-click mode
+// ('single' / 'double') wins; otherwise the yearly date range decides. Keep in step with attIsSingleSession() in the app.
+async function attendanceIsSingle(date) {
+  const rows = await sql`SELECT session_mode FROM attendance_settings WHERE id = 1`;
+  const mode = rows[0] ? rows[0].session_mode : null;
+  if (mode === 'single') return true;
+  if (mode === 'double') return false;
+  return inSingleRange(date, await attendanceSingleRange());
+}
 async function attendanceSingleRange() {
   const rows = await sql`SELECT single_from, single_to, single_set FROM attendance_settings WHERE id = 1`;
   const r = rows[0];
@@ -4424,7 +4440,7 @@ async function notifyAttendanceEvent({ studentId, date, status }) {
   const recs = await sql`SELECT session, status FROM attendance_records WHERE student_id = ${studentId} AND date = ${date}`;
   const same = recs.filter(r => r.status === status);
   if (!same.length) return;      // changed again in the meantime
-  const single = inSingleRange(date, await attendanceSingleRange());
+  const single = await attendanceIsSingle(date);
   const sess = same.some(r => !r.session) ? ['Morning', 'Afternoon'] : ['Morning', 'Afternoon'].filter(x => same.some(r => r.session === x));
   const fullDay = single || sess.length === 2;
   const refKey = date + '|' + status + '|' + (single ? 'day' : sess.join('+'));
@@ -6270,7 +6286,8 @@ app.post('/api/biometric/punches', async (req, res) => {
         const istMs = punchedAt.getTime() + 5.5 * 60 * 60 * 1000;
         const istDate = new Date(istMs);
         const dateStr = istDate.toISOString().slice(0, 10);
-        const session = istDate.getUTCHours() < 13 ? 'Morning' : 'Afternoon';
+        // One-session school: every punch of the day belongs to the single Morning register.
+        const session = (await attendanceIsSingle(dateStr)) ? 'Morning' : (istDate.getUTCHours() < 13 ? 'Morning' : 'Afternoon');
         const attId = 'statt_' + staffId + '_' + dateStr + '_' + session;
         await sql`
           INSERT IGNORE INTO staff_attendance_records (id, staff_id, date, session, status)
