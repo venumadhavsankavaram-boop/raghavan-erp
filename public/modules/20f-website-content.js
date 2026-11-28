@@ -104,7 +104,7 @@ Email: {{email}}` }
     try{ const r = await fetch(KEY, { credentials:'same-origin' }); wcLoadOk = r.ok; wcData = r.ok ? await r.json() : {}; }catch(e){ wcLoadOk = false; wcData = {}; }
     wcData = wcData || {};
     SECTIONS.forEach(s => { if(!Array.isArray(wcData[s.k])) wcData[s.k] = []; });
-    ['admission','ratio','recognition','transport','academics','results','visible','policies'].forEach(k => { wcData[k] = wcData[k] || {}; });
+    ['admission','ratio','recognition','transport','academics','results','scouts','visible','policies'].forEach(k => { wcData[k] = wcData[k] || {}; });
   }
   const vis = (k, label) => `<label class="wc-show wc-vis"><input type="checkbox" ${(wcData.visible || {})[k] !== false ? 'checked' : ''} onchange="wcVis('${k}',this.checked)"> 👁 ${label}</label>`;
   window.wcVis = (k, v) => { wcData.visible = wcData.visible || {}; wcData.visible[k] = !!v; };
@@ -266,6 +266,15 @@ Email: {{email}}` }
         <label class="wc-show"><input type="checkbox" ${wcData.transport.gps ? 'checked' : ''} onchange="wcSetKey('transport','gps',this.checked)"> Our vehicles are GPS-enabled</label>
         <div class="form-grid" style="margin-top:12px;"><div class="f-field full"><label>Short note (optional)</label><input type="text" value="${E(wcData.transport.note)}" oninput="wcSetKey('transport','note',this.value)" placeholder="e.g. Parents can ask the office about live location"></div></div>
       </section>`,
+    scouts: () => `<section class="sf-card cm-post">
+        <h3 class="cm-h">⚜️ Scouts &amp; Guides</h3>
+        <p class="cm-sub">Shows a Scouts &amp; Guides card inside the website Facilities section. Leave the boxes empty to use the standard wording. Write only what the school actually does.</p>
+        ${vis('scouts','Show the Scouts &amp; Guides card on the website')}
+        <div class="form-grid">
+          <div class="f-field full"><label>Classes taking part (optional, e.g. 6th to 10th)</label><input type="text" value="${E(wcData.scouts.classes)}" oninput="wcSetKey('scouts','classes',this.value)" placeholder="e.g. 6th to 10th"></div>
+          <div class="f-field full"><label>Description (optional)</label><textarea rows="3" oninput="wcSetKey('scouts','detail',this.value)" placeholder="Standard wording is used when this is empty">${E(wcData.scouts.detail)}</textarea></div>
+        </div>
+      </section>`,
     academics: () => `<section class="sf-card cm-post">
         <h3 class="cm-h">📚 What is taught (optional)</h3>
         <p class="cm-sub">Leave blank to use the standard text. One point per line; replaces the list on that stage's card.</p>
@@ -277,7 +286,7 @@ Email: {{email}}` }
   };
   const TAB_CONTENT = {
     home: { title: 'Home & Banner', blurb: 'What visitors see first: the recognition strip, the admissions banner, the results tile and the "At a glance" numbers.', cards: () => [BLOCKS.recognition(), BLOCKS.admission(), BLOCKS.results(), BLOCKS.glance()] },
-    pages: { title: 'Pages', blurb: 'The text and facilities cards inside the website: what is taught, vehicles, safety and download buttons.', cards: () => [BLOCKS.academics(), BLOCKS.transport(), SEC('safety'), SEC('downloads')] },
+    pages: { title: 'Pages', blurb: 'The text and facilities cards inside the website: what is taught, vehicles, Scouts &amp; Guides, safety and download buttons.', cards: () => [BLOCKS.academics(), BLOCKS.transport(), BLOCKS.scouts(), SEC('safety'), SEC('downloads')] },
     people: { title: 'Alumni & Achievements', blurb: 'Pride of the school. Only add what really happened.', cards: () => [SEC('alumni'), SEC('achievements')] },
     policies: { title: 'Policies', blurb: '', cards: () => [policyHtml()] }
   };
@@ -344,6 +353,7 @@ Email: {{email}}` }
     const custom = ['preKg','primary','high'].filter(k => String(ac[k] || '').trim()).length;
     add('pages','📚','What is taught', v('academics') ? 'live' : 'off', v('academics') ? (custom ? `Your own text for ${custom} stage${custom > 1 ? 's' : ''}` : 'Standard text') : 'Hidden');
     add('pages','📍','Vehicle facility', v('transport') ? 'live' : 'off', v('transport') ? (tr.gps ? 'Shown, GPS enabled' : 'Shown') : 'Hidden');
+    add('pages','⚜️','Scouts & Guides', v('scouts') ? 'live' : 'off', v('scouts') ? 'Shown' : 'Hidden');
     SECTIONS.forEach(s => {
       const n = (wcData[s.k] || []).filter(i => i && i.show !== false).length;
       const page = (s.k === 'alumni' || s.k === 'achievements') ? 'people' : 'pages';

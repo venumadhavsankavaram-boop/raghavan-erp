@@ -1701,6 +1701,7 @@ app.get('/api/website-extras', async (req, res) => {
     const out = {
       alumni: vis(x.alumni), achievements: vis(x.achievements), safety: vis(x.safety),
       downloads: vis(x.downloads).filter(d => /^https?:\/\//i.test(d.url || '')).map(d => ({ id: d.id, title: d.title, url: d.url })),
+      scouts: { detail: String((x.scouts || {}).detail || '').slice(0, 600), classes: String((x.scouts || {}).classes || '').slice(0, 120) },
       transport: x.transport || {}, recognition: { board: (x.recognition || {}).board, medium: (x.recognition || {}).medium, recognition: (x.recognition || {}).recognition, timings: (x.recognition || {}).timings }, admission: x.admission || {}, results: x.results || {}, visible: x.visible || {}, academics: x.academics || {}, ratio: x.ratio || {}
     };
     let students = 0, teachers = 0;
