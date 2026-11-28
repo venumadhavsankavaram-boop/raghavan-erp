@@ -7650,6 +7650,24 @@ function validateRecipient(b) {
   return null;
 }
 
+// ---------- Inbox alerts: tell the right people the moment a parent/student writes, and the family when staff reply ----------
+// Saves to the bell (user_notifications) and sends a phone/browser push, same as the other alerts. Never blocks or fails the request.
+async function notifyInboxRecipient(rec, payload) {
+  try {
+    if (rec.recipientType === 'management') { await notifyUsersByRole(MANAGEMENT_ROLES, payload); return; }
+    let uid = null;
+    if (rec.recipientStaffId) {
+      const rows = await sql`SELECT extra FROM staff WHERE id = ${rec.recipientStaffId} LIMIT 1`;
+      let ex = rows.length ? rows[0].extra : null; if (typeof ex === 'string') { try { ex = JSON.parse(ex); } catch (e) { ex = null; } }
+      uid = ex && ex.linkedUserId ? ex.linkedUserId : null;
+    }
+    if (uid) { await sendPushToUser(uid, payload); return; }
+    // The teacher has no login linked, so nobody would ever see this: tell the office instead of staying silent.
+    await notifyUsersByRole(MANAGEMENT_ROLES, { ...payload, title: 'No login for ' + (rec.recipientName || 'the teacher'), body: 'A parent wrote to ' + (rec.recipientName || 'a teacher') + ' but that teacher has no ERP login linked, so they cannot see it. ' + payload.body });
+  } catch (e) { console.error('inbox notify failed', e); }
+}
+function inboxWho(student) { return (student.first_name + ' ' + (student.last_name || '')).trim() + (student.class_name ? ' (' + student.class_name + (student.section ? '-' + student.section : '') + ')' : ''); }
+
 app.post('/api/concerns', async (req, res) => {
   try {
     if (!req.authUser || !PARENT_LOGIN_ROLES.includes(req.authUser.role)) {
@@ -7670,6 +7688,7 @@ app.post('/api/concerns', async (req, res) => {
               ${b.recipientType === 'subject_teacher' ? (b.subjectName || '') : null},
               ${String(b.message).trim().slice(0, 4000)})
     `;
+    notifyInboxRecipient({ recipientType: b.recipientType, recipientStaffId: b.recipientStaffId, recipientName: b.recipientName }, { title: 'New message from a parent', body: inboxWho(student) + ': ' + String(b.message).trim().slice(0, 100), tag: 'concern', url: '/?view=inbox' });
     return res.status(201).json({ ok: true, id });
   } catch (err) {
     console.error('concerns create error:', err);
@@ -7748,6 +7767,7 @@ app.put('/api/concerns/:id/reply', async (req, res) => {
         replied_by = ${req.authUser.name}, replied_at = now()
       WHERE id = ${req.params.id}
     `;
+    sendPushToStudent(concern.student_id, { title: 'Reply from ' + (req.authUser.name || 'the school'), body: String(replyMessage).trim().slice(0, 100), tag: 'concern-reply', url: '/' }).catch(e => console.error('reply notify failed', e));
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('concerns reply error:', err);
@@ -7811,6 +7831,7 @@ app.post('/api/submissions', async (req, res) => {
               ${b.homeworkId || null}, ${String(b.title).trim().slice(0, 300)},
               ${String(b.description || '').trim().slice(0, 4000)}, ${JSON.stringify(attachments)}::jsonb)
     `;
+    notifyInboxRecipient({ recipientType: b.recipientType, recipientStaffId: b.recipientStaffId, recipientName: b.recipientName }, { title: 'New student submission', body: inboxWho(student) + ': ' + String(b.title).trim().slice(0, 100), tag: 'submission', url: '/?view=inbox' });
     return res.status(201).json({ ok: true, id });
   } catch (err) {
     console.error('submissions create error:', err);
@@ -7879,6 +7900,7 @@ app.put('/api/submissions/:id/review', async (req, res) => {
         reviewed_by = ${req.authUser.name}, reviewed_at = now()
       WHERE id = ${req.params.id}
     `;
+    sendPushToStudent(submission.student_id, { title: status === 'resubmit' ? 'Please resubmit: ' + String(submission.title || '').slice(0, 60) : 'Your work was reviewed', body: (feedback ? String(feedback).trim().slice(0, 100) : String(submission.title || '').slice(0, 100)) + (marks ? ' (Marks: ' + String(marks).trim().slice(0, 20) + ')' : ''), tag: 'submission-review', url: '/' }).catch(e => console.error('review notify failed', e));
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('submissions review error:', err);
