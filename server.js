@@ -1736,15 +1736,15 @@ app.get('/api/website-extras', async (req, res) => {
 // ---------- Public website visitor counter ----------
 // The website calls POST once per browser per day, and GET to show the total. Only a per-day number is kept
 // (no IP, no cookie, nothing about the person). Obvious bots are ignored and one address can add at most
-// 3 visits an hour. The number is sent to the website only once it reaches VISIT_COUNT_MIN (default 500).
-const VISIT_COUNT_MIN = (process.env.VISIT_COUNT_MIN !== undefined && process.env.VISIT_COUNT_MIN !== '' && Number.isFinite(Number(process.env.VISIT_COUNT_MIN))) ? Math.max(0, Number(process.env.VISIT_COUNT_MIN)) : 500;
+// 3 visits an hour. The number is sent to the website from the first visit (VISIT_COUNT_MIN, default 0, can hold it back until a larger number).
+const VISIT_COUNT_MIN = (process.env.VISIT_COUNT_MIN !== undefined && process.env.VISIT_COUNT_MIN !== '' && Number.isFinite(Number(process.env.VISIT_COUNT_MIN))) ? Math.max(0, Number(process.env.VISIT_COUNT_MIN)) : 0;
 const BOT_UA = /bot|crawl|spider|slurp|headless|lighthouse|preview|monitor|curl|wget|python|axios|java\//i;
 const visitHits = new Map();   // ip -> [timestamps]
 async function siteVisitTotal() {
   const rows = await sql`SELECT COALESCE(SUM(n), 0) AS t FROM site_visits`;
   return Number(rows && rows[0] && rows[0].t) || 0;
 }
-function visitReply(total) { return total >= VISIT_COUNT_MIN ? { show: true, total } : { show: false }; }
+function visitReply(total) { return (total >= VISIT_COUNT_MIN && total > 0) ? { show: true, total } : { show: false }; }
 app.get('/api/site-visits', async (req, res) => {
   try { res.set('Cache-Control', 'public, max-age=60'); return res.json(visitReply(await siteVisitTotal())); }
   catch (err) { return res.json({ show: false }); }

@@ -31,8 +31,11 @@ function make(min) {
   };
   return { call, days };
 }
-test('small totals stay hidden (default threshold 500)', async () => {
-  const c = make(); const r = await c.call('POST /api/site-visit'); assert.deepEqual(r, { show: false });
+test('shows the real total from the first visit by default', async () => {
+  const c = make(); const r = await c.call('POST /api/site-visit'); assert.deepEqual(r, { show: true, total: 1 });
+});
+test('nothing is shown while the total is 0', async () => {
+  const c = make(); assert.deepEqual(await c.call('GET /api/site-visits'), { show: false });
 });
 test('a visit is counted and the total shows once it reaches the threshold', async () => {
   const c = make(2); assert.deepEqual(await c.call('POST /api/site-visit', 'Mozilla/5.0', '2.2.2.2'), { show: false });
