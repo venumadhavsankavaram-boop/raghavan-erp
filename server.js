@@ -181,6 +181,8 @@ const WEBSITE_CORS_RULES = {
   '/api/website-gallery': 'GET, OPTIONS',
   '/api/school-info': 'GET, OPTIONS',
   '/api/website-extras': 'GET, OPTIONS',
+  '/api/site-visit': 'POST, OPTIONS',
+  '/api/site-visits': 'GET, OPTIONS',
 };
 // WEBSITE_ORIGIN may list several origins separated by commas, and the bare
 // and "www." forms of each are always treated as the same site, so a visitor
@@ -723,6 +725,8 @@ async function ensureSchema() {
   // OBJECT_BACKED_KEYS registrations for the full list). Each round-trips its
   // whole current value as JSON, keyed by the same string the module already
   // uses as its storage key, rather than needing one more hand-built table.
+  // Public-website visitor counter: one row per day, nothing about the visitor is stored.
+  await sql`CREATE TABLE IF NOT EXISTS site_visits (day CHAR(10) PRIMARY KEY, n BIGINT NOT NULL DEFAULT 0)`;
   await sql`CREATE TABLE IF NOT EXISTS kv_store (
     \`key\` VARCHAR(191) PRIMARY KEY, value JSON NOT NULL DEFAULT ('{}'), updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
@@ -1234,6 +1238,8 @@ const PUBLIC_API_ROUTES = [
   { path: '/api/website-gallery', methods: ['GET'] },
   { path: '/api/school-info', methods: ['GET'] },
   { path: '/api/website-extras', methods: ['GET'] },
+  { path: '/api/site-visit', methods: ['POST'] },
+  { path: '/api/site-visits', methods: ['GET'] },
   // Called by the on-site biometric bridge (a machine, not a logged-in
   // person) — authenticated by its own BIOMETRIC_API_KEY header check
   // inside the route, same pattern as /api/vendor/admission-inquiries above.
@@ -1725,6 +1731,37 @@ app.get('/api/website-extras', async (req, res) => {
     console.error('website-extras error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
+});
+
+// ---------- Public website visitor counter ----------
+// The website calls POST once per browser per day, and GET to show the total. Only a per-day number is kept
+// (no IP, no cookie, nothing about the person). Obvious bots are ignored and one address can add at most
+// 3 visits an hour. The number is sent to the website only once it reaches VISIT_COUNT_MIN (default 500).
+const VISIT_COUNT_MIN = (process.env.VISIT_COUNT_MIN !== undefined && process.env.VISIT_COUNT_MIN !== '' && Number.isFinite(Number(process.env.VISIT_COUNT_MIN))) ? Math.max(0, Number(process.env.VISIT_COUNT_MIN)) : 500;
+const BOT_UA = /bot|crawl|spider|slurp|headless|lighthouse|preview|monitor|curl|wget|python|axios|java\//i;
+const visitHits = new Map();   // ip -> [timestamps]
+async function siteVisitTotal() {
+  const rows = await sql`SELECT COALESCE(SUM(n), 0) AS t FROM site_visits`;
+  return Number(rows && rows[0] && rows[0].t) || 0;
+}
+function visitReply(total) { return total >= VISIT_COUNT_MIN ? { show: true, total } : { show: false }; }
+app.get('/api/site-visits', async (req, res) => {
+  try { res.set('Cache-Control', 'public, max-age=60'); return res.json(visitReply(await siteVisitTotal())); }
+  catch (err) { return res.json({ show: false }); }
+});
+app.post('/api/site-visit', async (req, res) => {
+  try {
+    const ua = String(req.headers['user-agent'] || '');
+    const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    const ip = fwd || req.socket.remoteAddress || 'unknown';
+    const now = Date.now(), hits = (visitHits.get(ip) || []).filter(t => now - t < 3600000);
+    if (!ua || BOT_UA.test(ua) || hits.length >= 3) return res.json(visitReply(await siteVisitTotal()));
+    hits.push(now); visitHits.set(ip, hits);
+    if (visitHits.size > 5000) visitHits.clear();
+    const day = new Date(now + 19800000).toISOString().slice(0, 10);   // India date
+    await sql`INSERT INTO site_visits (day, n) VALUES (${day}, 1) ON DUPLICATE KEY UPDATE n = n + 1`;
+    return res.json(visitReply(await siteVisitTotal()));
+  } catch (err) { return res.json({ show: false }); }
 });
 
 // ---------- Voucher register tables ----------
