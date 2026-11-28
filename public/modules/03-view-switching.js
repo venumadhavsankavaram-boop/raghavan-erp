@@ -72,6 +72,7 @@ function switchView(view){
     document.getElementById('view-transport').style.display = view === 'transport' ? 'block' : 'none';
     document.getElementById('view-library').style.display = view === 'library' ? 'block' : 'none';
     document.getElementById('view-hostel').style.display = view === 'hostel' ? 'block' : 'none';
+    { const v = document.getElementById('view-scouts'); if(v) v.style.display = view === 'scouts' ? 'block' : 'none'; }
     document.getElementById('view-accounting').style.display = view === 'accounting' ? 'block' : 'none';
     document.getElementById('view-announcements').style.display = view === 'announcements' ? 'block' : 'none';
     document.getElementById('view-inbox').style.display = view === 'inbox' ? 'block' : 'none';
@@ -114,6 +115,7 @@ function switchView(view){
     document.getElementById('navTransport').classList.toggle('active', view === 'transport');
     document.getElementById('navLibrary').classList.toggle('active', view === 'library');
     document.getElementById('navHostel').classList.toggle('active', view === 'hostel');
+    { const b = document.getElementById('navScouts'); if(b) b.classList.toggle('active', view === 'scouts'); }
     document.getElementById('navAccounting').classList.toggle('active', view === 'accounting');
     document.getElementById('navAnnouncements').classList.toggle('active', view === 'announcements');
     document.getElementById('navInbox').classList.toggle('active', view === 'inbox');
@@ -149,6 +151,7 @@ function switchView(view){
     if(view === 'transport'){ initTransportView(); }
     if(view === 'library'){ initLibraryView(); }
     if(view === 'hostel'){ initHostelView(); }
+    if(view === 'scouts' && typeof initScoutsView === 'function'){ initScoutsView(); }
     if(view === 'accounting'){ initAccountingView(); }
     if(view === 'announcements'){ initCommsView(); }
     if(view === 'inbox'){ initInboxView(); }

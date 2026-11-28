@@ -633,11 +633,11 @@ let sbPreSearchCollapse = null;
   const USERS_KEY = "erp-users";
   const ROLES = ["Admin","Principal","Accountant","Office Assistant","Teacher","Staff","Student","Parent"];
   const ROLE_VIEWS = {
-    Admin: ['dashboard','insights','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','inbox','noticeboard','websiteinquiries','websitegallery','contactvendor','reports','inventory','timetable','syllabus','transport','library','hostel','setup'],
-    Principal: ['dashboard','insights','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','inbox','noticeboard','websiteinquiries','websitegallery','contactvendor','reports','inventory','timetable','syllabus','transport','library','hostel','setup'],
+    Admin: ['dashboard','insights','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','inbox','noticeboard','websiteinquiries','websitegallery','contactvendor','reports','inventory','timetable','syllabus','transport','library','hostel','scouts','setup'],
+    Principal: ['dashboard','insights','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','inbox','noticeboard','websiteinquiries','websitegallery','contactvendor','reports','inventory','timetable','syllabus','transport','library','hostel','scouts','setup'],
     Accountant: ['dashboard','admissions','managefee','accounting','reports','inventory','transport'],
     'Office Assistant': ['admissions'],
-    Teacher: ['admissions','attendance','exams','subjects','result','timetable','syllabus','library','announcements','inbox'],
+    Teacher: ['admissions','attendance','exams','subjects','result','timetable','syllabus','library','scouts','announcements','inbox'],
     Staff: ['admissions','attendance','inbox'],
     Student: ['myprofile'],
     Parent: ['myprofile'],

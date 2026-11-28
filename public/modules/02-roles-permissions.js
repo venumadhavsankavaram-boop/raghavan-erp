@@ -114,6 +114,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     { key:'hostel_rooms', label:'Rooms',              icon:'🛏️', category:'Facilities', parent:'hostel', isNew:true },
     { key:'hostel_allot', label:'Allot Students',     icon:'🧾', category:'Facilities', parent:'hostel', isNew:true },
     { key:'hostel_roster', label:'Room Roster',       icon:'📋', category:'Facilities', parent:'hostel', isNew:true },
+    { key:'scouts',      label:'Scouts & Guides',    icon:'⚜️', category:'Facilities', isNew:true },
 
     { key:'reports',     label:'Reports (menu access)', icon:'📈', category:'Reports' },
     { key:'reports_academic',   label:'Academic Reports',   icon:'🎓', category:'Reports' },
@@ -948,6 +949,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     document.getElementById('navTransport').style.display = (allowed.includes('transport') && isModuleEnabledByPlan('transport')) ? 'flex' : 'none';
     document.getElementById('navLibrary').style.display = (allowed.includes('library') && isModuleEnabledByPlan('library')) ? 'flex' : 'none';
     document.getElementById('navHostel').style.display = allowed.includes('hostel') ? 'flex' : 'none';
+    { const b = document.getElementById('navScouts'); if(b) b.style.display = allowed.includes('scouts') ? 'flex' : 'none'; }
     document.getElementById('navAccounting').style.display = allowed.includes('accounting') ? 'flex' : 'none';
     document.getElementById('navAnnouncements').style.display = allowed.includes('announcements') ? 'flex' : 'none';
     document.getElementById('navInbox').style.display = allowed.includes('inbox') ? 'flex' : 'none';
