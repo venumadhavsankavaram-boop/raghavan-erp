@@ -6,7 +6,7 @@
    and 'websiteinquiries' (plus 'noticeboard' for the Notices tab). */
 (function(){
   const KEY = '/api/kv/website-extras';
-  let webTab = 'overview', wcData = null, wcBusy = false, wcLoadOk = false, wcDirty = false, webSeq = 0, webFeedOk = null;
+  let webTab = 'overview', wcData = null, wcBusy = false, wcLoadOk = false, wcDirty = false, webSeq = 0, webFeedOk = null, alumniPend = [], alumniPendOk = false;
   const E = v => (typeof cmEsc === 'function' ? cmEsc(v) : String(v == null ? '' : v).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])));
   const SECTIONS = [
     { k:'alumni', vis:'Show the Alumni section on the website', one:'alumnus', icon:'🎓', title:'Alumni', hint:'Former students you are proud of. Shown on the website with name, batch and what they do now.',
@@ -212,7 +212,7 @@ Email: {{email}}` }
   function paintTabs(){
     const el = byId('webTabs'); if(!el) return;
     el.innerHTML = webTabsAllowed().map(t => {
-      const n = t.k === 'enquiries' ? newEnquiries() : 0;
+      const n = t.k === 'enquiries' ? newEnquiries() : (t.k === 'people' ? alumniPend.length : 0);
       return `<button type="button" class="mf-tab ${webTab === t.k ? 'active' : ''}" onclick="webGo('${t.k}')">${t.icon} ${t.label}${n ? `<span class="web-badge" title="New enquiries waiting">${n}</span>` : ''}</button>`;
     }).join('');
   }
@@ -287,7 +287,7 @@ Email: {{email}}` }
   const TAB_CONTENT = {
     home: { title: 'Home & Banner', blurb: 'What visitors see first: the recognition strip, the admissions banner, the results tile and the "At a glance" numbers.', cards: () => [BLOCKS.recognition(), BLOCKS.admission(), BLOCKS.results(), BLOCKS.glance()] },
     pages: { title: 'Pages', blurb: 'The text and facilities cards inside the website: what is taught, vehicles, Scouts &amp; Guides, safety and download buttons.', cards: () => [BLOCKS.academics(), BLOCKS.transport(), BLOCKS.scouts(), SEC('safety'), SEC('downloads')] },
-    people: { title: 'Alumni & Achievements', blurb: 'Pride of the school. Only add what really happened.', cards: () => [SEC('alumni'), SEC('achievements')] },
+    people: { title: 'Alumni & Achievements', blurb: 'Pride of the school. Only add what really happened.', cards: () => [alumniPendingHtml(), SEC('alumni'), SEC('achievements')] },
     policies: { title: 'Policies', blurb: '', cards: () => [policyHtml()] }
   };
   function saveBar(){
@@ -468,11 +468,62 @@ Email: {{email}}` }
     await wnSave2(); showToast('Taken down from the website.', 'burst'); paintNotices();
   };
 
+
+  /* ---- Alumni requests: former students send their story from the website; nothing shows until approved here ---- */
+  const PEND_KEY = '/api/kv/alumni-submissions';
+  const actor = () => (typeof actorHeaders === 'function' ? actorHeaders() : {});
+  async function loadAlumniPending(){
+    try{
+      const r = await fetch(PEND_KEY, { credentials:'same-origin' });
+      if(r.status === 404){ alumniPend = []; alumniPendOk = true; return; }
+      if(!r.ok) throw new Error('x');
+      const v = await r.json(); alumniPend = Array.isArray(v) ? v : []; alumniPendOk = true;
+    }catch(e){ alumniPend = []; alumniPendOk = false; }
+  }
+  async function putAlumniPending(list){
+    const r = await fetch(PEND_KEY, { method:'PUT', credentials:'same-origin', headers:{'Content-Type':'application/json', ...actor()}, body: JSON.stringify(list) });
+    if(!r.ok) throw new Error('Could not update the request list (' + r.status + ')');
+    alumniPend = list;
+  }
+  function alumniPendingHtml(){
+    if(!alumniPendOk) return `<section class="sf-card cm-post"><h3 class="cm-h">📨 Alumni requests</h3><p class="cm-sub">Could not load the requests just now. Refresh the page to try again.</p></section>`;
+    const rows = alumniPend.map(a => `<div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin:10px 0;">
+        <b>${E(a.name)}</b> <span class="cm-sub" style="margin:0;">· Batch ${E(a.batch)}${a.now ? ' · ' + E(a.now) : ''}</span>
+        ${a.quote ? `<p style="margin:8px 0;">“${E(a.quote)}”</p>` : ''}
+        <p class="cm-sub" style="margin:4px 0 10px;">Contact (only you can see this): <b>${E(a.contact)}</b> · sent ${E(String(a.at || '').slice(0,10))}</p>
+        <button type="button" class="sf-btn sf-btn--primary" onclick="alumniApprove('${E(a.id)}')">✅ Approve &amp; show on website</button>
+        <button type="button" class="sf-btn sf-btn--soft" onclick="alumniReject('${E(a.id)}')">Reject</button>
+      </div>`).join('');
+    return `<section class="sf-card cm-post">
+      <h3 class="cm-h">📨 Alumni requests ${alumniPend.length ? `<span class="web-badge">${alumniPend.length}</span>` : ''}</h3>
+      <p class="cm-sub">Former students send their story from the website. Nothing appears publicly until you press Approve. Check it is really a former student (you can call the contact number).</p>
+      ${rows || '<p class="cm-sub">No requests waiting.</p>'}
+    </section>`;
+  }
+  window.alumniApprove = async function(id){
+    const a = alumniPend.find(x => x.id === id); if(!a) return;
+    if(typeof showConfirmDialog === 'function' && !await showConfirmDialog('Show ' + a.name + ' in the Alumni section of the website?', { title: 'Approve alumni' })) return;
+    if(!Array.isArray(wcData.alumni)) wcData.alumni = [];
+    wcData.alumni.push({ id: 'w' + Date.now(), name: a.name, batch: a.batch, now: a.now || '', quote: a.quote || '', show: true });
+    markDirty();
+    await window.wcSave();
+    if(wcDirty){ wcData.alumni = wcData.alumni.filter(x => x.name !== a.name || x.batch !== a.batch); paintContentTab(webTab); return; }   // save failed: nothing changed
+    try{ await putAlumniPending(alumniPend.filter(x => x.id !== id)); }catch(e){ if(typeof showToast === 'function') showToast(e.message); }
+    paintContentTab(webTab); paintTabs();
+  };
+  window.alumniReject = async function(id){
+    const a = alumniPend.find(x => x.id === id); if(!a) return;
+    if(typeof showConfirmDialog === 'function' && !await showConfirmDialog('Reject and delete the request from ' + a.name + '?', { title: 'Reject request' })) return;
+    try{ await putAlumniPending(alumniPend.filter(x => x.id !== id)); }catch(e){ if(typeof showToast === 'function') showToast(e.message); }
+    paintContentTab(webTab); paintTabs();
+  };
+
   /* ---- tab switching ---- */
   async function ensureContent(force){
     if(wcData && wcDirty) return;
     if(wcData && wcLoadOk && !force) return;
     await wcLoad();
+    await loadAlumniPending();
     try{ const r = await fetch('/api/website-extras'); webFeedOk = r.ok; if(r.ok){ const c = await r.json(); wcData._counts = c.counts; } }catch(e){ webFeedOk = false; }
   }
   async function webShow(tab, force){

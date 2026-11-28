@@ -67,6 +67,7 @@ app.use((req, res, next) => {
 // stuff giant payloads into the database.
 app.use('/api/payments/webhook', express.raw({ type: '*/*', limit: '200kb' }));
 app.use('/api/admission-inquiries', express.json({ limit: '20kb' }));
+app.use('/api/alumni-submit', express.json({ limit: '20kb' }));
 // The website's enquiry form is open to the whole internet, so it is throttled: a few per visitor per hour and a
 // school-wide ceiling per hour, so a script cannot fill the database with junk.
 const inquiryHits = new Map(); let inquiryGlobal = { n: 0, since: Date.now() };
@@ -182,6 +183,7 @@ const WEBSITE_CORS_RULES = {
   '/api/school-info': 'GET, OPTIONS',
   '/api/website-extras': 'GET, OPTIONS',
   '/api/site-visit': 'POST, OPTIONS',
+  '/api/alumni-submit': 'POST, OPTIONS',
   '/api/site-visits': 'GET, OPTIONS',
 };
 // WEBSITE_ORIGIN may list several origins separated by commas, and the bare
@@ -1239,6 +1241,7 @@ const PUBLIC_API_ROUTES = [
   { path: '/api/school-info', methods: ['GET'] },
   { path: '/api/website-extras', methods: ['GET'] },
   { path: '/api/site-visit', methods: ['POST'] },
+  { path: '/api/alumni-submit', methods: ['POST'] },
   { path: '/api/site-visits', methods: ['GET'] },
   // Called by the on-site biometric bridge (a machine, not a logged-in
   // person) — authenticated by its own BIOMETRIC_API_KEY header check
@@ -1762,6 +1765,40 @@ app.post('/api/site-visit', async (req, res) => {
     await sql`INSERT INTO site_visits (day, n) VALUES (${day}, 1) ON DUPLICATE KEY UPDATE n = n + 1`;
     return res.json(visitReply(await siteVisitTotal()));
   } catch (err) { return res.json({ show: false }); }
+});
+
+// ---------- Alumni: share your story (website form -> ERP approval -> website) ----------
+// A former student fills a short form on the website. It is saved here as "pending" (kv key
+// 'alumni-submissions') and shown to the school in Website > Alumni & Achievements, with the contact
+// they gave (never sent to the website). Nothing appears publicly until the school approves it there.
+const alumniHits = new Map(); let alumniGlobal = { n: 0, since: Date.now() };
+app.post('/api/alumni-submit', async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (b.website) return res.status(201).json({ ok: true });                       // hidden field only bots fill
+    const now = Date.now();
+    if (now - alumniGlobal.since > 3600000) alumniGlobal = { n: 0, since: now };
+    const fwd = req.headers['x-forwarded-for']; const ip = (fwd ? String(fwd).split(',').pop().trim() : '') || req.socket.remoteAddress || 'x';
+    const rec = (alumniHits.get(ip) || []).filter(t => now - t < 3600000);
+    if (rec.length >= 3 || alumniGlobal.n >= 40) return res.status(429).json({ error: 'Too many submissions just now. Please try again later, or call the school office.' });
+    const clean = (v, n) => String(v == null ? '' : v).replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
+    const name = clean(b.name, 80), batch = clean(b.batch, 20), nowDoing = clean(b.now, 120), quote = clean(b.quote, 400), contact = clean(b.contact, 80);
+    if (!name) return res.status(400).json({ error: 'Please enter your name.' });
+    if (!batch) return res.status(400).json({ error: 'Please enter your batch (the year you passed 10th).' });
+    if (!contact) return res.status(400).json({ error: 'Please give a phone number or email so the school can reach you. It is never shown on the website.' });
+    if (/https?:\/\/|www\./i.test(name + ' ' + nowDoing + ' ' + quote)) return res.status(400).json({ error: 'Please do not include web links.' });
+    const rows = await sql`SELECT value FROM kv_store WHERE \`key\` = 'alumni-submissions'`;
+    let list = rows.length ? rows[0].value : []; if (typeof list === 'string') { try { list = JSON.parse(list); } catch (e) { list = []; } }
+    if (!Array.isArray(list)) list = [];
+    if (list.length >= 200) return res.status(429).json({ error: 'The school has many entries waiting. Please try again later.' });
+    list.push({ id: 'as' + now.toString(36) + Math.random().toString(36).slice(2, 6), name, batch, now: nowDoing, quote, contact, at: new Date(now).toISOString() });
+    await sql`INSERT INTO kv_store (\`key\`, value) VALUES ('alumni-submissions', ${JSON.stringify(list)}) ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP`;
+    rec.push(now); alumniHits.set(ip, rec); alumniGlobal.n++; if (alumniHits.size > 5000) alumniHits.clear();
+    return res.status(201).json({ ok: true });
+  } catch (err) {
+    console.error('alumni-submit error:', err);
+    return res.status(500).json({ error: 'Something went wrong. Please try again or call the school office.' });
+  }
 });
 
 // ---------- Voucher register tables ----------
@@ -2408,6 +2445,7 @@ const RESOURCE_TO_MODULE = {
 const KV_KEY_TO_MODULE = {
   // Public-website content (alumni, achievements, safety, vehicles, admission copy) — edited in Website Gallery > Website Content.
   'website-extras': ['websitegallery'],
+  'alumni-submissions': ['websitegallery'],
   'finance-settings': ['managefee'],
   'payroll-settings': ['staff'],
   // Salary posting to Accounting: its settings and the record of which vouchers were created.
