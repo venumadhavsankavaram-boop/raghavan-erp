@@ -7801,7 +7801,7 @@ app.put('/api/concerns/:id/reply', async (req, res) => {
         replied_by = ${req.authUser.name}, replied_at = now()
       WHERE id = ${req.params.id}
     `;
-    sendPushToStudent(concern.student_id, { title: 'Reply from ' + (req.authUser.name || 'the school'), body: String(replyMessage).trim().slice(0, 100), tag: 'concern-reply', url: '/' }).catch(e => console.error('reply notify failed', e));
+    sendPushToStudent(concern.student_id, { title: 'Reply to your message', body: String(replyMessage).trim().slice(0, 100), tag: 'concern-reply', url: '/' }).catch(e => console.error('reply notify failed', e));
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('concerns reply error:', err);
