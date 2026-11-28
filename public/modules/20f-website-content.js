@@ -485,11 +485,21 @@ Email: {{email}}` }
     if(!r.ok) throw new Error('Could not update the request list (' + r.status + ')');
     alumniPend = list;
   }
+  /* Helps the school check a request: looks the name up in the ERP's student records (former students stay there as Inactive). Information only. */
+  const nameKey = v => String(v || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean).sort().join(' ');
+  function alumniRecordCheck(a){
+    const list = (typeof students !== 'undefined' && Array.isArray(students)) ? students : [];
+    const k = nameKey(a.name); if(!k) return '';
+    const hits = list.filter(s => nameKey((s.firstName || '') + ' ' + (s.lastName || '')) === k).slice(0, 3);
+    if(!hits.length) return '<span style="color:#7A5200;">⚠️ Not found in school records (normal while old years are not entered). Please verify by phone.</span>';
+    return '<span style="color:#1b6b3a;">✅ Found in school records: ' + hits.map(h => E(((h.firstName || '') + ' ' + (h.lastName || '')).trim() + ' (' + (h.className || 'class not set') + (h.status && h.status !== 'Active' ? ', ' + h.status : '') + ')')).join('; ') + '. Still confirm it is the same person.</span>';
+  }
   function alumniPendingHtml(){
     if(!alumniPendOk) return `<section class="sf-card cm-post"><h3 class="cm-h">📨 Alumni requests</h3><p class="cm-sub">Could not load the requests just now. Refresh the page to try again.</p></section>`;
     const rows = alumniPend.map(a => `<div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin:10px 0;">
         <b>${E(a.name)}</b> <span class="cm-sub" style="margin:0;">· Batch ${E(a.batch)}${a.now ? ' · ' + E(a.now) : ''}</span>
         ${a.quote ? `<p style="margin:8px 0;">“${E(a.quote)}”</p>` : ''}
+        <p style="margin:4px 0;font-size:.85rem;">${alumniRecordCheck(a)}</p>
         <p class="cm-sub" style="margin:4px 0 10px;">Contact (only you can see this): <b>${E(a.contact)}</b> · sent ${E(String(a.at || '').slice(0,10))}</p>
         <button type="button" class="sf-btn sf-btn--primary" onclick="alumniApprove('${E(a.id)}')">✅ Approve &amp; show on website</button>
         <button type="button" class="sf-btn sf-btn--soft" onclick="alumniReject('${E(a.id)}')">Reject</button>

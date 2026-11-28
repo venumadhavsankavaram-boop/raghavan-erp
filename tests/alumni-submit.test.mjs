@@ -31,4 +31,11 @@ test('wiring: public route, CORS, storage permission, ERP card and website form'
   assert.match(src, /path: '\/api\/alumni-submit', methods: \['POST'\]/); assert.match(src, /'\/api\/alumni-submit': 'POST, OPTIONS'/); assert.match(src, /'alumni-submissions': \['websitegallery'\]/);
   assert.match(mod, /alumniApprove/); assert.match(mod, /alumniReject/); assert.match(mod, /alumni-submissions/);
 });
+test('ERP request card compares the name with school student records', () => {
+  assert.match(mod, /alumniRecordCheck/); assert.match(mod, /Found in school records/); assert.match(mod, /Not found in school records/);
+  const fn = mod.slice(mod.indexOf('const nameKey'), mod.indexOf('function alumniPendingHtml'));
+  const run = (students, a) => vm.runInNewContext('const E=v=>String(v);' + fn + ';alumniRecordCheck(a)', { students, a });
+  assert.match(run([{ firstName: 'Ravi', lastName: 'Kumar', className: '10th', status: 'Inactive' }], { name: 'kumar  RAVI' }), /Found in school records: Ravi Kumar \(10th, Inactive\)/);
+  assert.match(run([{ firstName: 'Sita', lastName: 'Devi' }], { name: 'Ravi Kumar' }), /Not found/);
+});
 await done('alumni-submit');
