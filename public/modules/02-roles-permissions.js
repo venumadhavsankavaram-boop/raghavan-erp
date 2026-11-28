@@ -593,7 +593,11 @@ const CUSTOM_ROLES_KEY = "custom-roles";
       initSbSectionsCollapseState();
       updateMyProfileBadge();
       const allowed = getRoleViews(currentUser.role).length ? getRoleViews(currentUser.role) : ['dashboard'];
-      switchView(allowed[0]);
+      let startView = allowed[0];
+      try{ const last = JSON.parse(sessionStorage.getItem('rgv_last_view') || 'null'); if(last && last.uid === u.id && /^[a-z0-9_-]+$/i.test(last.view || '')) startView = last.view; }catch(e){}
+      switchView(startView);
+      // If the remembered page is gone or no longer allowed, nothing is showing: fall back to the home page.
+      if(startView !== allowed[0] && !Array.from(document.querySelectorAll('[id^="view-"]')).some(el => el.style.display === 'block')) switchView(allowed[0]);
       startIdleWatcher();
       maybeSubscribeToPush();
       startApprovalsWatcher();
@@ -805,6 +809,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     stopApprovalsWatcher();
     currentUser = null;
     sessionStorage.removeItem('rgv_current_user');
+    try{ sessionStorage.removeItem('rgv_last_view'); }catch(e){}
     // Best-effort — invalidates the session server-side so the cookie can't
     // be reused even if it were somehow still sitting in the browser. Not
     // awaited: there's nothing useful to do differently if this fails, and

@@ -41,6 +41,8 @@ function switchView(view){
       showToast('You do not have access to that section.');
       return;
     }
+    // Remember where this person is, so a page refresh (F5, pull-to-refresh) returns to the same page. Kept per browser tab, per user.
+    try{ sessionStorage.setItem('rgv_last_view', JSON.stringify({ uid: currentUser.id, view: view })); }catch(e){}
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
     closeMobileSidebar();
     expandSbSectionFor(view);
